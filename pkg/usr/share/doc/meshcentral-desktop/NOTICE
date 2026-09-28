@@ -1,0 +1,21 @@
+MeshCentral Desktop
+Copyright 2026 CYVELION LTD (Denis Maggipinto, https://github.com/d-maggipinto)
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+It was developed with the assistance of Claude Code by Anthropic.
+
+MeshCentral Desktop is an independent, unofficial client for MeshCentral. It is not affiliated
+with, endorsed by or supported by the MeshCentral project or its authors. "MeshCentral" is used
+only to describe the server software this client works with.
+
+-------------------------------------------------------------------------------
+MeshCentral
+Copyright Ylian Saint-Hilaire and the MeshCentral contributors (portions Copyright Intel Corporation)
+https://meshcentral.com  https://github.com/Ylianst/MeshCentral
+Licensed under the Apache License, Version 2.0.
+
+This client talks to a MeshCentral server using the same control-channel messages as the
+MeshCentral web interface. Where present, the account and device permission rules follow the web
+interface functions GetMeshRights, GetNodeRights and removeUserRights, and option labels and bit
+values match the web interface. The remote desktop view embeds the MeshCentral web viewer served
+by the user's own MeshCentral server at run time; it is not copied into this project.

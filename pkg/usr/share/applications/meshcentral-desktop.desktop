@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=MeshCentral Desktop
+GenericName=Remote Management
+Comment=Manage devices on mesh.example.com
+Exec=meshcentral-desktop %U
+Icon=meshcentral-desktop
+Terminal=false
+Categories=Network;RemoteAccess;
+Keywords=meshcentral;remote;desktop;rmm;
+StartupWMClass=meshcentral-desktop
+StartupNotify=true

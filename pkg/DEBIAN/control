@@ -1,0 +1,15 @@
+Package: meshcentral-desktop
+Version: 1.0.0
+Section: net
+Priority: optional
+Architecture: all
+Depends: python3, python3-gi, gir1.2-gtk-3.0, gir1.2-webkit2-4.1
+Recommends: xdg-utils
+Maintainer: Denis Maggipinto (CYVELION LTD) <d.maggipinto@cyvelion.co.uk>
+Homepage: https://github.com/d-maggipinto/meshcentral-desktop
+Description: Desktop GUI client for a MeshCentral server
+ Native GTK/WebKit window for managing devices on the MeshCentral
+ server at mesh.example.com. Keeps you logged in between
+ sessions, supports remote desktop/terminal/file popups, downloads,
+ notifications, zoom and fullscreen. The server URL can be changed
+ from the menu or in /etc/meshcentral-desktop.conf.

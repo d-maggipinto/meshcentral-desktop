@@ -1,0 +1,12 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: meshcentral-desktop
+Upstream-Contact: Denis Maggipinto (CYVELION LTD) <d.maggipinto@cyvelion.co.uk>
+Source: https://github.com/d-maggipinto/meshcentral-desktop
+Comment: Unofficial desktop client for MeshCentral, not affiliated with or endorsed by the
+ MeshCentral project. Developed with the assistance of Claude Code by Anthropic.
+
+Files: *
+Copyright: 2026 CYVELION LTD
+License: Apache-2.0
+ On Debian systems, the complete text of the Apache License, Version 2.0 can be found in
+ "/usr/share/common-licenses/Apache-2.0".
