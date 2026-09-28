@@ -1,4 +1,3 @@
 #!/bin/sh
-# Work around blank-page issues on some GPU/Wayland setups
 export WEBKIT_DISABLE_DMABUF_RENDERER="${WEBKIT_DISABLE_DMABUF_RENDERER:-1}"
-exec /usr/bin/python3 /usr/share/meshcentral-desktop/meshcentral-desktop.py "$@"
+exec /usr/bin/python3 /usr/share/meshcentral-desktop/main.py "$@"
