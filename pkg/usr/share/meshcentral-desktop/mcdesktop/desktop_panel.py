@@ -56,10 +56,16 @@ class DesktopPanel(Gtk.Box):
         self._reveal_timer = None
         self._displays_sig = None
         self._display_updating = False
+        # Connection state machine. _gen invalidates callbacks/timers of an older attempt
+        # (reconnect, cancel), so a stale page or retry loop can never hijack a new one.
+        self._phase = "idle"             # idle | loading | connecting | connected
+        self._gen = 0
+        self._page_ready = False         # the device desktop view is loaded in the WebView
+        self._watchdog = None
 
         # --- toolbar row 1: session + view ---
         self._toolbar = bar = Gtk.Box(spacing=6, margin=6)
-        self.connect_btn = Gtk.Button(label="Disconnect",
+        self.connect_btn = Gtk.Button(label="Connect",
             image=Gtk.Image.new_from_icon_name("network-wired-symbolic", Gtk.IconSize.BUTTON),
             always_show_image=True)
         self.connect_btn.connect("clicked", self._toggle_connect)
@@ -139,6 +145,9 @@ class DesktopPanel(Gtk.Box):
         s.set_javascript_can_open_windows_automatically(True)
         s.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.ALWAYS)
         self.view.connect("load-changed", self._on_load)
+        # The page's dialogs would be invisible behind our cover and block forever -
+        # notably MeshCentral's "leave page?" beforeunload confirm on reconnect.
+        self.view.connect("script-dialog", self._on_script_dialog)
         self.view.connect("size-allocate", self._on_view_resize)
         self._resize_timer = None
 
@@ -191,20 +200,80 @@ class DesktopPanel(Gtk.Box):
         self._started = True
         self.start_flow()
 
+    _FLOW_TIMEOUT_S = 45
+
+    # JS that ends the viewer's session and drops its "leave page?" guard.
+    _END_SESSION_JS = ("(function(){try{window.onbeforeunload=null;"
+                       "if(typeof desktop!=='undefined'&&desktop&&typeof connectDesktop==='function')"
+                       "{connectDesktop(null,0);}return 'ok';}catch(e){return 'err';}})()")
+
+    def _set_phase(self, phase):
+        self._phase = phase
+        self._connected = phase == "connected"
+        self.connect_btn.set_label({"idle": "Connect", "connected": "Disconnect"}.get(phase, "Cancel"))
+        if phase != "connected":
+            self._set_controls_enabled(False)
+        if phase in ("idle", "connected") and self._watchdog:
+            GLib.source_remove(self._watchdog)
+            self._watchdog = None
+
+    def _arm_watchdog(self):
+        if self._watchdog:
+            GLib.source_remove(self._watchdog)
+        gen = self._gen
+
+        def fire():
+            self._watchdog = None
+            if gen == self._gen and self._phase in ("loading", "connecting"):
+                self._fail("The remote desktop did not start in time. Check that the device is "
+                           "online and that you can reach the server, then Retry.")
+            return False
+        self._watchdog = GLib.timeout_add_seconds(self._FLOW_TIMEOUT_S, fire)
+
+    def _fail(self, text):
+        self._gen += 1                     # stop any pending retries of this attempt
+        self._js(self._END_SESSION_JS)
+        self._set_phase("idle")
+        self._set_status("")
+        self._cover_show(text, busy=False, button="Retry")
+
     def start_flow(self):
+        """Full (re)connect: end any session, reload the web UI, sign in, open the device."""
+        self._gen += 1
         self._logged_in = False
         self._navigated = False
         self._connect_tried = False
-        self._retry_connect = False
-        self._connected = False
+        self._page_ready = False
         self._connect_attempts = 0
-        self._set_controls_enabled(False)
+        self._set_phase("loading")
         self._cover_show("Connecting…")
         self._set_status("Opening…")
-        self.view.load_uri(self.app.ctrl.server.url + "/")
+        self._arm_watchdog()
+        gen = self._gen
+
+        def go(_v=None):
+            if gen == self._gen and not self._closing:
+                self.view.load_uri(self.app.ctrl.server.url + "/")
+        self._js(self._END_SESSION_JS, go)
+
+    def _on_script_dialog(self, _view, dialog):
+        t = dialog.get_dialog_type()
+        if t == WebKit2.ScriptDialogType.BEFORE_UNLOAD_CONFIRM:
+            dialog.confirm_set_confirmed(True)       # always allow leaving/reloading
+        elif t == WebKit2.ScriptDialogType.CONFIRM:
+            dialog.confirm_set_confirmed(False)
+        elif t == WebKit2.ScriptDialogType.ALERT:
+            msg = (dialog.get_message() or "").strip()
+            if msg:
+                self._note(msg)
+        return True                                  # handled: never show a hidden dialog
 
     def teardown(self):
         self._closing = True
+        self._gen += 1
+        if self._watchdog:
+            GLib.source_remove(self._watchdog)
+            self._watchdog = None
         self._clip_unlisten()
         if self._reveal_timer:
             GLib.source_remove(self._reveal_timer)
@@ -358,18 +427,24 @@ class DesktopPanel(Gtk.Box):
             "catch(e){return 'err';}})()")
 
     def _toggle_connect(self, *_):
-        if self._connected:
-            self._js("(function(){try{if(typeof connectDesktop==='function'){connectDesktop(null,0);"
-                     "return 'ok';}return 'no';}catch(e){return 'err';}})()")
-            self._connected = False
-            self._set_controls_enabled(False)
-            self.connect_btn.set_label("Connect")
+        if self._phase != "idle":
+            # Disconnect when connected, Cancel while loading/connecting.
+            self._gen += 1
+            self._js(self._END_SESSION_JS)
+            self._set_phase("idle")
             self._set_status("Disconnected")
             self._cover_show("Disconnected", busy=False, button="Connect")
-        else:
+        elif self._page_ready:
+            # The device view is already loaded: just start a new KVM session.
+            self._gen += 1
             self._connect_attempts = 0
+            self._set_phase("loading")
             self._cover_show("Connecting…")
-            self._click_connect()
+            self._set_status("Starting remote session…")
+            self._arm_watchdog()
+            self._click_connect(self._gen)
+        else:
+            self.start_flow()
 
     def _toggle_fullscreen(self):
         # Ask the main window for TRUE fullscreen: hide its sidebar/tabs/action bar and
@@ -612,7 +687,7 @@ class DesktopPanel(Gtk.Box):
             self._route)
 
     def _route(self, kind):
-        if self._closing:
+        if self._closing or self._phase != "loading":
             return
         if kind == "token":
             self._set_status("Two-factor code required")
@@ -641,18 +716,19 @@ class DesktopPanel(Gtk.Box):
         # On the device desktop view: strip outer chrome, then click Connect as soon as
         # the viewer's button exists (polled; no fixed delay).
         self._inject_style("mcd-chrome-css", self._CHROME_CSS)
+        self._page_ready = True
         if not self._connect_tried:
             self._connect_tried = True
             self._set_status("Starting remote session…")
             self._connect_attempts = 0
-            self._click_connect()
+            self._click_connect(self._gen)
 
     def _after_login_submit(self, result):
         if result == "noform":
             self._note("Could not find the login form on this server's page.")
 
-    def _click_connect(self):
-        if self._closing:
+    def _click_connect(self, gen):
+        if self._closing or gen != self._gen or self._phase != "loading":
             return False
         self._connect_attempts += 1
         self._js(
@@ -662,11 +738,14 @@ class DesktopPanel(Gtk.Box):
             "if(typeof connectDesktop==='function'&&typeof currentNode!=='undefined'&&currentNode){"
             "connectDesktop(null,1);return 'connected';}"
             "return 'nobtn';}catch(e){return 'err';}})()",
-            self._after_connect)
+            lambda r: self._after_connect(r, gen))
         return False
 
-    def _after_connect(self, result):
+    def _after_connect(self, result, gen):
+        if gen != self._gen or self._phase != "loading":
+            return
         if result == "connected":
+            self._set_phase("connecting")
             self._set_status("Connecting to remote screen…")
             # Now safe to hide the viewer's own control row + bottom toolbar.
             self._inject_style("mcd-desk-css", self._DESK_CSS)
@@ -677,11 +756,11 @@ class DesktopPanel(Gtk.Box):
                 GLib.timeout_add(300, self._poll_status)
         elif result == "nobtn":
             if self._connect_attempts < 80:          # ~20 s at 250 ms
-                GLib.timeout_add(250, self._click_connect)
+                GLib.timeout_add(250, self._click_connect, gen)
             else:
-                self._note("The desktop did not start. Check that the device is online, then Retry.")
+                self._fail("The desktop did not start. Check that the device is online, then Retry.")
         else:
-            self._note("Could not start the desktop session. Click Reconnect to try again.")
+            self._fail("Could not start the desktop session.")
 
     def _poll_status(self):
         if self._closing:
@@ -695,40 +774,41 @@ class DesktopPanel(Gtk.Box):
         if self._closing:
             return
         now_connected = text.lower().startswith("connected")
-        if now_connected or self._connected:
+        if self._connected:
             self._set_status(text or "")
-        if now_connected and not self._connected:
-            self._connected = True
+        # Only a session WE started counts: a stale "Connected" from the page being left
+        # behind during a reconnect is ignored because the phase isn't "connecting".
+        if now_connected and self._phase == "connecting":
+            self._set_phase("connected")
             self._set_controls_enabled(True)
-            self.connect_btn.set_label("Disconnect")
             self._apply_compression(force=True)
-            self._wait_first_frame(0)
-        elif not now_connected and self._connected:
-            self._connected = False
-            self._set_controls_enabled(False)
-            self.connect_btn.set_label("Connect")
+            self._wait_first_frame(0, 0, self._gen)
+        elif not now_connected and self._phase == "connected":
+            self._set_phase("idle")
             self._cover_show("The remote session ended.", busy=False, button="Retry")
         if self._connected:
             self._refresh_displays()
         # keep polling while the panel is alive: fast while connecting, slow after
         GLib.timeout_add(2000 if self._connected else 300, self._poll_status)
 
-    def _wait_first_frame(self, tries, hits=0):
+    def _wait_first_frame(self, tries, hits, gen):
         # Reveal only once the viewer has drawn a frame, so the user never sees an empty,
         # black or half-built view. The first tile makes onResize() size the canvas to the
         # real screen and clear FirstDraw (the viewer starts with a 960x701 placeholder).
         # Require it on two consecutive checks so the first frame has time to paint.
         self._reveal_timer = None
-        if self._closing or not self._connected:
+        if self._closing or not self._connected or gen != self._gen:
             return False
         def got(v):
+            if gen != self._gen or not self._connected:
+                return
             h = hits + 1 if v == "drawn" else 0
             if h >= 2 or tries >= 30:              # ~6 s cap, then show whatever is there
                 self._refit_canvas()
                 self._cover_hide()
                 self._set_status("Connected")
             else:
-                self._reveal_timer = GLib.timeout_add(200, self._wait_first_frame, tries + 1, h)
+                self._reveal_timer = GLib.timeout_add(200, self._wait_first_frame, tries + 1, h, gen)
         self._js("(function(){try{var m=desktop.m,c=m.Canvas.canvas;"
                  "var real=!(m.ScreenWidth==960&&m.ScreenHeight==701)&&m.ScreenWidth>8&&m.ScreenHeight>8;"
                  "return (desktop.State===3&&real&&m.FirstDraw===false&&c.width===m.ScreenWidth)?'drawn':'wait';"
