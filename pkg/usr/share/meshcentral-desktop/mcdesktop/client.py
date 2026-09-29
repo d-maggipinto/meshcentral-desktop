@@ -136,6 +136,10 @@ class ControlConnection:
             self.tracesources = msg.get("traceSources")
         elif action == "event" and (msg.get("event") or {}).get("action") == "traceinfo":
             self.tracesources = msg["event"].get("traceSources")
+        elif action == "event" and (msg.get("event") or {}).get("action") == "accountchange":
+            acc = msg["event"].get("account")
+            if isinstance(acc, dict) and acc.get("_id") and acc.get("_id") == self.userinfo.get("_id"):
+                self.userinfo = acc            # our own account changed (2FA, image, language...)
         elif action == "serverwarnings":
             self.serverwarnings = msg.get("warnings") or []
         elif action == "authcookie":

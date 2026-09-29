@@ -22,6 +22,16 @@ def is_online(node):
     return bool((node.get("conn") or 0) & 1)
 
 
+_TIME_FMT = "%Y-%m-%d %H:%M:%S"
+
+
+def set_time_format(fmt):
+    """App-wide date/time format (My Account -> Localization settings)."""
+    global _TIME_FMT
+    if fmt:
+        _TIME_FMT = fmt
+
+
 def fmt_time(ms):
     if not ms:
         return ""
@@ -31,11 +41,11 @@ def fmt_time(ms):
         try:
             from datetime import datetime
             dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
-            return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+            return dt.astimezone().strftime(_TIME_FMT)
         except Exception:
             return s
     try:
-        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ms / 1000 if ms > 1e11 else ms))
+        return time.strftime(_TIME_FMT, time.localtime(ms / 1000 if ms > 1e11 else ms))
     except Exception:
         return str(ms)
 

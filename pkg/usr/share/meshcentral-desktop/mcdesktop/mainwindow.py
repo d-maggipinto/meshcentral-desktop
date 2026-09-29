@@ -11,7 +11,8 @@ from .terminal_panel import TerminalPanel
 from .files_panel import FilesPanel
 from .desktop_panel import DesktopPanel
 from .tools_panel import ProcessesPanel, ServicesPanel, ConsolePanel
-from .admin_panel import UsersPanel, UserGroupsPanel, ServerEventsPanel, AccountPanel
+from .admin_panel import UsersPanel, UserGroupsPanel, ServerEventsPanel
+from .account_panel import AccountPanel
 from .server_files_panel import ServerFilesPanel
 from .server_panel import MyServerPanel
 from . import rights
@@ -645,7 +646,7 @@ class MainWindow(Gtk.ApplicationWindow):
             self.notify_box.remove(kids[0])
         self.notify_box.pack_start(card, False, False, 0)
         card.show_all()
-        if not self.is_active():
+        if not self.is_active() and self.app.config.get("notify", {}).get("desktop", True):
             self.app.notify(head, text)
 
     def _on_event(self, msg):
@@ -655,12 +656,31 @@ class MainWindow(Gtk.ApplicationWindow):
             self.show_notification(ev.get("title"), ev.get("value"), msg.get("maxtime"), ev.get("tag"),
                                    msg.get("msgid"))
             return
+        if action == "nodeconnect":
+            self._notify_connection(msg.get("event") or {})
         if action in ("addnode", "removenode", "changenode", "nodeconnect", "meshchange"):
             # Coalesce bursts of events into a single refresh so the tree does not
             # rebuild (and jump) on every event.
             if self._refresh_timer:
                 GLib.source_remove(self._refresh_timer)
             self._refresh_timer = GLib.timeout_add(1500, self._debounced_refresh)
+
+    def _notify_connection(self, ev):
+        """My Account -> Notification settings: cards for device connections / disconnections."""
+        prefs = self.app.config.get("notify", {})
+        node = self.nodes.get(ev.get("nodeid"))
+        if node is None or "conn" not in ev:
+            return
+        was, now = ui.is_online(node), bool((ev.get("conn") or 0) & 1)
+        if was == now or not prefs.get("connect" if now else "disconnect", False):
+            return
+        name = node.get("name") or "Device"
+        group = self.group_name(node) if prefs.get("groupname", True) else ""
+        if group:
+            name += f" ({group})"
+        self.show_notification(name, "Device connected" if now else "Device disconnected", 10)
+        if prefs.get("sound"):
+            Gdk.Display.get_default().beep()
 
     def _debounced_refresh(self):
         self._refresh_timer = None
@@ -712,6 +732,8 @@ _NOTIFY_CSS = b"""
 .mcd-rail-btn { padding: 6px 2px; min-width: 64px; border-radius: 8px; }
 .mcd-rail-btn:checked { background-color: alpha(@theme_selected_bg_color, 0.35); }
 .mcd-rail-caption { font-size: 8pt; }
+.mcd-link { color: @theme_selected_bg_color; padding: 1px 4px; }
+.mcd-link:hover { background: alpha(@theme_selected_bg_color, 0.12); }
 """
 _notify_css_done = False
 

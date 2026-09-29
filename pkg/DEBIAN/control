@@ -1,11 +1,11 @@
 Package: meshcentral-desktop
-Version: 2.16.0
+Version: 2.17.0
 Section: net
 Priority: optional
 Architecture: all
 Depends: python3, python3-gi, python3-websocket, python3-cairo,
  gir1.2-gtk-3.0, gir1.2-vte-2.91, gir1.2-secret-1, gir1.2-webkit2-4.1
-Recommends: xdg-utils, gnome-keyring
+Recommends: xdg-utils, gnome-keyring, python3-qrcode
 Maintainer: Denis Maggipinto (CYVELION LTD) <d.maggipinto@cyvelion.co.uk>
 Homepage: https://github.com/d-maggipinto/meshcentral-desktop
 Description: Native desktop client for MeshCentral

@@ -47,6 +47,8 @@ class App(Gtk.Application):
         Gtk.Application.do_startup(self)
         self.load_config()
         os.makedirs(DATA_DIR, exist_ok=True)
+        from . import ui
+        ui.set_time_format(self.config.get("date_format"))
         settings = Gtk.Settings.get_default()
         if self.config.get("dark", True):
             settings.set_property("gtk-application-prefer-dark-theme", True)
