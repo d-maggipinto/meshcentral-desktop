@@ -1,4 +1,6 @@
 """Main window: one window, device tree on the left, embedded panel tabs on the right."""
+import time
+
 from gi.repository import Gtk, Gdk, GLib, Pango
 
 from . import ui
@@ -76,13 +78,22 @@ class MainWindow(Gtk.ApplicationWindow):
         hb.pack_end(self.search)
 
         self.paned = paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, position=340)
-        self.add(paned)
+        # Notification cards (user broadcasts, server notices) float top-right above everything,
+        # including the fullscreen remote desktop.
+        root = Gtk.Overlay()
+        root.add(paned)
+        self.add(root)
+        self.notify_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
+                                  halign=Gtk.Align.END, valign=Gtk.Align.START, margin=14)
+        root.add_overlay(self.notify_box)
+        _install_notify_css()
         paned.pack1(self._build_sidebar(), False, False)
         paned.pack2(self._build_content(), True, False)
 
         self.ctrl.on("nodes", self._on_nodes)
         self.ctrl.on("meshes", self._on_meshes)
         self.ctrl.on("event", self._on_event)
+        self.ctrl.on("msg", self._on_ctrl_msg)
         self.ctrl.on_close = self._on_disconnect
         self.connect("destroy", self._on_destroy)
         # Window-level shortcuts run BEFORE the focused WebView sees the key, so they work
@@ -509,8 +520,74 @@ class MainWindow(Gtk.ApplicationWindow):
         return False
 
     # ---- events / lifecycle ------------------------------------------------
+    # ---- notifications (user broadcasts / server notices) ----------------------
+    # Broadcast: {action:'msg', type:'notify', value, title:<sender>, tag:'broadcast', maxtime:<s>}
+    # (from the web UI's User Group "Broadcast" or from this app). Some server notices come as
+    # {action:'event', event:{action:'notify', value, title, tag}} instead.
+    _MAX_CARDS = 5
+    _MSGIDS = {1: "Permission denied", 14: "Email sent.", 10: "Account limit reached."}
+
+    def _on_ctrl_msg(self, msg):
+        if msg.get("type") == "notify":
+            self.show_notification(msg.get("title"), msg.get("value"), msg.get("maxtime"), msg.get("tag"),
+                                   msg.get("msgid"))
+
+    def show_notification(self, title, text, maxtime=None, tag=None, msgid=None):
+        text = text if isinstance(text, str) and text else self._MSGIDS.get(msgid, "")
+        if not text:
+            return
+        broadcast = tag == "broadcast"
+        head = f"Broadcast from {title}" if broadcast and title else (title or "MeshCentral")
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, width_request=360)
+        card.get_style_context().add_class("mcd-notify")
+        if broadcast:
+            card.get_style_context().add_class("mcd-broadcast")
+        top = Gtk.Box(spacing=8)
+        icon = Gtk.Image.new_from_icon_name("mail-unread-symbolic" if broadcast else "dialog-information-symbolic",
+                                            Gtk.IconSize.MENU)
+        top.pack_start(icon, False, False, 0)
+        t = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        t.set_markup(f"<b>{GLib.markup_escape_text(head)}</b>")
+        top.pack_start(t, True, True, 0)
+        when = Gtk.Label(label=time.strftime("%H:%M"))
+        when.get_style_context().add_class("dim-label")
+        top.pack_start(when, False, False, 0)
+        close = Gtk.Button.new_from_icon_name("window-close-symbolic", Gtk.IconSize.MENU)
+        close.set_relief(Gtk.ReliefStyle.NONE)
+        close.set_tooltip_text("Dismiss")
+        top.pack_start(close, False, False, 0)
+        card.pack_start(top, False, False, 0)
+        body = Gtk.Label(label=text, xalign=0, wrap=True, selectable=True, max_width_chars=48,
+                         wrap_mode=Pango.WrapMode.WORD_CHAR)
+        card.pack_start(body, False, False, 0)
+
+        timer = [None]
+
+        def dismiss(*_):
+            if timer[0]:
+                GLib.source_remove(timer[0])
+                timer[0] = None
+            if card.get_parent():
+                self.notify_box.remove(card)
+            return False
+        close.connect("clicked", dismiss)
+        if isinstance(maxtime, (int, float)) and maxtime > 0:
+            timer[0] = GLib.timeout_add_seconds(int(maxtime), dismiss)
+        kids = self.notify_box.get_children()
+        if len(kids) >= self._MAX_CARDS:
+            self.notify_box.remove(kids[0])
+        self.notify_box.pack_start(card, False, False, 0)
+        card.show_all()
+        if not self.is_active():
+            self.app.notify(head, text)
+
     def _on_event(self, msg):
         action = msg.get("event", {}).get("action")
+        if action == "notify":
+            ev = msg.get("event") or {}
+            self.show_notification(ev.get("title"), ev.get("value"), msg.get("maxtime"), ev.get("tag"),
+                                   msg.get("msgid"))
+            return
         if action in ("addnode", "removenode", "changenode", "nodeconnect", "meshchange"):
             # Coalesce bursts of events into a single refresh so the tree does not
             # rebuild (and jump) on every event.
@@ -559,3 +636,23 @@ class MainWindow(Gtk.ApplicationWindow):
                             website=self.ctrl.server.url, logo_icon_name="meshcentral-desktop")
         a.run()
         a.destroy()
+
+
+_NOTIFY_CSS = b"""
+.mcd-notify { background-color: rgba(34, 37, 43, 0.97); color: #eceef1; border-radius: 10px;
+              padding: 10px 12px; border: 1px solid rgba(255, 255, 255, 0.08);
+              box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
+.mcd-notify.mcd-broadcast { border-left: 4px solid #e5a50a; }
+"""
+_notify_css_done = False
+
+
+def _install_notify_css():
+    global _notify_css_done
+    if _notify_css_done:
+        return
+    prov = Gtk.CssProvider()
+    prov.load_from_data(_NOTIFY_CSS)
+    Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov,
+                                             Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+    _notify_css_done = True
