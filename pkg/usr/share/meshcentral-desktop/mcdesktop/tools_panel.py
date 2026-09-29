@@ -5,6 +5,7 @@ Each panel talks to the agent over the control channel using the "msg" envelope
 MeshCentral web UI's device tools.
 """
 import json
+import secrets
 
 from gi.repository import Gtk, GLib, Pango
 
@@ -171,11 +172,86 @@ class ServicesPanel(_MsgPanel):
     def _first_load(self):
         self.refresh()
 
+    # Linux: the agent's own "services" enumeration is slow (3+ s locally, far more over a
+    # tunnel) and returns every unit twice. systemctl answers in milliseconds, so on Linux
+    # we ask it through the documented runcommands API (output comes back as a separate
+    # {action:'msg', type:'runcommands', result, responseid}) and only fall back to the
+    # agent enumeration if that gets no answer.
+    _SYSTEMCTL = ("systemctl list-units --type=service --all --no-legend --no-pager --plain 2>/dev/null; "
+                  "echo ===MCD===; "
+                  "systemctl list-unit-files --type=service --no-legend --no-pager 2>/dev/null")
+    _SYSTEMCTL_TIMEOUT_S = 10
+
     def refresh(self):
         self.count.set_text("Loading…")
-        self.app.ctrl.send_node_msg(self.nodeid, "services")
+        if ui.is_windows(self.node):
+            self.app.ctrl.send_node_msg(self.nodeid, "services")
+            return
+        self._svc_rid = "mcdsvc" + secrets.token_hex(6)
+        self.app.ctrl.send({"action": "runcommands", "nodeids": [self.nodeid], "type": 3,
+                            "cmds": self._SYSTEMCTL, "runAsUser": 0, "reply": True,
+                            "responseid": self._svc_rid})
+        rid = self._svc_rid
+        GLib.timeout_add_seconds(self._SYSTEMCTL_TIMEOUT_S, self._systemctl_timeout, rid)
+
+    def _systemctl_timeout(self, rid):
+        if rid == getattr(self, "_svc_rid", None):          # never answered: use the agent's list
+            self._svc_rid = None
+            self.app.ctrl.send_node_msg(self.nodeid, "services")
+        return False
+
+    def _handle_systemctl(self, text):
+        if "===MCD===" not in text:
+            return False
+        units, files = text.split("===MCD===", 1)
+        info = {}
+        for line in units.splitlines():
+            parts = line.split(None, 4)                     # unit load active sub description
+            if len(parts) < 4 or not parts[0].endswith(".service"):
+                continue
+            info[parts[0][:-8]] = {"sub": parts[3], "active": parts[2],
+                                   "desc": parts[4] if len(parts) > 4 else ""}
+        startup = {}
+        for line in files.splitlines():
+            parts = line.split()                             # unit state [preset]
+            if len(parts) >= 2 and parts[0].endswith(".service") and "@." not in parts[0]:
+                startup[parts[0][:-8]] = parts[1]
+        if not info and not startup:
+            return False
+        rows = []
+        running = 0
+        for name in set(info) | set(startup):
+            u = info.get(name, {})
+            sub = u.get("sub", "dead")
+            state = {"running": "Running", "exited": "Exited", "dead": "Inactive",
+                     "failed": "Failed"}.get(sub, sub.capitalize())
+            if u.get("active") == "failed":
+                state = "Failed"
+            running += sub == "running"
+            kind = "systemd" + (f" · {startup[name]}" if name in startup else "")
+            rows.append([u.get("desc") or name, kind, state, name])
+        self._fill(rows, running)
+        return True
+
+    def _fill(self, rows, running):
+        # Detach the model while filling: far faster than letting the view re-sort and
+        # redraw on every append.
+        self.tree.set_model(None)
+        self.store.clear()
+        for r in rows:
+            self.store.append(r)
+        self.store.set_sort_column_id(0, Gtk.SortType.ASCENDING)
+        self.tree.set_model(self.store)
+        self.count.set_text(f"{len(rows)} services · {running} running")
 
     def _handle_msg(self, message):
+        if message.get("type") == "runcommands" and message.get("responseid") == getattr(self, "_svc_rid", None):
+            result = message.get("result")
+            if isinstance(result, str) and result != "OK":
+                self._svc_rid = None
+                if not self._handle_systemctl(result):      # not systemd / no output: agent list
+                    self.app.ctrl.send_node_msg(self.nodeid, "services")
+            return
         if message.get("type") != "services":
             return
         try:
@@ -195,7 +271,7 @@ class ServicesPanel(_MsgPanel):
             if prev is None or (not self._svc_state_raw(prev) and self._svc_state_raw(svc)):
                 by_name[key] = svc
 
-        self.store.clear()
+        rows = []
         running = 0
         for svc in by_name.values():
             if svc.get("status"):                     # Windows: live SCM state
@@ -211,9 +287,8 @@ class ServicesPanel(_MsgPanel):
             if state in ("Running",):
                 running += 1
             name = svc.get("name") or display
-            self.store.append([display, svc_type, state, name])
-        self.store.set_sort_column_id(0, Gtk.SortType.ASCENDING)
-        self.count.set_text(f"{len(self.store)} services · {running} running")
+            rows.append([display, svc_type, state, name])
+        self._fill(rows, running)
 
     @staticmethod
     def _svc_state_raw(svc):

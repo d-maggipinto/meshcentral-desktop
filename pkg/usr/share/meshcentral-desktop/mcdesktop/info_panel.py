@@ -10,6 +10,35 @@ from gi.repository import Gtk, GLib, Pango
 from . import ui
 
 
+# MeshCentral agent type ids -> names (same table as the web UI's agentsStr).
+AGENT_TYPES = ["Unknown", "Windows 32bit console", "Windows 64bit console", "Windows 32bit service",
+               "Windows 64bit service", "Linux 32bit", "Linux 64bit", "MIPS", "XENx86", "Android", "Linux ARM",
+               "macOS x86-32bit", "Android x86", "PogoPlug ARM", "Android", "Linux Poky x86-32bit",
+               "macOS x86-64bit", "ChromeOS", "Linux Poky x86-64bit", "Linux NoKVM x86-32bit",
+               "Linux NoKVM x86-64bit", "Windows MinCore console", "Windows MinCore service", "NodeJS",
+               "ARM-Linaro", "ARMv6l / ARMv7l", "ARMv8 64bit", "ARMv6l / ARMv7l / NoKVM", "MIPS24KC (OpenWRT)",
+               "Apple Silicon", "FreeBSD x86-64", "Unknown", "Linux ARM 64 bit", "Alpine Linux x86 64 Bit (MUSL)",
+               "Assistant (Windows)", "Armada370 - ARM32/HF (libc/2.26)", "OpenWRT x86-64", "OpenBSD x86-64",
+               "Unknown", "Unknown", "MIPSEL24KC (OpenWRT)", "ARMADA/CORTEX-A53/MUSL (OpenWRT)",
+               "Windows ARM 64bit console", "Windows ARM 64bit service", "ARMVIRT32 (OpenWRT)", "RISC-V x86-64"]
+
+
+def agent_description(node):
+    """'Linux 64bit' (+ ' v<ver>' only when non-zero, like the web UI; modern agents report 0)."""
+    agent = node.get("agent") or {}
+    aid = agent.get("id")
+    if aid is None:
+        return ""
+    name = AGENT_TYPES[aid] if 0 <= aid < len(AGENT_TYPES) else AGENT_TYPES[0]
+    if agent.get("ver"):
+        name += f" v{agent['ver']}"
+    if aid == 14 and agent.get("core"):
+        name = agent["core"]
+    if agent.get("root") is False and ui.is_online(node):
+        name += ", Restricted"
+    return name
+
+
 def _group_name(app, node):
     meshid = node.get("meshid")
     for src in (getattr(app, "meshes", None),
@@ -59,7 +88,9 @@ class GeneralPanel(Gtk.Box):
             ("Host", node.get("host", "")),
             ("Tags", tags or ""),
             ("Description", node.get("desc", "")),
-            ("Agent version", agent.get("ver", "")),
+            ("Mesh agent", agent_description(node)),
+            # The meaningful version on modern agents: the running core's build string.
+            ("Agent core", agent.get("core", "")),
             ("Node ID", node.get("_id", "")),
         ]
         r = 0

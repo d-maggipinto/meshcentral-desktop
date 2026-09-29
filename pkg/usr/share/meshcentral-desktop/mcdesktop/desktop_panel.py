@@ -34,6 +34,8 @@ _COVER_CSS = b"""
 .mcd-desk-cover { background-color: #16181c; }
 .mcd-desk-cover label { color: #d8dade; }
 .mcd-desk-cover .mcd-cover-title { font-size: 15pt; font-weight: bold; }
+.mcd-hint { background-color: rgba(20, 22, 26, 0.88); color: #eceef1; border-radius: 8px;
+            padding: 8px 16px; font-weight: bold; }
 """
 _cover_css_installed = False
 
@@ -71,6 +73,8 @@ class DesktopPanel(Gtk.Box):
         self._sync_last_remote = None
         self._sync_baseline = True
         self._status_hold = 0.0          # keep a transient status (e.g. clipboard) visible briefly
+        self._kb_seat = None             # set while we hold the keyboard grab (hotkeys -> remote)
+        self._hint_timer = None
 
         # --- toolbar row 1: session + view ---
         self._toolbar = bar = Gtk.Box(spacing=6, margin=6)
@@ -105,7 +109,7 @@ class DesktopPanel(Gtk.Box):
         self._ctrl_widgets += [paste, typeb, copyr]
 
         full = Gtk.Button.new_from_icon_name("view-fullscreen-symbolic", Gtk.IconSize.BUTTON)
-        full.set_tooltip_text("Fullscreen")
+        full.set_tooltip_text("Fullscreen (Ctrl+Alt+F)")
         full.connect("clicked", lambda *_: self._toggle_fullscreen())
         bar.pack_start(full, False, False, 0)
         self.reconnect_btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic", Gtk.IconSize.BUTTON)
@@ -132,6 +136,15 @@ class DesktopPanel(Gtk.Box):
         self.clip_sync.set_tooltip_text("Automatically share the clipboard both ways while connected")
         self.clip_sync.connect("notify::active", self._on_sync_toggled)
         qbar.pack_start(self.clip_sync, False, False, 0)
+        qbar.pack_start(Gtk.Label(label="Send hotkeys:"), False, False, 0)
+        self.hotkeys = Gtk.Switch(valign=Gtk.Align.CENTER,
+                                  active=bool(app.config.get("desktop_hotkeys", True)))
+        self.hotkeys.set_tooltip_text(
+            "Send system shortcuts (Super, Alt+Tab, Alt+F4, Ctrl+Alt+…) to the remote computer while "
+            "its screen has focus. Ctrl+Alt+F always toggles fullscreen; Super+Esc (GNOME) restores "
+            "local shortcuts.")
+        self.hotkeys.connect("notify::active", self._on_hotkeys_toggled)
+        qbar.pack_start(self.hotkeys, False, False, 0)
         for c in (self.quality, self.speed, self.encoding, self.scale):
             c.connect("changed", lambda *_: self._apply_compression(force=True))
             self._ctrl_widgets.append(c)
@@ -194,6 +207,17 @@ class DesktopPanel(Gtk.Box):
         overlay = Gtk.Overlay()
         overlay.add(self.view)
         overlay.add_overlay(self._cover)
+        self._hint = Gtk.Label()
+        self._hint.get_style_context().add_class("mcd-hint")
+        self._hint_rev = Gtk.Revealer(halign=Gtk.Align.CENTER, valign=Gtk.Align.START, margin_top=24,
+                                      transition_type=Gtk.RevealerTransitionType.CROSSFADE)
+        self._hint_rev.add(self._hint)
+        self._hint_rev.set_no_show_all(True)
+        overlay.add_overlay(self._hint_rev)
+        overlay.set_overlay_pass_through(self._hint_rev, True)
+        # Keyboard grab follows the remote screen's focus (see "keyboard" section).
+        self.view.connect("focus-in-event", lambda *_: (self._kb_update(), False)[1])
+        self.view.connect("focus-out-event", lambda *_: (GLib.idle_add(self._kb_update), False)[1])
         self.pack_start(overlay, True, True, 0)
         self.show_all()
         self._set_controls_enabled(False)
@@ -230,6 +254,7 @@ class DesktopPanel(Gtk.Box):
             self._sync_start()
         elif was_connected and not self._connected:
             self._sync_stop()
+        self._kb_update()
         self.connect_btn.set_label({"idle": "Connect", "connected": "Disconnect"}.get(phase, "Cancel"))
         if phase != "connected":
             self._set_controls_enabled(False)
@@ -290,6 +315,7 @@ class DesktopPanel(Gtk.Box):
 
     def teardown(self):
         self._sync_stop()
+        self._kb_ungrab()
         self._closing = True
         self._gen += 1
         if self._watchdog:
@@ -607,6 +633,67 @@ class DesktopPanel(Gtk.Box):
         # New display = new native size: re-measure at 100% then re-apply auto scale.
         GLib.timeout_add(1500, lambda: (self._apply_compression(force=True), False)[1])
         self.refit_soon()
+
+    # ---- keyboard: hotkeys + layout --------------------------------------------
+    # Hotkeys: GNOME/X take Super, Alt+Tab, Alt+F4, Ctrl+Alt+arrows... before the app sees
+    # them. While the remote screen has focus we grab the keyboard; on Wayland GTK turns a
+    # keyboard grab into zwp_keyboard_shortcuts_inhibit (GNOME asks the user once; Super+Esc
+    # restores local shortcuts), on X11 it is a real XGrabKeyboard. Released on focus loss.
+    def _on_hotkeys_toggled(self, sw, _pspec):
+        self.app.config["desktop_hotkeys"] = sw.get_active()
+        self.app.save_config()
+        self._kb_update()
+
+    def _kb_update(self):
+        want = (self._connected and not self._closing and self.hotkeys.get_active()
+                and self.view.has_focus())
+        if want and not self._kb_seat:
+            top = self.get_toplevel()
+            gdkwin = top.get_window() if isinstance(top, Gtk.Window) else None
+            seat = Gdk.Display.get_default().get_default_seat()
+            if gdkwin is not None and seat is not None:
+                st = seat.grab(gdkwin, Gdk.SeatCapabilities.KEYBOARD, True, None, None, None, None)
+                if st == Gdk.GrabStatus.SUCCESS:
+                    self._kb_seat = seat
+        elif not want and self._kb_seat:
+            self._kb_ungrab()
+        return False
+
+    def _kb_ungrab(self):
+        if self._kb_seat:
+            try:
+                self._kb_seat.ungrab()
+            except Exception:
+                pass
+            self._kb_seat = None
+
+    # Layout: printable keys already go to the remote as Unicode (layout-independent), but
+    # on Linux AltGr arrives as its own key ("AltGraph") and the viewer forwards it as a
+    # held Right-Alt BEFORE the composed character, so the remote sees e.g. Alt+@ and
+    # garbles @ # [ ] { } € on non-US layouts. Swallow AltGraph; the character that
+    # AltGr produced still arrives as Unicode.
+    _KEYS_JS = ("(function(){try{var m=desktop.m;if(!m||m.__mcdKeys)return 'skip';"
+                "var kd=m.handleKeyDown,ku=m.handleKeyUp;"
+                "function ag(e){return !!e&&e.key==='AltGraph';}"
+                "m.handleKeyDown=function(e){if(ag(e)){if(e.preventDefault)e.preventDefault();return false;}"
+                "return kd.apply(m,arguments);};"
+                "m.handleKeyUp=function(e){if(ag(e)){if(e.preventDefault)e.preventDefault();return false;}"
+                "return ku.apply(m,arguments);};"
+                "m.__mcdKeys=1;return 'ok';}catch(e){return 'err';}})()")
+
+    def show_hint(self, text, secs=3):
+        self._hint.set_text(text)
+        self._hint.show()
+        self._hint_rev.show()
+        self._hint_rev.set_reveal_child(True)
+        if self._hint_timer:
+            GLib.source_remove(self._hint_timer)
+
+        def hide():
+            self._hint_timer = None
+            self._hint_rev.set_reveal_child(False)
+            return False
+        self._hint_timer = GLib.timeout_add_seconds(secs, hide)
 
     # ---- clipboard sync (automatic, both directions) ----------------------------
     # On connect we patch the running agent ONCE (in memory; reverts on agent restart):
@@ -988,6 +1075,7 @@ class DesktopPanel(Gtk.Box):
         if now_connected and self._phase == "connecting":
             self._set_phase("connected")
             self._set_controls_enabled(True)
+            self._js(self._KEYS_JS)
             self._apply_compression(force=True)
             self._wait_first_frame(0, 0, self._gen)
         elif not now_connected and self._phase == "connected":

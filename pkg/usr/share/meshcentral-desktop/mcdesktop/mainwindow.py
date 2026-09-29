@@ -77,6 +77,10 @@ class MainWindow(Gtk.ApplicationWindow):
         self.ctrl.on("event", self._on_event)
         self.ctrl.on_close = self._on_disconnect
         self.connect("destroy", self._on_destroy)
+        # Window-level shortcuts run BEFORE the focused WebView sees the key, so they work
+        # even while the remote desktop has the keyboard. Ctrl+Alt+F toggles fullscreen
+        # (like NoMachine); Esc is deliberately NOT used, it must reach the remote.
+        self.connect("key-press-event", self._on_key)
         self.show_all()
         self.content.set_visible_child_name("empty")
         self.load_devices()
@@ -272,9 +276,9 @@ class MainWindow(Gtk.ApplicationWindow):
         self.device_notebook.set_show_border(False)
         if hasattr(panel, "set_chrome_visible"):
             panel.set_chrome_visible(False)
-        if not getattr(self, "_fs_key_handler", None):
-            self._fs_key_handler = self.connect("key-press-event", self._fs_key_press)
         self.fullscreen()
+        if hasattr(panel, "show_hint"):
+            panel.show_hint("Press Ctrl+Alt+F to exit fullscreen")
         if hasattr(panel, "refit_soon"):
             panel.refit_soon()
 
@@ -290,17 +294,31 @@ class MainWindow(Gtk.ApplicationWindow):
         panel = getattr(self, "_desk_fs_panel", None)
         if panel is not None and hasattr(panel, "set_chrome_visible"):
             panel.set_chrome_visible(True)
-        if getattr(self, "_fs_key_handler", None):
-            self.disconnect(self._fs_key_handler)
-            self._fs_key_handler = None
         if panel is not None and hasattr(panel, "refit_soon"):
             panel.refit_soon()
 
-    def _fs_key_press(self, _w, ev):
-        if ev.keyval == Gdk.KEY_Escape and getattr(self, "_desk_fs", False):
-            self._exit_desktop_fullscreen()
-            return True
+    def _on_key(self, _w, ev):
+        mods = ev.state & (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK |
+                           Gdk.ModifierType.SHIFT_MASK | Gdk.ModifierType.SUPER_MASK)
+        if mods == (Gdk.ModifierType.CONTROL_MASK | Gdk.ModifierType.MOD1_MASK) and \
+                Gdk.keyval_to_lower(ev.keyval) == Gdk.KEY_f:
+            if getattr(self, "_desk_fs", False):
+                self._exit_desktop_fullscreen()
+                return True
+            panel = self._current_desktop_panel()
+            if panel is not None and getattr(panel, "_connected", False):
+                self._enter_desktop_fullscreen(panel)
+                return True
         return False
+
+    def _current_desktop_panel(self):
+        if self.content.get_visible_child_name() != "device":
+            return None
+        i = self.device_notebook.get_current_page()
+        if 0 <= i < len(self._device_tabs) and self._device_tabs[i]["label"] == "Desktop":
+            p = self._device_tabs[i]["panel"]
+            return p if not isinstance(p, str) else None
+        return None
 
     def goto_device_tab(self, label):
         for i, tab in enumerate(self._device_tabs):
