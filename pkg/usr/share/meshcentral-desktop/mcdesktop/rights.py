@@ -31,7 +31,10 @@ RESETOFF = 0x40000             # power off / reset / sleep
 DEVICEDETAILS = 0x100000
 
 # Site rights (userinfo.siteadmin, SITERIGHT_*)
+SITE_BACKUP = 0x1              # My Server: download server backup (+ stats)
 SITE_MANAGEUSERS = 0x2
+SITE_RESTORE = 0x4             # My Server: restore server from backup (+ stats)
+SITE_UPDATE = 0x10             # My Server: version/update, error log, configuration (+ stats)
 SITE_FILEACCESS = 0x8          # "My Files" at all
 SITE_USERGROUPS = 0x100
 

@@ -359,12 +359,16 @@ class WebSession:
 
     def download(self, link, dest, on_progress=None, on_done=None):
         """link: 'user//name/folder/file' (server path). Streams to dest."""
+        self.fetch("/downloadfile.ashx?link=" + urllib.parse.quote(link, safe=""), dest, on_progress, on_done)
+
+    def fetch(self, path, dest, on_progress=None, on_done=None, timeout=60):
+        """GET <server><path> with the web session and stream it to dest (e.g. /backup.zip)."""
         def run():
             try:
                 self._login()
-                url = self.ctrl.server.url + "/downloadfile.ashx?link=" + urllib.parse.quote(link, safe="")
+                url = self.ctrl.server.url + path
                 req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-                with self._opener().open(req, timeout=60) as r, open(dest, "wb") as f:
+                with self._opener().open(req, timeout=timeout) as r, open(dest, "wb") as f:
                     total = int(r.headers.get("Content-Length") or 0)
                     got = 0
                     while True:
@@ -386,6 +390,12 @@ class WebSession:
 
     def upload(self, link, path, on_progress=None, on_done=None):
         """Upload local file `path` into server folder `link` (e.g. 'user//name/Public')."""
+        self.post_file("/uploadfile.ashx", {"link": urllib.parse.quote(link, safe="")}, "files",
+                       path, on_progress, on_done)
+
+    def post_file(self, url_path, fields, file_field, path, on_progress=None, on_done=None, timeout=300):
+        """Multipart POST of one local file plus form fields (the control-channel auth cookie is
+        added as field "auth"). Used by uploadfile.ashx and restoreserver.ashx."""
         def run(cookie):
             try:
                 try:
@@ -397,8 +407,8 @@ class WebSession:
 
                 def field(k, v):
                     return (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").encode()
-                head = field("link", urllib.parse.quote(link, safe="")) + field("auth", cookie or "") + (
-                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; "
+                head = b"".join(field(k, v) for k, v in fields.items()) + field("auth", cookie or "") + (
+                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
                     f"filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
                 tail = f"\r\n--{boundary}--\r\n".encode()
                 size = os.path.getsize(path)
@@ -416,10 +426,10 @@ class WebSession:
                             yield b
                     yield tail
                 req = urllib.request.Request(
-                    self.ctrl.server.url + "/uploadfile.ashx", data=body(), method="POST",
+                    self.ctrl.server.url + url_path, data=body(), method="POST",
                     headers={"User-Agent": USER_AGENT, "Content-Length": str(len(head) + size + len(tail)),
                              "Content-Type": f"multipart/form-data; boundary={boundary}"})
-                self._opener().open(req, timeout=300).read()
+                self._opener().open(req, timeout=timeout).read()
                 _ui(on_done, None)
             except Exception as ex:
                 _ui(on_done, str(ex))

@@ -13,32 +13,57 @@ from .desktop_panel import DesktopPanel
 from .tools_panel import ProcessesPanel, ServicesPanel, ConsolePanel
 from .admin_panel import UsersPanel, UserGroupsPanel, ServerEventsPanel, AccountPanel
 from .server_files_panel import ServerFilesPanel
+from .server_panel import MyServerPanel
 from . import rights
 
 POWER = {"wake": 100, "off": 2, "reset": 3, "sleep": 4}
 
-# (label, class, online_only, required rights.NodeCaps attribute or None)
-DEVICE_TABS = [
-    ("General", GeneralPanel, False, None),
-    ("Desktop", DesktopPanel, True, "desktop"),
-    ("Terminal", TerminalPanel, True, "terminal"),
-    ("Files", FilesPanel, True, "files"),
-    ("Processes", ProcessesPanel, True, "tools"),
-    ("Services", ServicesPanel, True, "tools"),
-    ("Console", ConsolePanel, True, "console"),
-    ("Hardware", HardwarePanel, False, None),
-    ("Network", NetworkPanel, True, None),
-    ("Events", EventsPanel, False, None),
-    ("Notes", NotesPanel, False, None),
+# Device pages, grouped: (group id, group title, [(label, class, online_only, NodeCaps attribute)])
+DEVICE_GROUPS = [
+    ("overview", "Overview", [
+        ("General", GeneralPanel, False, None),
+        ("Hardware", HardwarePanel, False, None),
+        ("Network", NetworkPanel, True, None),
+        ("Events", EventsPanel, False, None),
+        ("Notes", NotesPanel, False, None),
+    ]),
+    ("remote", "Remote", [
+        ("Desktop", DesktopPanel, True, "desktop"),
+        ("Terminal", TerminalPanel, True, "terminal"),
+        ("Files", FilesPanel, True, "files"),
+    ]),
+    ("tools", "Tools", [
+        ("Processes", ProcessesPanel, True, "tools"),
+        ("Services", ServicesPanel, True, "tools"),
+        ("Console", ConsolePanel, True, "console"),
+    ]),
 ]
-# (label, class, required site right or None). ServerFilesPanel explains a missing right itself.
-SERVER_TABS = [
-    ("My Files", ServerFilesPanel, None),
-    ("Users", UsersPanel, rights.SITE_MANAGEUSERS),
-    ("User Groups", UserGroupsPanel, rights.SITE_USERGROUPS),
-    ("Server Events", ServerEventsPanel, None),
-    ("My Account", AccountPanel, None),
+# flat list kept for callers/tests: (label, class, online_only, cap)
+DEVICE_TABS = [t for _g, _t, tabs in DEVICE_GROUPS for t in tabs]
+
+
+def _site_any(ctrl, *bits):
+    sa = rights.site_rights(ctrl)
+    return sa == rights.FULL or any(sa & b for b in bits)
+
+
+# Navigation rail: (page id, icon, caption, visibility check(ctrl) or None, page class)
+# Sections the account cannot use are hidden (the server enforces the rights anyway).
+NAV = [
+    ("devices", "computer-symbolic", "Devices", None, None),
+    ("files", "folder-symbolic", "My Files",
+     lambda c: rights.has_site(c, rights.SITE_FILEACCESS), ServerFilesPanel),
+    ("server", "network-server-symbolic", "My Server",
+     lambda c: _site_any(c, rights.SITE_BACKUP, rights.SITE_RESTORE, rights.SITE_UPDATE), MyServerPanel),
+    ("users", "avatar-default-symbolic", "Users",
+     lambda c: rights.has_site(c, rights.SITE_MANAGEUSERS), UsersPanel),
+    ("usergroups", "system-users-symbolic", "Groups",
+     lambda c: rights.has_site(c, rights.SITE_USERGROUPS), UserGroupsPanel),
+    ("events", "document-open-recent-symbolic", "Events", None, ServerEventsPanel),
+    ("account", "emblem-system-symbolic", "Account", None, AccountPanel),
 ]
+_NAV_TITLES = {"devices": "Devices", "files": "My Files", "server": "My Server", "users": "Users",
+               "usergroups": "User Groups", "events": "Server Events", "account": "My Account"}
 _TAB_DENIED = {
     "desktop": "remote desktop", "terminal": "the terminal", "files": "file access",
     "tools": "device tools (processes and services)", "console": "the agent console",
@@ -55,13 +80,16 @@ class MainWindow(Gtk.ApplicationWindow):
         self.nodes = {}
         self.current = None
         self.actions = DeviceActions(self)
-        self._device_tabs = []       # per-tab lazy state for the selected device
-        self._server_panels = []
+        self._device_tabs = []       # per-tab lazy state for the selected device (flat list)
+        self._group_nbs = {}         # device group id -> Gtk.Notebook of its pages
+        self._building = False       # suppress lazy panel creation while tabs are (re)built
+        self._pages = {}             # rail page id -> panel (built on first visit)
+        self._nav_buttons = {}
         self._open_node_id = None    # nodeid currently shown (guards selection re-fires)
         self._refresh_timer = None   # debounced device-refresh timer
         self._tree_sig = None        # signature of the last rendered device tree
 
-        hb = Gtk.HeaderBar(show_close_button=True, title="Devices")
+        self.headerbar = hb = Gtk.HeaderBar(show_close_button=True, title="Devices")
         from . import __version__
         hb.props.subtitle = f"{ctrl.username} @ {ctrl.server.host} · v{__version__}"
         self.set_titlebar(hb)
@@ -77,11 +105,20 @@ class MainWindow(Gtk.ApplicationWindow):
         self.search.connect("search-changed", lambda *_: self.filter_devices())
         hb.pack_end(self.search)
 
-        self.paned = paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, position=340)
-        # Notification cards (user broadcasts, server notices) float top-right above everything,
-        # including the fullscreen remote desktop.
+        self.paned = paned = Gtk.Paned(orientation=Gtk.Orientation.HORIZONTAL, position=320)
+        # Layout: navigation rail | page stack ("devices" = tree + device area; other pages are
+        # built on first visit). Notification cards (user broadcasts, server notices) float
+        # top-right above everything, including the fullscreen remote desktop.
+        self.pages = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=120)
+        self.pages.add_named(paned, "devices")
+        body = Gtk.Box()
+        self.rail = self._build_rail()
+        body.pack_start(self.rail, False, False, 0)
+        self.rail_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        body.pack_start(self.rail_sep, False, False, 0)
+        body.pack_start(self.pages, True, True, 0)
         root = Gtk.Overlay()
-        root.add(paned)
+        root.add(body)
         self.add(root)
         self.notify_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=8,
                                   halign=Gtk.Align.END, valign=Gtk.Align.START, margin=14)
@@ -124,16 +161,59 @@ class MainWindow(Gtk.ApplicationWindow):
         col.set_cell_data_func(txt, self._name_cell)
         self.tree.append_column(col)
         box.pack_start(ui.scrolled(self.tree), True, True, 0)
-
-        server_btn = Gtk.Button(label="  Server administration",
-                                image=Gtk.Image.new_from_icon_name("network-server-symbolic", Gtk.IconSize.BUTTON),
-                                always_show_image=True)
-        server_btn.set_relief(Gtk.ReliefStyle.NONE)
-        server_btn.get_child().set_halign(Gtk.Align.START)
-        server_btn.connect("clicked", lambda *_: self.show_server())
-        box.pack_start(Gtk.Separator(), False, False, 0)
-        box.pack_start(server_btn, False, False, 2)
         return box
+
+    # ---- navigation rail ---------------------------------------------------
+    def _build_rail(self):
+        rail = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        rail.get_style_context().add_class("mcd-rail")
+        group = None
+        for pid, icon, caption, check, _cls in NAV:
+            if check is not None and not check(self.ctrl):
+                continue
+            b = Gtk.RadioButton.new_from_widget(group)
+            group = group or b
+            b.set_mode(False)                              # looks like a toggle button
+            b.set_relief(Gtk.ReliefStyle.NONE)
+            b.get_style_context().add_class("mcd-rail-btn")
+            inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+            img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.LARGE_TOOLBAR)
+            inner.pack_start(img, False, False, 0)
+            cap = Gtk.Label(label=caption)
+            cap.get_style_context().add_class("mcd-rail-caption")
+            inner.pack_start(cap, False, False, 0)
+            b.add(inner)
+            b.set_tooltip_text(_NAV_TITLES[pid])
+            b.connect("toggled", lambda w, p=pid: w.get_active() and self.show_page(p))
+            rail.pack_start(b, False, False, 0)
+            self._nav_buttons[pid] = b
+        return rail
+
+    def show_page(self, pid):
+        """Switch the main area to a rail page (building it on first visit)."""
+        btn = self._nav_buttons.get(pid)
+        if btn is None:
+            return
+        if not btn.get_active():
+            btn.set_active(True)                          # re-enters via "toggled"
+            return
+        if pid != "devices" and pid not in self._pages:
+            cls = next(c for p, _i, _t, _k, c in NAV if p == pid)
+            try:
+                panel = cls(self.app, None)
+            except Exception as ex:
+                print("page construct error:", pid, ex)
+                panel = Gtk.Label(label=f"Could not open {_NAV_TITLES[pid]}:\n{ex}")
+            self._pages[pid] = panel
+            self.pages.add_named(panel, pid)
+            panel.show_all()
+            if hasattr(panel, "on_shown"):
+                GLib.idle_add(lambda: (panel.on_shown(), False)[1])
+        self.pages.set_visible_child_name(pid)
+        self.headerbar.set_title(_NAV_TITLES[pid])
+        on_devices = pid == "devices"
+        self.search.set_visible(on_devices)
+        self.refresh_btn.set_visible(on_devices)
 
     def _name_cell(self, _c, cell, model, it, _d):
         name, sub = model[it][1], model[it][2]
@@ -166,30 +246,24 @@ class MainWindow(Gtk.ApplicationWindow):
         empty.pack_start(l, False, False, 0)
         self.content.add_named(empty, "empty")
 
-        # Device view: action bar + notebook
+        # Device view: action bar, group switcher (Overview / Remote / Tools), and one
+        # notebook of sub-pages per group.
         dev = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.action_bar = self.actions.build_bar()
         dev.pack_start(self.action_bar, False, False, 0)
-        dev.pack_start(Gtk.Separator(), False, False, 0)
-        self.device_notebook = Gtk.Notebook(scrollable=True)
-        self.device_notebook.connect("switch-page", self._on_device_tab)
-        dev.pack_start(self.device_notebook, True, True, 0)
+        self.group_stack = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=100)
+        for gid, title, _tabs in DEVICE_GROUPS:
+            nb = Gtk.Notebook(scrollable=True, show_border=False)
+            nb.connect("switch-page", lambda _nb, _pg, idx, g=gid: self._on_group_page(g, idx))
+            self._group_nbs[gid] = nb
+            self.group_stack.add_titled(nb, gid, title)
+        self.group_stack.connect("notify::visible-child", lambda *_: self._on_group_changed())
+        self.group_bar = Gtk.Box(margin_start=8, margin_end=8, margin_bottom=4)
+        switcher = Gtk.StackSwitcher(stack=self.group_stack, halign=Gtk.Align.START)
+        self.group_bar.pack_start(switcher, False, False, 0)
+        dev.pack_start(self.group_bar, False, False, 0)
+        dev.pack_start(self.group_stack, True, True, 0)
         self.content.add_named(dev, "device")
-
-        # Server view
-        srv = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        srv_hdr = Gtk.Box(spacing=8, margin=8)
-        srv_hdr.pack_start(Gtk.Image.new_from_icon_name("network-server-symbolic", Gtk.IconSize.BUTTON), False, False, 0)
-        srv_hdr.pack_start(Gtk.Label(label="Server administration", xalign=0), True, True, 0)
-        back = Gtk.Button(label="Back to devices")
-        back.connect("clicked", lambda *_: self.content.set_visible_child_name("empty"))
-        srv_hdr.pack_end(back, False, False, 0)
-        srv.pack_start(srv_hdr, False, False, 0)
-        srv.pack_start(Gtk.Separator(), False, False, 0)
-        self.server_notebook = Gtk.Notebook(scrollable=True)
-        self.server_notebook.connect("switch-page", self._on_server_tab)
-        srv.pack_start(self.server_notebook, True, True, 0)
-        self.content.add_named(srv, "server")
         return self.content
 
     # ---- data --------------------------------------------------------------
@@ -316,9 +390,9 @@ class MainWindow(Gtk.ApplicationWindow):
         sidebar = self.paned.get_child1()
         if sidebar is not None:
             sidebar.hide()
-        self.action_bar.hide()
-        self.device_notebook.set_show_tabs(False)
-        self.device_notebook.set_show_border(False)
+        for w in (self.rail, self.rail_sep, self.action_bar, self.group_bar):
+            w.hide()
+        self._group_nbs["remote"].set_show_tabs(False)
         if hasattr(panel, "set_chrome_visible"):
             panel.set_chrome_visible(False)
         self.fullscreen()
@@ -333,9 +407,9 @@ class MainWindow(Gtk.ApplicationWindow):
         sidebar = self.paned.get_child1()
         if sidebar is not None:
             sidebar.show()
-        self.action_bar.show()
-        self.device_notebook.set_show_tabs(True)
-        self.device_notebook.set_show_border(True)
+        for w in (self.rail, self.rail_sep, self.action_bar, self.group_bar):
+            w.show()
+        self._group_nbs["remote"].set_show_tabs(True)
         panel = getattr(self, "_desk_fs_panel", None)
         if panel is not None and hasattr(panel, "set_chrome_visible"):
             panel.set_chrome_visible(True)
@@ -356,19 +430,27 @@ class MainWindow(Gtk.ApplicationWindow):
                 return True
         return False
 
-    def _current_desktop_panel(self):
-        if self.content.get_visible_child_name() != "device":
+    def _current_tab(self):
+        """The flat _device_tabs entry currently on screen, or None."""
+        if self.pages.get_visible_child_name() != "devices" or self.content.get_visible_child_name() != "device":
             return None
-        i = self.device_notebook.get_current_page()
-        if 0 <= i < len(self._device_tabs) and self._device_tabs[i]["label"] == "Desktop":
-            p = self._device_tabs[i]["panel"]
-            return p if not isinstance(p, str) else None
+        gid = self.group_stack.get_visible_child_name()
+        page = self._group_nbs[gid].get_current_page()
+        return next((t for t in self._device_tabs if t["group"] == gid and t["page"] == page), None)
+
+    def _current_desktop_panel(self):
+        tab = self._current_tab()
+        if tab and tab["label"] == "Desktop" and not isinstance(tab["panel"], str):
+            return tab["panel"]
         return None
 
     def goto_device_tab(self, label):
-        for i, tab in enumerate(self._device_tabs):
+        for tab in self._device_tabs:
             if tab["label"] == label:
-                self.device_notebook.set_current_page(i)
+                self.show_page("devices")
+                self.group_stack.set_visible_child_name(tab["group"])
+                self._group_nbs[tab["group"]].set_current_page(tab["page"])
+                self._ensure_tab(self._device_tabs.index(tab))
                 return
 
     # ---- selection ---------------------------------------------------------
@@ -393,29 +475,50 @@ class MainWindow(Gtk.ApplicationWindow):
         # with EMPTY containers. Each real panel is constructed lazily the first
         # time its tab is shown (see _ensure_tab) so selecting a device is cheap.
         self._teardown_device_panels()
-        nb = self.device_notebook
-        while nb.get_n_pages():
-            nb.remove_page(0)
+        self._building = True
+        for nb in self._group_nbs.values():
+            while nb.get_n_pages():
+                nb.remove_page(0)
         self._device_tabs = []
         online = ui.is_online(node)
         caps = rights.node_caps(self.ctrl, self.meshes, node)
-        for label, cls, online_only, cap in DEVICE_TABS:
-            container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-            tab_label = Gtk.Label(label=label)
-            allowed = cap is None or getattr(caps, cap)
-            if (online_only and not online) or not allowed:
-                tab_label.set_sensitive(False)
-            if not allowed:
-                tab_label.set_tooltip_text("Your account does not have permission for this")
-            nb.append_page(container, tab_label)
-            self._device_tabs.append({"label": label, "cls": cls, "online_only": online_only,
-                                      "container": container, "panel": None, "node": node,
-                                      "allowed": allowed, "cap": cap})
-        nb.show_all()
+        for gid, _title, tabs in DEVICE_GROUPS:
+            nb = self._group_nbs[gid]
+            for page, (label, cls, online_only, cap) in enumerate(tabs):
+                container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+                tab_label = Gtk.Label(label=label)
+                allowed = cap is None or getattr(caps, cap)
+                if (online_only and not online) or not allowed:
+                    tab_label.set_sensitive(False)
+                if not allowed:
+                    tab_label.set_tooltip_text("Your account does not have permission for this")
+                nb.append_page(container, tab_label)
+                self._device_tabs.append({"label": label, "cls": cls, "online_only": online_only,
+                                          "container": container, "panel": None, "node": node,
+                                          "allowed": allowed, "cap": cap, "group": gid, "page": page})
+            nb.show_all()
+            nb.set_current_page(0)
+        self._building = False
         self.actions.update(node)
         self.content.set_visible_child_name("device")
-        nb.set_current_page(0)
+        self.group_stack.set_visible_child_name("overview")
         GLib.idle_add(self._ensure_tab, 0)
+
+    def _on_group_page(self, gid, page):
+        # Only build panels that are actually on screen (the hidden Remote group must NOT
+        # construct, and auto-connect, the Desktop just because its notebook got a page).
+        if self._building or self.group_stack.get_visible_child_name() != gid:
+            return
+        for i, t in enumerate(self._device_tabs):
+            if t["group"] == gid and t["page"] == page:
+                self._ensure_tab(i)
+                return
+
+    def _on_group_changed(self):
+        if self._building or not self._device_tabs:
+            return
+        gid = self.group_stack.get_visible_child_name()
+        self._on_group_page(gid, self._group_nbs[gid].get_current_page())
 
     def _ensure_tab(self, index):
         """Construct (once) and show the real panel for device tab `index`."""
@@ -462,22 +565,6 @@ class MainWindow(Gtk.ApplicationWindow):
                 print("panel on_shown error:", tab["label"], ex)
         return False
 
-    def _on_device_tab(self, _nb, _page, index):
-        self._ensure_tab(index)
-
-    def _on_server_tab(self, _nb, page, _index):
-        self._lazy_show(page)
-
-    def _lazy_show(self, panel):
-        if panel is None or getattr(panel, "_mcd_started", True):
-            return
-        panel._mcd_started = True
-        if hasattr(panel, "on_shown"):
-            try:
-                panel.on_shown()
-            except Exception as ex:
-                print("panel on_shown error:", ex)
-
     def _teardown_device_panels(self):
         for tab in self._device_tabs:
             p = tab.get("panel")
@@ -487,26 +574,6 @@ class MainWindow(Gtk.ApplicationWindow):
                 except Exception:
                     pass
         self._device_tabs = []
-
-    # ---- server view -------------------------------------------------------
-    def show_server(self):
-        if not self._server_panels:
-            for label, cls, site_bit in SERVER_TABS:
-                if site_bit is not None and not rights.has_site(self.ctrl, site_bit):
-                    panel = Gtk.Label(label="Your account does not have permission for this.",
-                                      justify=Gtk.Justification.CENTER)
-                    panel.get_style_context().add_class("dim-label")
-                    tab_label = Gtk.Label(label=label, sensitive=False)
-                else:
-                    panel = cls(self.app, None)
-                    tab_label = Gtk.Label(label=label)
-                panel._mcd_started = False
-                self._server_panels.append(panel)
-                self.server_notebook.append_page(panel, tab_label)
-            self.server_notebook.show_all()
-        self.content.set_visible_child_name("server")
-        self.server_notebook.set_current_page(0)
-        GLib.idle_add(lambda: self._lazy_show(self.server_notebook.get_nth_page(0)) or False)
 
     # ---- context menu ------------------------------------------------------
     def _on_tree_click(self, tree, event):
@@ -609,15 +676,13 @@ class MainWindow(Gtk.ApplicationWindow):
             GLib.source_remove(self._refresh_timer)
             self._refresh_timer = None
         self._teardown_device_panels()
-        for p in self._server_panels:
+        for p in self._pages.values():
             try:
                 p.teardown()
             except Exception:
                 pass
 
     def _app_menu(self):
-        # Note: "Server administration" lives on the sidebar button, so it is NOT
-        # repeated here (avoids the duplicate-menu look).
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=6)
         for label, cb in (("Sign out", lambda *_: self.app.sign_out()),
@@ -643,6 +708,10 @@ _NOTIFY_CSS = b"""
               padding: 10px 12px; border: 1px solid rgba(255, 255, 255, 0.08);
               box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45); }
 .mcd-notify.mcd-broadcast { border-left: 4px solid #e5a50a; }
+.mcd-rail { padding: 6px 4px; background-color: alpha(@theme_fg_color, 0.04); }
+.mcd-rail-btn { padding: 6px 2px; min-width: 64px; border-radius: 8px; }
+.mcd-rail-btn:checked { background-color: alpha(@theme_selected_bg_color, 0.35); }
+.mcd-rail-caption { font-size: 8pt; }
 """
 _notify_css_done = False
 
