@@ -123,6 +123,18 @@ Y_TITLES = {"connections": "Connection count", "memory": "Megabytes", "cpu": "Lo
 _MB = 1024 * 1024
 
 
+def _cpu1(cpu):
+    """1-minute load from a sample's `cpu`. Like the web UI (typeof cpu == 'object' && typeof cpu[0]
+    == 'number') accept a list OR an object keyed "0"/0, the shape depends on the server's database."""
+    if isinstance(cpu, (list, tuple)):
+        v = cpu[0] if cpu else None
+    elif isinstance(cpu, dict):
+        v = cpu.get("0", cpu.get(0))
+    else:
+        v = None
+    return v if isinstance(v, (int, float)) else None
+
+
 def _traffic_values(tr, inbound):
     """12 traffic values (MB per 5-minute sample) in TRAFFIC_NAMES order."""
     d = "In" if inbound else "Out"
@@ -169,8 +181,7 @@ def build_series(samples, kind):
     if kind == "memory":
         return series_from(MEM_SERIES, lambda s, k: ((s.get("mem") or {}).get(k) or 0) / _MB if s.get("mem") else None)
     if kind == "cpu":
-        return series_from([("CPU", 0, (158, 151, 16))],
-                           lambda s, k: s["cpu"][0] if isinstance(s.get("cpu"), list) and s["cpu"] else None)
+        return series_from([("CPU", 0, (158, 151, 16))], lambda s, k: _cpu1(s.get("cpu")))
     inbound = kind == "in"
     rows = [(s, _traffic_values(s.get("traffic") or {}, inbound)) for s in samples if s.get("traffic") is not None]
     used = [i for i in range(len(TRAFFIC_NAMES)) if any(v[i] > 0 for _s, v in rows)]
@@ -459,6 +470,10 @@ class MyServerPanel(Gtk.Box):
         self._handlers = []
         self._web = None
         self.full_admin = rights.site_rights(self.ctrl) == rights.FULL
+        # CPU history: MeshCentral's MongoDB/NeDB backends drop `cpu` when returning the stats
+        # history (find(..., {cpu: 0})), so we also collect the live 10-second serverstats load
+        # while this page exists and merge it into the CPU chart.
+        self._cpu_live = []
         self.can_backup = rights.has_site(self.ctrl, rights.SITE_BACKUP)
         self.can_restore = rights.has_site(self.ctrl, rights.SITE_RESTORE)
         self.can_update = rights.has_site(self.ctrl, rights.SITE_UPDATE)
@@ -577,6 +592,11 @@ class MyServerPanel(Gtk.Box):
 
     def _on_stats(self, msg):
         cpu = msg.get("cpuavg") or []
+        if cpu and isinstance(cpu[0], (int, float)):
+            self._cpu_live.append((time.time(), float(cpu[0])))
+            del self._cpu_live[:-20000]
+            if self.stack.get_visible_child_name() == "stats" and CHART_KINDS[self.chart_kind.get_active()][0] == "cpu":
+                self._render_chart()
         if cpu:
             self.cpu_gauge.set_fraction(cpu[0])
             self.cpu_label.set_markup("<b>" + ", ".join(f"{c:.2f}".rstrip("0").rstrip(".") for c in cpu) + "</b>")
@@ -628,7 +648,7 @@ class MyServerPanel(Gtk.Box):
             bar.pack_start(w, False, False, 0)
         for w in (dl, self.chart_range, self.chart_kind):
             bar.pack_end(w, False, False, 0)
-        self.chart_info = Gtk.Label(xalign=1)
+        self.chart_info = Gtk.Label(xalign=1, ellipsize=Pango.EllipsizeMode.END)
         self.chart_info.get_style_context().add_class("dim-label")
         bar.pack_end(self.chart_info, True, True, 8)
         box.pack_start(bar, False, False, 0)
@@ -659,11 +679,32 @@ class MyServerPanel(Gtk.Box):
         kind = CHART_KINDS[self.chart_kind.get_active()][0]
         now = time.time()
         series = build_series(self._timeline, kind)
-        self.chart.set_data(series, now - self._hours() * 3600, now, Y_TITLES[kind],
+        cpu_note = ""
+        if kind == "cpu":
+            hist = [(t, v) for t, v in (series[0][2] if series else []) if v is not None]
+            pts = sorted((series[0][2] if series else []) + self._cpu_live, key=lambda p: p[0])
+            series = [("CPU", (158, 151, 16), pts)]
+            if not hist:
+                cpu_note = (" · this server's database does not keep CPU history, showing live values "
+                            "since My Server was opened (every 10 s)")
+        # The window starts at now - range (client clock, like the web UI's x.min) but ENDS at the
+        # newest sample if that is later: a server clock slightly ahead of ours must not hide the
+        # most recent samples (e.g. the only CPU samples right after a server upgrade).
+        newest = max((t for _n, _c, pts in series for t, v in pts if v is not None), default=now)
+        self.chart.set_data(series, now - self._hours() * 3600, max(now, newest), Y_TITLES[kind],
                             stacked=kind in ("in", "out"), log=self.chart_log.get_active(),
                             empty_text="No samples in this range, the server records one every 5 minutes.")
-        n = sum(1 for s in self._timeline if (_epoch(s.get("time")) or 0) >= now - self._hours() * 3600)
-        self.chart_info.set_text(f"{n} sample{'s' if n != 1 else ''} · hover the chart for values")
+        t0 = now - self._hours() * 3600
+        n = sum(1 for s in self._timeline if (_epoch(s.get("time")) or 0) >= t0)
+        with_data = len({t for _n, _c, pts in series for t, v in pts if v is not None and t >= t0})
+        if kind == "cpu":
+            with_data = min(with_data, n)       # live 10 s readings are not server samples
+        info = f"{n} sample{'s' if n != 1 else ''}"
+        if with_data < n:
+            what = {"cpu": "CPU", "in": "traffic", "out": "traffic"}.get(kind, "chart")
+            info += f" · {with_data} with {what} data"
+        self.chart_info.set_text(info + (cpu_note or " · hover the chart for values"))
+        self.chart_info.set_tooltip_text(self.chart_info.get_text())
 
     def _download_csv(self):
         ch = Gtk.FileChooserNative.new("Save data points", self.get_toplevel(), Gtk.FileChooserAction.SAVE,
@@ -688,7 +729,8 @@ class MyServerPanel(Gtk.Box):
             row = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)),
                    c.get("ca"), c.get("cu"), c.get("us"), c.get("rs"), c.get("am"), c.get("amc"),
                    m.get("external"), m.get("heapUsed"), m.get("heapTotal"), m.get("rss")]
-            row += [cpu[i] if isinstance(cpu, list) and len(cpu) > i else "" for i in range(3)]
+            row += [(cpu[i] if isinstance(cpu, list) and len(cpu) > i else
+                     cpu.get(str(i), "") if isinstance(cpu, dict) else "") for i in range(3)]
             row += [round(sum(_traffic_values(tr, True)), 4) if tr else "",
                     round(sum(_traffic_values(tr, False)), 4) if tr else ""]
             lines.append(",".join("" if v is None else str(v) for v in row))
