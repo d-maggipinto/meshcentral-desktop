@@ -20,7 +20,7 @@ import os
 import time
 from datetime import datetime
 
-from gi.repository import Gtk, GLib, Pango
+from gi.repository import Gtk, Gdk, GLib, Pango
 
 from . import ui, rights
 from .client import WebSession
@@ -72,17 +72,6 @@ def warning_text(w):
     return tmpl, WARNING_HINTS.get(w.get("id"))
 
 
-RANGES = [("Last hour", 1), ("Last 6 hours", 6), ("Last 24 hours", 24), ("Last 7 days", 168),
-          ("Last 30 days", 720)]
-CHARTS = {
-    "Connections": [("Agents", "ca", (0.20, 0.60, 0.86)), ("Users", "cu", (0.18, 0.80, 0.44)),
-                    ("User sessions", "us", (0.95, 0.61, 0.07)), ("Relay sessions", "rs", (0.91, 0.30, 0.24))],
-    "Memory (MB)": [("RSS", "rss", (0.20, 0.60, 0.86)), ("Heap total", "heapTotal", (0.18, 0.80, 0.44)),
-                    ("Heap used", "heapUsed", (0.95, 0.61, 0.07)), ("External", "external", (0.61, 0.35, 0.71))],
-    "CPU load": [("1 min load", 0, (0.20, 0.60, 0.86))],
-}
-
-
 # ---- small drawing widgets ---------------------------------------------------------
 class Gauge(Gtk.DrawingArea):
     """Ring gauge like the web UI's CPU / memory indicators."""
@@ -116,87 +105,334 @@ class Gauge(Gtk.DrawingArea):
         return False
 
 
-class LineChart(Gtk.DrawingArea):
-    """Minimal time-series chart: series = [(name, (r,g,b), [(epoch, value), ...])]."""
+# ---- Stats page: same charts, series, colours and ranges as the web UI (p40) --------
+RANGES = [("Last 3 hours", 3), ("Last 8 hours", 8), ("Last day", 24), ("Last week", 168), ("Last 30 days", 720)]
+CHART_KINDS = [("connections", "Connections"), ("memory", "Memory"), ("cpu", "CPU"),
+               ("in", "Inbound traffic"), ("out", "Outbound traffic")]
+CONN_SERIES = [("Agents", "ca", (158, 151, 16)), ("Users", "cu", (16, 84, 158)),
+               ("User Sessions", "us", (255, 99, 132)), ("Relay Sessions", "rs", (39, 158, 16)),
+               ("Intel AMT", "am", (134, 16, 158)), ("Intel AMT CIRA", "amc", (255, 155, 0))]
+MEM_SERIES = [("External", "external", (158, 151, 16)), ("Heap Used", "heapUsed", (16, 84, 158)),
+              ("Heap Total", "heapTotal", (255, 99, 132)), ("RSS", "rss", (39, 158, 16))]
+TRAFFIC_NAMES = ["Agent", "CIRA", "AMT-OS", "HTTP", "Relay", "Terminal", "Desktop", "Files", "WebRDP",
+                 "WebSSH", "WebVNC", "Desktop Multiplex"]
+TRAFFIC_COLORS = [(158, 151, 16), (16, 84, 158), (255, 99, 132), (39, 158, 16), (134, 16, 158), (0, 148, 255),
+                  (255, 216, 0), (255, 127, 237), (109, 213, 255), (89, 94, 255), (179, 104, 255), (179, 104, 255)]
+Y_TITLES = {"connections": "Connection count", "memory": "Megabytes", "cpu": "Load (1 min)",
+            "in": "Megabytes", "out": "Megabytes"}
+_MB = 1024 * 1024
+
+
+def _traffic_values(tr, inbound):
+    """12 traffic values (MB per 5-minute sample) in TRAFFIC_NAMES order."""
+    d = "In" if inbound else "Out"
+    relay = tr.get("relay" + d) or []
+
+    def rel(i):
+        if isinstance(relay, list):
+            return relay[i] if len(relay) > i else 0
+        if isinstance(relay, dict):
+            return relay.get(str(i)) or relay.get(i) or 0
+        return 0
+    vals = [tr.get("AgentCtrl" + d), tr.get("CIRA" + d), tr.get("LMS" + d), tr.get("http" + d)]
+    vals += [rel(i) for i in (0, 1, 2, 5, 10, 11, 12)]
+    vals.append((tr.get("desktopMultiplex") or {}).get("in" if inbound else "out"))
+    return [(v or 0) / _MB for v in vals]
+
+
+def build_series(samples, kind):
+    """-> list of (name, (r,g,b), [(epoch, value or None)]). None = gap (server restarted:
+    the sample carries first=true, like the web UI's NaN break)."""
+    samples = [s for s in samples if _epoch(s.get("time")) is not None]
+    servers = [s.get("s") for s in samples if s.get("s") is not None]
+    if servers:                                   # multi-server (peering): first server, like the web UI
+        samples = [s for s in samples if s.get("s") == servers[0]]
+    samples.sort(key=lambda s: _epoch(s.get("time")))
+
+    def series_from(spec, getter):
+        out = []
+        for name, key, col in spec:
+            pts = []
+            for s in samples:
+                t = _epoch(s["time"])
+                if s.get("first"):
+                    pts.append((t - 0.001, None))
+                v = getter(s, key)
+                if isinstance(v, (int, float)):
+                    pts.append((t, float(v)))
+            if key != "amc" or any(v is not None for _t, v in pts):
+                out.append((name, col, pts))
+        return out
+
+    if kind == "connections":
+        return series_from(CONN_SERIES, lambda s, k: (s.get("conn") or {}).get(k))
+    if kind == "memory":
+        return series_from(MEM_SERIES, lambda s, k: ((s.get("mem") or {}).get(k) or 0) / _MB if s.get("mem") else None)
+    if kind == "cpu":
+        return series_from([("CPU", 0, (158, 151, 16))],
+                           lambda s, k: s["cpu"][0] if isinstance(s.get("cpu"), list) and s["cpu"] else None)
+    inbound = kind == "in"
+    rows = [(s, _traffic_values(s.get("traffic") or {}, inbound)) for s in samples if s.get("traffic") is not None]
+    used = [i for i in range(len(TRAFFIC_NAMES)) if any(v[i] > 0 for _s, v in rows)]
+    out = []
+    for i in used:
+        pts = []
+        for s, v in rows:
+            t = _epoch(s["time"])
+            if s.get("first"):
+                pts.append((t - 0.001, None))
+            pts.append((t, v[i]))
+        out.append((TRAFFIC_NAMES[i], TRAFFIC_COLORS[i], pts))
+    return out
+
+
+def _nice_step(span, target):
+    raw = span / max(1, target)
+    mag = 10 ** math.floor(math.log10(raw)) if raw > 0 else 1
+    for m in (1, 2, 2.5, 5, 10):
+        if raw <= m * mag:
+            return m * mag
+    return 10 * mag
+
+
+_TIME_STEPS = [300, 600, 900, 1800, 3600, 7200, 10800, 21600, 43200, 86400, 172800, 604800]
+
+
+class TimeChart(Gtk.DrawingArea):
+    """Time-series area chart (cairo): fixed time window, smooth filled lines with sample points,
+    gaps, optional stacking (traffic) and log scale, legend on top, y-axis title, hover crosshair
+    with the exact values."""
+    PAD_L, PAD_R, PAD_T, PAD_B = 72, 20, 40, 34
 
     def __init__(self):
         super().__init__()
-        self.set_size_request(-1, 320)
-        self.series = []
+        self.set_size_request(-1, 360)
+        self.series, self.t0, self.t1 = [], 0, 1
+        self.y_title, self.stacked, self.log = "", False, False
         self.empty_text = "No data"
+        self.hover = None
+        self.add_events(Gdk.EventMask.POINTER_MOTION_MASK | Gdk.EventMask.LEAVE_NOTIFY_MASK)
         self.connect("draw", self._draw)
+        self.connect("motion-notify-event", lambda w, e: self._set_hover(e.x))
+        self.connect("leave-notify-event", lambda *_: self._set_hover(None))
 
-    def set_series(self, series, empty_text="No data"):
-        self.series = series
-        self.empty_text = empty_text
+    def set_data(self, series, t0, t1, y_title, stacked=False, log=False, empty_text="No data"):
+        self.series, self.t0, self.t1 = series, t0, max(t1, t0 + 60)
+        self.y_title, self.stacked, self.log, self.empty_text = y_title, stacked, log, empty_text
         self.queue_draw()
+
+    def _set_hover(self, x):
+        self.hover = x
+        self.queue_draw()
+
+    # -- geometry helpers
+    def _layers(self):
+        """[(name, col, [(t, top, bottom) | None])], stacked sums for traffic."""
+        out, base = [], {}
+        for name, col, pts in self.series:
+            layer = []
+            for t, v in pts:
+                if v is None:
+                    layer.append(None)
+                    continue
+                if t < self.t0 or t > self.t1:
+                    continue
+                b = base.get(t, 0.0) if self.stacked else 0.0
+                layer.append((t, b + v, b))
+                if self.stacked:
+                    base[t] = b + v
+            out.append((name, col, layer))
+        return out
 
     def _draw(self, w, cr):
         a = w.get_allocation()
-        sc = w.get_style_context()
-        fg = sc.get_color(Gtk.StateFlags.NORMAL)
-        L, R, T, B = 60, 16, 16, 64
+        fg = w.get_style_context().get_color(Gtk.StateFlags.NORMAL)
+        L, R, T, B = self.PAD_L, self.PAD_R, self.PAD_T, self.PAD_B
         pw, ph = a.width - L - R, a.height - T - B
-        pts = [p for _n, _c, d in self.series for p in d]
         cr.select_font_face("Sans")
         cr.set_font_size(11)
-        if not pts or pw < 50 or ph < 50:
-            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.6)
+        layers = self._layers()
+        vals = [p[1] for _n, _c, l in layers for p in l if p]
+        if pw < 80 or ph < 60:
+            return False
+        # legend (top, centered)
+        items = [(n, c) for n, c, _l in layers]
+        widths = [16 + 6 + cr.text_extents(n).x_advance + 18 for n, _c in items]
+        x = L + max(0, (pw - sum(widths)) / 2)
+        for (n, c), wd in zip(items, widths):
+            r, g, b = (v / 255 for v in c)
+            cr.set_source_rgba(r, g, b, 0.25)
+            cr.rectangle(x, 12, 16, 10)
+            cr.fill_preserve()
+            cr.set_source_rgb(r, g, b)
+            cr.set_line_width(1.5)
+            cr.stroke()
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.8)
+            cr.move_to(x + 22, 21)
+            cr.show_text(n)
+            x += wd
+        if not vals:
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.55)
             ext = cr.text_extents(self.empty_text)
-            cr.move_to((a.width - ext.width) / 2, a.height / 2)
+            cr.move_to(L + (pw - ext.width) / 2, T + ph / 2)
             cr.show_text(self.empty_text)
             return False
-        t0, t1 = min(p[0] for p in pts), max(p[0] for p in pts)
-        if t1 <= t0:
-            t1 = t0 + 60
-        vmax = max(p[1] for p in pts) or 1
-        mag = 10 ** math.floor(math.log10(vmax))
-        vmax = math.ceil(vmax / mag * 1.1) * mag                   # round up for a clean axis
-        X = lambda t: L + (t - t0) / (t1 - t0) * pw
-        Y = lambda v: T + ph - v / vmax * ph
+        # y scale
+        vmax = max(vals) or 1.0
+        if self.log:
+            pos = [v for v in vals if v > 0] or [1]
+            lo = 10 ** math.floor(math.log10(min(pos)))
+            hi = 10 ** math.ceil(math.log10(max(max(pos), lo * 10)))
+            Y = lambda v: T + ph - (math.log10(max(v, lo)) - math.log10(lo)) / (math.log10(hi) - math.log10(lo)) * ph
+            ticks = [lo * 10 ** i for i in range(int(round(math.log10(hi / lo))) + 1)]
+        else:
+            step = _nice_step(vmax, 5)
+            top = math.ceil(vmax * 1.05 / step) * step
+            Y = lambda v: T + ph - max(v, 0) / top * ph
+            ticks = [i * step for i in range(int(round(top / step)) + 1)]
+        X = lambda t: L + (t - self.t0) / (self.t1 - self.t0) * pw
         # grid + y labels
         cr.set_line_width(1)
-        for i in range(5):
-            v = vmax * i / 4
+        for v in ticks:
             y = Y(v)
-            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.12)
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.10)
             cr.move_to(L, y)
             cr.line_to(L + pw, y)
             cr.stroke()
-            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.7)
-            lab = f"{v:.2f}" if vmax < 5 else f"{v:.0f}"
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.65)
+            lab = (f"{v:g}" if v >= 1 or v == 0 else f"{v:.2g}")
             ext = cr.text_extents(lab)
-            cr.move_to(L - 8 - ext.width, y + 4)
+            cr.move_to(L - 8 - ext.x_advance, y + 4)
             cr.show_text(lab)
-        # x labels
-        span = t1 - t0
-        fmt = "%H:%M" if span <= 2 * 86400 else "%d %b"
-        for i in range(5):
-            t = t0 + span * i / 4
-            lab = time.strftime(fmt, time.localtime(t))
-            ext = cr.text_extents(lab)
-            cr.move_to(min(max(X(t) - ext.width / 2, L), L + pw - ext.width), T + ph + 18)
-            cr.show_text(lab)
-        # lines
-        cr.set_line_width(2)
-        for _name, col, data in self.series:
-            if not data:
-                continue
-            cr.set_source_rgb(*col)
-            for k, (t, v) in enumerate(sorted(data)):
-                (cr.move_to if k == 0 else cr.line_to)(X(t), Y(v))
+        # y title (rotated)
+        cr.save()
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.6)
+        ext = cr.text_extents(self.y_title)
+        cr.move_to(16, T + ph / 2 + ext.width / 2)
+        cr.rotate(-math.pi / 2)
+        cr.show_text(self.y_title)
+        cr.restore()
+        # x ticks: adaptive interval, aligned to local time
+        span = self.t1 - self.t0
+        step = next((s for s in _TIME_STEPS if pw / (span / s) >= 90), _TIME_STEPS[-1])
+        fmt = "%H:%M" if step < 86400 else "%d %b"
+        tz = time.localtime(self.t0).tm_gmtoff
+        t = math.ceil((self.t0 + tz) / step) * step - tz
+        while t <= self.t1:
+            x = X(t)
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.07)
+            cr.move_to(x, T)
+            cr.line_to(x, T + ph)
             cr.stroke()
-        # legend
-        x = L
-        for name, col, _d in self.series:
-            cr.set_source_rgb(*col)
-            cr.rectangle(x, a.height - 22, 12, 12)
-            cr.fill()
-            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.85)
-            cr.move_to(x + 17, a.height - 12)
-            cr.show_text(name)
-            x += 17 + cr.text_extents(name).width + 22
+            lab = time.strftime(fmt, time.localtime(t))
+            if step >= 86400 or time.localtime(t).tm_hour == 0 and time.localtime(t).tm_min == 0 and span > 86400:
+                lab = time.strftime("%d %b" if step >= 86400 else "%d %b %H:%M", time.localtime(t))
+            ext = cr.text_extents(lab)
+            cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.65)
+            cr.move_to(x - ext.x_advance / 2, T + ph + 18)
+            cr.show_text(lab)
+            t += step
+        # axes
+        cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.35)
+        cr.move_to(L, T)
+        cr.line_to(L, T + ph)
+        cr.line_to(L + pw, T + ph)
+        cr.stroke()
+        # series: fill, line, points (clip to plot area)
+        cr.save()
+        cr.rectangle(L, T - 2, pw, ph + 4)
+        cr.clip()
+        npts = max((sum(1 for p in l if p) for _n, _c, l in layers), default=0)
+        for name, col, layer in (reversed(layers) if self.stacked else layers):
+            r, g, b = (v / 255 for v in col)
+            for seg in self._segments(layer):
+                pts = [(X(t), Y(top)) for t, top, _b in seg]
+                base = [(X(t), Y(bot)) for t, _top, bot in seg]
+                if len(pts) == 1:
+                    cr.set_source_rgb(r, g, b)
+                    cr.arc(pts[0][0], pts[0][1], 3, 0, 2 * math.pi)
+                    cr.fill()
+                    continue
+                self._path(cr, pts, smooth=not self.stacked)
+                for bx, by in reversed(base):
+                    cr.line_to(bx, by)
+                cr.close_path()
+                cr.set_source_rgba(r, g, b, 0.14 if not self.stacked else 0.45)
+                cr.fill()
+                self._path(cr, pts, smooth=not self.stacked)
+                cr.set_source_rgb(r, g, b)
+                cr.set_line_width(2)
+                cr.stroke()
+                if npts <= 160:
+                    for px, py in pts:
+                        cr.arc(px, py, 2.4, 0, 2 * math.pi)
+                        cr.fill()
+        cr.restore()
+        # hover crosshair + values
+        if self.hover is not None and L <= self.hover <= L + pw:
+            times = sorted({p[0] for _n, _c, l in layers for p in l if p})
+            if times:
+                ht = min(times, key=lambda tt: abs(X(tt) - self.hover))
+                hx = X(ht)
+                cr.set_source_rgba(fg.red, fg.green, fg.blue, 0.45)
+                cr.set_line_width(1)
+                cr.move_to(hx, T)
+                cr.line_to(hx, T + ph)
+                cr.stroke()
+                rows = [time.strftime("%a %d %b %H:%M", time.localtime(ht))]
+                cols = [None]
+                for (name, col, pts) in self.series:
+                    v = next((vv for tt, vv in pts if tt == ht and vv is not None), None)
+                    if v is not None:
+                        rows.append(f"{name}: {v:.2f}" if not float(v).is_integer() else f"{name}: {int(v)}")
+                        cols.append(col)
+                wbox = max(cr.text_extents(s).x_advance for s in rows) + 30
+                hbox = 16 * len(rows) + 10
+                bx = hx + 12 if hx + 12 + wbox < L + pw else hx - 12 - wbox
+                by = T + 8
+                cr.set_source_rgba(0.1, 0.11, 0.13, 0.92)
+                cr.rectangle(bx, by, wbox, hbox)
+                cr.fill()
+                for i, (s, c) in enumerate(zip(rows, cols)):
+                    yy = by + 18 + 16 * i
+                    if c:
+                        cr.set_source_rgb(*(v / 255 for v in c))
+                        cr.rectangle(bx + 8, yy - 9, 10, 10)
+                        cr.fill()
+                    cr.set_source_rgb(0.93, 0.93, 0.94)
+                    cr.move_to(bx + (24 if c else 8), yy)
+                    cr.show_text(s)
         return False
+
+    @staticmethod
+    def _segments(layer):
+        seg = []
+        for p in layer:
+            if p is None:
+                if seg:
+                    yield seg
+                seg = []
+            else:
+                seg.append(p)
+        if seg:
+            yield seg
+
+    @staticmethod
+    def _path(cr, pts, smooth=True):
+        cr.move_to(*pts[0])
+        if not smooth or len(pts) < 3:
+            for p in pts[1:]:
+                cr.line_to(*p)
+            return
+        # Catmull-Rom → Bézier, control points clamped to the neighbouring y range (no overshoot)
+        for i in range(len(pts) - 1):
+            p0 = pts[i - 1] if i > 0 else pts[i]
+            p1, p2 = pts[i], pts[i + 1]
+            p3 = pts[i + 2] if i + 2 < len(pts) else p2
+            lo, hi = min(p1[1], p2[1]), max(p1[1], p2[1])
+            c1 = (p1[0] + (p2[0] - p0[0]) / 6, min(max(p1[1] + (p2[1] - p0[1]) / 6, lo), hi))
+            c2 = (p2[0] - (p3[0] - p1[0]) / 6, min(max(p2[1] - (p3[1] - p1[1]) / 6, lo), hi))
+            cr.curve_to(c1[0], c1[1], c2[0], c2[1], p2[0], p2[1])
 
 
 def _section(text):
@@ -365,63 +601,103 @@ class MyServerPanel(Gtk.Box):
     # ---- Stats (history) --------------------------------------------------------
     def _build_stats(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=16, margin_top=4, spacing=8)
+        title = Gtk.Label(xalign=0)
+        title.set_markup("<span size='x-large' weight='bold'>My Server Stats</span>")
+        box.pack_start(title, False, False, 0)
         bar = Gtk.Box(spacing=8)
+        refresh = Gtk.Button(label="Refresh", image=Gtk.Image.new_from_icon_name("view-refresh-symbolic",
+                             Gtk.IconSize.BUTTON), always_show_image=True)
+        refresh.connect("clicked", lambda *_: self._request_timeline())
+        self.chart_log = Gtk.CheckButton(label="Log scale")
+        self.chart_log.set_tooltip_text("Logarithmic value axis (the web UI's “Log-X”)")
+        self.chart_log.connect("toggled", lambda *_: self._render_chart())
         self.chart_kind = Gtk.ComboBoxText()
-        for k in CHARTS:
-            self.chart_kind.append_text(k)
+        for _k, label in CHART_KINDS:
+            self.chart_kind.append_text(label)
         self.chart_kind.set_active(0)
+        self.chart_kind.connect("changed", lambda *_: self._render_chart())
         self.chart_range = Gtk.ComboBoxText()
         for label, _h in RANGES:
             self.chart_range.append_text(label)
-        self.chart_range.set_active(2)
-        refresh = Gtk.Button.new_from_icon_name("view-refresh-symbolic", Gtk.IconSize.BUTTON)
-        refresh.set_tooltip_text("Refresh")
-        refresh.connect("clicked", lambda *_: self._request_timeline())
-        self.chart_kind.connect("changed", lambda *_: self._render_chart())
+        self.chart_range.set_active(0)
         self.chart_range.connect("changed", lambda *_: self._request_timeline())
-        for w in (Gtk.Label(label="Chart:"), self.chart_kind, Gtk.Label(label="Range:"), self.chart_range, refresh):
+        dl = Gtk.Button.new_from_icon_name("document-save-symbolic", Gtk.IconSize.BUTTON)
+        dl.set_tooltip_text("Download data points (.csv)")
+        dl.connect("clicked", lambda *_: self._download_csv())
+        for w in (refresh, self.chart_log):
             bar.pack_start(w, False, False, 0)
+        for w in (dl, self.chart_range, self.chart_kind):
+            bar.pack_end(w, False, False, 0)
         self.chart_info = Gtk.Label(xalign=1)
         self.chart_info.get_style_context().add_class("dim-label")
-        bar.pack_end(self.chart_info, True, True, 0)
+        bar.pack_end(self.chart_info, True, True, 8)
         box.pack_start(bar, False, False, 0)
-        self.chart = LineChart()
+        self.chart = TimeChart()
         box.pack_start(self.chart, True, True, 0)
         self._timeline = []
         return box
 
+    def _hours(self):
+        return RANGES[self.chart_range.get_active()][1]
+
     def _request_timeline(self):
         self.chart_info.set_text("Loading…")
-        self.ctrl.send({"action": "servertimelinestats", "hours": RANGES[self.chart_range.get_active()][1]})
+        self.ctrl.send({"action": "servertimelinestats", "hours": self._hours()})
 
     def _on_timeline(self, msg):
         self._timeline = msg.get("events") or []
         self._render_chart()
 
-    def _render_chart(self):
-        kind = self.chart_kind.get_active_text()
-        series = []
-        for name, key, col in CHARTS[kind]:
-            data = []
-            for e in self._timeline:
-                t = _epoch(e.get("time"))
-                if t is None:
-                    continue
-                if kind == "Connections":
-                    v = (e.get("conn") or {}).get(key)
-                elif kind.startswith("Memory"):
-                    v = (e.get("mem") or {}).get(key)
-                    v = v / (1024 * 1024) if isinstance(v, (int, float)) else None
-                else:
-                    c = e.get("cpu")
-                    v = c[key] if isinstance(c, list) and len(c) > key else None
-                if isinstance(v, (int, float)):
-                    data.append((t, float(v)))
-            series.append((name, col, data))
-        self.chart.set_series(series, "No samples yet, the server records one every 5 minutes.")
-        n = len(self._timeline)
-        self.chart_info.set_text(f"{n} sample{'s' if n != 1 else ''}")
+    def _on_live_sample(self, msg):
+        # The server events every new 5-minute sample: {action:'event', event:{action:'servertimelinestats', data}}
+        ev = msg.get("event") or {}
+        if ev.get("action") == "servertimelinestats" and isinstance(ev.get("data"), dict):
+            self._timeline.append(ev["data"])
+            self._render_chart()
 
+    def _render_chart(self):
+        kind = CHART_KINDS[self.chart_kind.get_active()][0]
+        now = time.time()
+        series = build_series(self._timeline, kind)
+        self.chart.set_data(series, now - self._hours() * 3600, now, Y_TITLES[kind],
+                            stacked=kind in ("in", "out"), log=self.chart_log.get_active(),
+                            empty_text="No samples in this range, the server records one every 5 minutes.")
+        n = sum(1 for s in self._timeline if (_epoch(s.get("time")) or 0) >= now - self._hours() * 3600)
+        self.chart_info.set_text(f"{n} sample{'s' if n != 1 else ''} · hover the chart for values")
+
+    def _download_csv(self):
+        ch = Gtk.FileChooserNative.new("Save data points", self.get_toplevel(), Gtk.FileChooserAction.SAVE,
+                                       "_Save", "_Cancel")
+        ch.set_current_name("ServerStats.csv")
+        ch.set_do_overwrite_confirmation(True)
+        if ch.run() != Gtk.ResponseType.ACCEPT:
+            ch.destroy()
+            return
+        dest = ch.get_filename()
+        ch.destroy()
+        cols = ["time", "conn.agent", "conn.users", "conn.usersessions", "conn.relaysession", "conn.intelamt",
+                "conn.intelamtcira", "mem.external", "mem.heapused", "mem.heaptotal", "mem.rss",
+                "cpu.load1", "cpu.load5", "cpu.load15", "traffic.in.mb", "traffic.out.mb"]
+        lines = [",".join(cols)]
+        for s in sorted(self._timeline, key=lambda s: _epoch(s.get("time")) or 0):
+            t = _epoch(s.get("time"))
+            if t is None:
+                continue
+            c, m, cpu = s.get("conn") or {}, s.get("mem") or {}, s.get("cpu") or []
+            tr = s.get("traffic") or {}
+            row = [time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t)),
+                   c.get("ca"), c.get("cu"), c.get("us"), c.get("rs"), c.get("am"), c.get("amc"),
+                   m.get("external"), m.get("heapUsed"), m.get("heapTotal"), m.get("rss")]
+            row += [cpu[i] if isinstance(cpu, list) and len(cpu) > i else "" for i in range(3)]
+            row += [round(sum(_traffic_values(tr, True)), 4) if tr else "",
+                    round(sum(_traffic_values(tr, False)), 4) if tr else ""]
+            lines.append(",".join("" if v is None else str(v) for v in row))
+        try:
+            with open(dest, "w") as f:
+                f.write("\r\n".join(lines) + "\r\n")
+            self.chart_info.set_text(f"Saved {len(lines) - 1} samples to {os.path.basename(dest)}")
+        except OSError as ex:
+            ui.message(self.get_toplevel(), "Cannot save file", str(ex), Gtk.MessageType.ERROR)
     # ---- Console ----------------------------------------------------------------
     def _build_console(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
@@ -475,7 +751,8 @@ class MyServerPanel(Gtk.Box):
         self._started = True
         self._render_warnings(self.ctrl.serverwarnings)
         for action, cb in (("serverstats", self._on_stats), ("servertimelinestats", self._on_timeline),
-                           ("serverconsole", self._on_console), ("serverwarnings", self._on_warnings)):
+                           ("serverconsole", self._on_console), ("serverwarnings", self._on_warnings),
+                           ("event", self._on_live_sample)):
             self.ctrl.on(action, cb)
             self._handlers.append((action, cb))
         self.ctrl.send({"action": "serverstats", "interval": STATS_INTERVAL_MS})
