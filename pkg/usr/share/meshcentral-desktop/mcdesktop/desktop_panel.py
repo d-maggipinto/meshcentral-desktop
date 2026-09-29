@@ -594,7 +594,6 @@ class DesktopPanel(Gtk.Box):
     # dropped SILENTLY by the server when domain ClipboardGet/ClipboardSet is false, and
     # the agent only answers getclip when the remote clipboard has text, hence timeouts.
     _CLIP_TIMEOUT_MS = 6000
-    _CLIP_FAST_MS = 2500           # getclip gets this long before the eval fallback starts
 
     # Fallback read via the agent console (admin "eval"). The agent's own getclip
     # swallows every read error (no reply at all), which is what happens on a Linux
@@ -602,10 +601,14 @@ class DesktopPanel(Gtk.Box):
     # OR its error is parked on the agent and fetched by a second eval. eval replies go
     # only to OUR session (console output without a sessionid would be broadcast to
     # every admin's console, so the clipboard text is never printed that way).
-    _CLIP_EVAL_START = ('eval "(function(){var A=require(\'MeshAgent\');A.__mcdc=null;try{'
-                        'require(\'clipboard\').dispatchRead().then(function(s){A.__mcdc={ok:(s==null?'
-                        '\'\':\'\'+s)};},function(e){A.__mcdc={err:\'\'+e};});}catch(e){A.__mcdc='
-                        '{err:\'\'+e};}return \'MCDCLIP0:started\';})()"')
+    # Agent-side read, run via console eval (no double quotes / backslashes allowed: it
+    # travels inside  eval "<js>" ). Mirrors the agent's own xclip read, but fixes the bug
+    # seen on the user's Kali target: the agent's display lookup (monitor-info getXInfo)
+    # returns an EMPTY display, so xclip fails with "Can't open display:". If that happens
+    # we take DISPLAY/XAUTHORITY from a process of the desktop user (/proc/<pid>/environ,
+    # parsed byte-wise: the agent's Buffer.toString() stops at the first NUL), then run
+    # xclip as that user. Without xclip it falls back to the agent's dispatchRead().
+    _CLIP_EVAL_START = 'eval "(function(){var A=require(\'MeshAgent\');A.__mcdc=null;var d={};try{var fs=require(\'fs\');var NL=String.fromCharCode(10);var uid=require(\'user-sessions\').consoleUid();d.uid=uid;var xi={};try{xi=require(\'monitor-info\').getXInfo(uid)||{};}catch(e){d.xierr=\'\'+e;}var disp=xi.display,auth=xi.xauthority;d.agent=[disp||\'\',auth||\'\'];if(!disp){var ps=fs.readdirSync(\'/proc\');for(var i=0;i<ps.length&&!disp;i++){var p=ps[i];if(!(parseInt(p)>0))continue;try{var ls=fs.readFileSync(\'/proc/\'+p+\'/status\').toString().split(NL);var u=-1;for(var j=0;j<ls.length;j++){if(ls[j].indexOf(\'Uid:\')==0){u=parseInt(ls[j].substring(4).trim());break;}}if(u!=uid)continue;var b=fs.readFileSync(\'/proc/\'+p+\'/environ\');var e2={},st=0;for(var k=0;k<=b.length;k++){if(k==b.length||b[k]==0){if(k>st){var kv=b.slice(st,k).toString();var q=kv.indexOf(\'=\');if(q>0){e2[kv.substring(0,q)]=kv.substring(q+1);}}st=k+1;}}if(e2.DISPLAY){disp=e2.DISPLAY;auth=e2.XAUTHORITY;d.from=\'pid \'+p;}}catch(x){}}}d.used=[disp||\'\',auth||\'\'];var xc=require(\'clipboard\').xclip;d.xclip=xc||\'\';if(!disp){A.__mcdc={err:\'No X display found for the desktop user (uid \'+uid+\')\',diag:d};return \'MCDCLIP0:nodisp\';}if(!xc){require(\'clipboard\').dispatchRead().then(function(s){A.__mcdc={ok:(s==null?\'\':\'\'+s)};},function(e){A.__mcdc={err:\'\'+e,diag:d};});return \'MCDCLIP0:native\';}var env={DISPLAY:disp};if(auth){env.XAUTHORITY=auth;}var c=require(\'child_process\').execFile(xc,[\'xclip\',\'-selection\',\'clipboard\',\'-o\'],{uid:uid,env:env});A.__mcdchild=c;c.stdout.s=\'\';c.stderr.s=\'\';c.stdout.on(\'data\',function(b){this.s+=b.toString();});c.stderr.on(\'data\',function(b){this.s+=b.toString();});c.on(\'exit\',function(){var o=this.stdout.s,er=this.stderr.s.trim();A.__mcdc=(o.length||!er)?{ok:o}:{err:er,diag:d};A.__mcdchild=null;});}catch(e){A.__mcdc={err:\'\'+e,diag:d};}return \'MCDCLIP0:started\';})()"'
     _CLIP_EVAL_FETCH = ('eval "(function(){var A=require(\'MeshAgent\');var r=A.__mcdc;'
                         'if(r){A.__mcdc=null;}return \'MCDCLIP1:\'+JSON.stringify(r);})()"')
 
@@ -653,8 +656,8 @@ class DesktopPanel(Gtk.Box):
         self._set_status("Reading remote clipboard…")
         if self._clip_get_timer:
             GLib.source_remove(self._clip_get_timer)
-        self._clip_get_timer = GLib.timeout_add(self._CLIP_FAST_MS, self._clip_eval_start,
-                                                self._clip_read_gen)
+        # getclip and the eval read run in parallel; whichever answers first wins.
+        self._clip_eval_start(self._clip_read_gen)
 
     def _clip_got_text(self, data):
         self._clip_read_done = True
@@ -713,7 +716,16 @@ class DesktopPanel(Gtk.Box):
                 GLib.source_remove(self._clip_get_timer)
                 self._clip_get_timer = None
             self._set_status("")
-            self._note("The remote agent could not read its clipboard: " + str(r.get("err")))
+            err = str(r.get("err") or "unknown error")
+            d = r.get("diag") or {}
+            used = (d.get("used") or ["", ""])[0]
+            if "target STRING not available" in err or "target UTF8_STRING not available" in err:
+                self._note("The remote clipboard is empty (or holds no text). On the remote computer, "
+                           "copy with Ctrl+C (Ctrl+Shift+C in a terminal), just selecting text is not enough.")
+                return
+            self._note(f"The remote agent could not read its clipboard: {err}  "
+                       f"[user uid {d.get('uid')}, display {used or 'none found'}"
+                       f"{' via ' + d['from'] if d.get('from') else ''}]")
 
     def _on_clip_msg(self, msg):
         if self._closing or msg.get("nodeid") != self.node["_id"]:
