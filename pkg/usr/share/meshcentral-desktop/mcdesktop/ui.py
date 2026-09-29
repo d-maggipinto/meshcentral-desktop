@@ -121,6 +121,41 @@ def form_dialog(parent, title, fields, ok_label="OK"):
     return out
 
 
+def text_column(title, col, expand=False, sort_col=None):
+    """A readable TreeView text column. Short columns (time, user, action, state...) are NOT
+    ellipsized, so they size to their content instead of collapsing to "2026-…"; only the one
+    expanding column (message, command, name) is ellipsized and takes the remaining width."""
+    from gi.repository import Pango
+    r = Gtk.CellRendererText()
+    if expand:
+        r.set_property("ellipsize", Pango.EllipsizeMode.END)
+    c = Gtk.TreeViewColumn(title, r, text=col)
+    c.set_resizable(True)
+    c.set_sort_column_id(col if sort_col is None else sort_col)
+    if expand:
+        c.set_expand(True)
+        c.set_min_width(200)
+    return c
+
+
+def row_tooltip(tv, col):
+    """Show a row's full text (column `col`) as a PLAIN-text tooltip. Unlike
+    TreeView.set_tooltip_column this does not parse Pango markup, so messages containing
+    <, & or code render correctly."""
+    def query(widget, x, y, keyboard, tooltip):
+        ok, _x, _y, model, path, it = widget.get_tooltip_context(x, y, keyboard)
+        if not ok or it is None:
+            return False
+        text = model[it][col]
+        if not text:
+            return False
+        tooltip.set_text(str(text))
+        widget.set_tooltip_row(tooltip, path)
+        return True
+    tv.set_has_tooltip(True)
+    tv.connect("query-tooltip", query)
+
+
 def scrolled(child):
     s = Gtk.ScrolledWindow(hexpand=True, vexpand=True)
     s.add(child)

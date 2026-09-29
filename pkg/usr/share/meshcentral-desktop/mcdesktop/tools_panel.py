@@ -78,13 +78,8 @@ class ProcessesPanel(_MsgPanel):
         self.store = Gtk.ListStore(int, str, str, str)
         self.tree = Gtk.TreeView(model=self.store, enable_search=True, search_column=3)
         for title, col, expand in (("PID", 1, False), ("User", 2, False), ("Command", 3, True)):
-            r = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
-            c = Gtk.TreeViewColumn(title, r, text=col)
-            c.set_resizable(True)
-            c.set_sort_column_id(0 if col == 1 else col)
-            if expand:
-                c.set_expand(True)
-            self.tree.append_column(c)
+            self.tree.append_column(ui.text_column(title, col, expand, sort_col=0 if col == 1 else col))
+        ui.row_tooltip(self.tree, 3)
         self.tree.connect("row-activated", lambda *_: self.kill_selected())
         self.pack_start(ui.scrolled(self.tree), True, True, 0)
 
@@ -160,13 +155,8 @@ class ServicesPanel(_MsgPanel):
         self.store = Gtk.ListStore(str, str, str, str)
         self.tree = Gtk.TreeView(model=self.store, enable_search=True, search_column=0)
         for title, col, expand in (("Service", 0, True), ("Type", 1, False), ("State", 2, False)):
-            r = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
-            c = Gtk.TreeViewColumn(title, r, text=col)
-            c.set_resizable(True)
-            c.set_sort_column_id(col)
-            if expand:
-                c.set_expand(True)
-            self.tree.append_column(c)
+            self.tree.append_column(ui.text_column(title, col, expand))
+        ui.row_tooltip(self.tree, 0)
         self.pack_start(ui.scrolled(self.tree), True, True, 0)
 
     def _first_load(self):

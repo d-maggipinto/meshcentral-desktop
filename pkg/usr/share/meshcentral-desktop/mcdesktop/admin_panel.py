@@ -120,13 +120,11 @@ def _make_tree(columns):
     store = Gtk.ListStore(*([str] * len(columns)))
     tv = Gtk.TreeView(model=store, enable_search=True)
     for i, (title, expand) in enumerate(columns):
-        r = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
-        c = Gtk.TreeViewColumn(title, r, text=i)
-        c.set_resizable(True)
-        c.set_sort_column_id(i)
-        if expand:
-            c.set_expand(True)
-        tv.append_column(c)
+        tv.append_column(ui.text_column(title, i, expand))
+    # hovering a row shows the (possibly ellipsized) main text in full
+    wide = [i for i, (_t, expand) in enumerate(columns) if expand]
+    if wide:
+        ui.row_tooltip(tv, wide[-1])
     return tv, store
 
 

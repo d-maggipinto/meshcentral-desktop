@@ -280,12 +280,8 @@ class EventsPanel(Gtk.Box):
         self.store = Gtk.ListStore(str, str, str)
         tv = Gtk.TreeView(model=self.store)
         for i, title in enumerate(("Time", "Action", "Message")):
-            r = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
-            col = Gtk.TreeViewColumn(title, r, text=i)
-            col.set_resizable(True)
-            if i == 2:
-                col.set_expand(True)
-            tv.append_column(col)
+            tv.append_column(ui.text_column(title, i, expand=(i == 2)))
+        ui.row_tooltip(tv, 2)
         self.pack_start(ui.scrolled(tv), True, True, 0)
 
     def _on_reply(self, message):
