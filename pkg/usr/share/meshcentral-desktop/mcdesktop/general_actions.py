@@ -3,7 +3,7 @@ import secrets
 
 from gi.repository import Gtk, Gdk, GLib
 
-from . import ui
+from . import ui, rights
 
 POWER = {"wake": 100, "off": 2, "reset": 3, "sleep": 4}
 RUN_TYPE = {"Windows Command": 0, "Windows PowerShell": 2, "Linux/macOS Shell": 3}
@@ -101,6 +101,7 @@ class DeviceActions:
         self.app = win.app
         self.ctrl = win.ctrl
         self.buttons = {}
+        self.items = {}              # menu key -> ModelButton (sensitivity follows rights)
 
     # ---- bar ---------------------------------------------------------------
     def build_bar(self):
@@ -142,6 +143,7 @@ class DeviceActions:
             b = Gtk.ModelButton(text=label)
             b.connect("clicked", lambda _w, k=key: self.power_action(k))
             box.pack_start(b, False, False, 0)
+            self.items["power_" + key] = b
         box.show_all()
         pop.add(box)
         return pop
@@ -149,39 +151,50 @@ class DeviceActions:
     def _more_menu(self):
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=6)
-        for label, cb in (("Notes…", self.notes), ("Message box…", self.msg_box),
-                          ("Toast notification…", self.toast),
-                          ("Rename…", self.rename_device), ("Edit tags…", self.edit_tags),
-                          ("Open in web UI", self.open_web)):
+        for key, label, cb in (("notes", "Notes…", self.notes), ("msgbox", "Message box…", self.msg_box),
+                               ("toast", "Toast notification…", self.toast),
+                               ("rename", "Rename…", self.rename_device), ("tags", "Edit tags…", self.edit_tags),
+                               ("web", "Open in web UI", self.open_web)):
             b = Gtk.ModelButton(text=label)
             b.connect("clicked", cb)
             box.pack_start(b, False, False, 0)
+            self.items[key] = b
         box.show_all()
         pop.add(box)
         return pop
 
+    def caps(self, node):
+        return rights.node_caps(self.ctrl, self.win.meshes, node)
+
     def update(self, node):
         online = ui.is_online(node)
-        for key in ("desktop", "terminal", "files", "run"):
-            if key in self.buttons:
-                self.buttons[key].set_sensitive(online)
+        c = self.caps(node)
+        self.buttons["run"].set_sensitive(online and c.run_commands)
+        self.buttons["run"].set_tooltip_text(None if c.run_commands else "Your account may not run commands on this device")
+        sens = {"power_wake": c.wake, "power_sleep": online and c.power, "power_reset": online and c.power,
+                "power_off": online and c.power, "msgbox": online and c.messages, "toast": online and c.messages,
+                "rename": c.manage, "tags": c.manage}
+        for key, on in sens.items():
+            self.items[key].set_sensitive(bool(on))
+        self.buttons["power"].set_sensitive(bool(c.wake or c.power))
         self.name_label.set_text(node.get("name", ""))
 
     # ---- context menu ------------------------------------------------------
     def context_menu(self, event, node):
         online = ui.is_online(node)
+        c = self.caps(node)
         menu = Gtk.Menu()
-        items = [("Remote Desktop", lambda: self.win.goto_device_tab("Desktop"), online),
-                 ("Terminal", lambda: self.win.goto_device_tab("Terminal"), online),
-                 ("Files", lambda: self.win.goto_device_tab("Files"), online),
-                 ("Run command…", self.run_command, online),
+        items = [("Remote Desktop", lambda: self.win.goto_device_tab("Desktop"), online and c.desktop),
+                 ("Terminal", lambda: self.win.goto_device_tab("Terminal"), online and c.terminal),
+                 ("Files", lambda: self.win.goto_device_tab("Files"), online and c.files),
+                 ("Run command…", self.run_command, online and c.run_commands),
                  (None, None, None),
-                 ("Wake up", lambda: self.power_action("wake"), True),
-                 ("Restart", lambda: self.power_action("reset"), online),
-                 ("Power off", lambda: self.power_action("off"), online),
+                 ("Wake up", lambda: self.power_action("wake"), c.wake),
+                 ("Restart", lambda: self.power_action("reset"), online and c.power),
+                 ("Power off", lambda: self.power_action("off"), online and c.power),
                  (None, None, None),
                  ("Notes…", self.notes, True),
-                 ("Rename…", self.rename_device, True),
+                 ("Rename…", self.rename_device, c.manage),
                  ("Open in web UI", self.open_web, True)]
         for label, cb, enabled in items:
             if label is None:
@@ -270,18 +283,19 @@ class DeviceActions:
         node = self._node()
         if not node:
             return
-        NotesDialog(self.win, self.ctrl, node).present()
+        NotesDialog(self.win, self.ctrl, node, editable=self.caps(node).notes).present()
 
     def open_web(self, *_):
         node = self._node()
         if node:
-            self.app.open_uri(f"{self.ctrl.server.url}/?gotonode={node['_id']}&viewmode=11")
+            # gotonode needs the SHORT id (last part of _id), like the desktop viewer URL.
+            self.app.open_uri(f"{self.ctrl.server.url}/?gotonode={node['_id'].split('/')[-1]}&viewmode=11")
 
 
 class NotesDialog(Gtk.Dialog):
     """Quick view/edit of a single device's notes (getNotes / setNotes)."""
 
-    def __init__(self, parent, ctrl, node):
+    def __init__(self, parent, ctrl, node, editable=True):
         super().__init__(title=f"Notes - {node.get('name', '')}", transient_for=parent, modal=True)
         self.ctrl = ctrl
         self.node = node
@@ -312,6 +326,10 @@ class NotesDialog(Gtk.Dialog):
         self.status.get_style_context().add_class("dim-label")
         box.pack_start(self.status, False, False, 0)
 
+        if not editable:
+            self.view.set_editable(False)
+            self.save_btn.set_sensitive(False)
+            hint.set_text("Notes for this device (read-only, your account may not edit notes here):")
         self.connect("response", self._on_response)
         self.connect("destroy", lambda *_: self._unlisten())
         self._handler = self._on_reply

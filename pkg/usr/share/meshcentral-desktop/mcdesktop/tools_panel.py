@@ -184,7 +184,10 @@ class ServicesPanel(_MsgPanel):
 
     def refresh(self):
         self.count.set_text("Loading…")
-        if ui.is_windows(self.node):
+        from . import rights
+        caps = rights.node_caps(self.app.ctrl, self.app.meshes, self.node)
+        if ui.is_windows(self.node) or not caps.run_commands:
+            # systemctl goes through "Run commands", which needs its own right.
             self.app.ctrl.send_node_msg(self.nodeid, "services")
             return
         self._svc_rid = "mcdsvc" + secrets.token_hex(6)

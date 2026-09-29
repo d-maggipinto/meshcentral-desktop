@@ -296,3 +296,132 @@ class Tunnel:
             except Exception:
                 pass
         self._set_state(0)
+
+
+# ---- HTTP session for server-side file storage ("My Files") -------------------------
+# downloadfile.ashx only accepts a WEB session (req.session.userid), not x-meshauth, so we
+# sign in once exactly like the browser (POST /login, action=login) into a PRIVATE,
+# in-memory cookie jar. uploadfile.ashx additionally accepts the control-channel login
+# cookie in the form field "auth". All transfers run on background threads; callbacks are
+# marshalled to the GTK loop.
+import http.cookiejar
+import os
+import urllib.error
+import urllib.parse
+import urllib.request
+
+
+def http_ssl_context():
+    """TLS context for HTTP transfers (tests against a self-signed local rig override this)."""
+    return ssl.create_default_context()
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+class WebSession:
+    CHUNK = 256 * 1024
+
+    def __init__(self, ctrl):
+        self.ctrl = ctrl
+        self.jar = http.cookiejar.CookieJar()
+        self._logged_in = False
+        self._lock = threading.Lock()
+
+    def _opener(self, follow=True):
+        handlers = [urllib.request.HTTPCookieProcessor(self.jar),
+                    urllib.request.HTTPSHandler(context=http_ssl_context())]
+        if not follow:
+            handlers.append(_NoRedirect())
+        return urllib.request.build_opener(*handlers)
+
+    def _login(self):
+        with self._lock:
+            if self._logged_in:
+                return
+            form = {"action": "login", "username": self.ctrl.username, "password": self.ctrl.password or ""}
+            if self.ctrl.token:
+                form["token"] = self.ctrl.token
+            req = urllib.request.Request(self.ctrl.server.url + "/login",
+                                         data=urllib.parse.urlencode(form).encode(),
+                                         headers={"User-Agent": USER_AGENT})
+            try:
+                self._opener(follow=False).open(req, timeout=30).read()
+            except urllib.error.HTTPError as ex:
+                if ex.code not in (301, 302, 303):          # a redirect is the normal answer
+                    raise
+            if not any(c.name.startswith("xid") for c in self.jar):
+                raise RuntimeError("the server did not accept the web sign-in "
+                                   "(two-factor accounts need the web UI for large downloads)")
+            self._logged_in = True
+
+    def download(self, link, dest, on_progress=None, on_done=None):
+        """link: 'user//name/folder/file' (server path). Streams to dest."""
+        def run():
+            try:
+                self._login()
+                url = self.ctrl.server.url + "/downloadfile.ashx?link=" + urllib.parse.quote(link, safe="")
+                req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
+                with self._opener().open(req, timeout=60) as r, open(dest, "wb") as f:
+                    total = int(r.headers.get("Content-Length") or 0)
+                    got = 0
+                    while True:
+                        b = r.read(self.CHUNK)
+                        if not b:
+                            break
+                        f.write(b)
+                        got += len(b)
+                        _ui(on_progress, got, total)
+                _ui(on_done, None)
+            except Exception as ex:
+                self._logged_in = False
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+                _ui(on_done, str(ex))
+        threading.Thread(target=run, daemon=True).start()
+
+    def upload(self, link, path, on_progress=None, on_done=None):
+        """Upload local file `path` into server folder `link` (e.g. 'user//name/Public')."""
+        def run(cookie):
+            try:
+                try:
+                    self._login()
+                except Exception:
+                    pass                                     # the "auth" cookie field may suffice
+                boundary = "----mcd" + secrets.token_hex(12)
+                name = os.path.basename(path)
+
+                def field(k, v):
+                    return (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").encode()
+                head = field("link", urllib.parse.quote(link, safe="")) + field("auth", cookie or "") + (
+                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"files\"; "
+                    f"filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
+                tail = f"\r\n--{boundary}--\r\n".encode()
+                size = os.path.getsize(path)
+
+                def body():
+                    yield head
+                    sent = 0
+                    with open(path, "rb") as f:
+                        while True:
+                            b = f.read(self.CHUNK)
+                            if not b:
+                                break
+                            sent += len(b)
+                            _ui(on_progress, sent, size)
+                            yield b
+                    yield tail
+                req = urllib.request.Request(
+                    self.ctrl.server.url + "/uploadfile.ashx", data=body(), method="POST",
+                    headers={"User-Agent": USER_AGENT, "Content-Length": str(len(head) + size + len(tail)),
+                             "Content-Type": f"multipart/form-data; boundary={boundary}"})
+                self._opener().open(req, timeout=300).read()
+                _ui(on_done, None)
+            except Exception as ex:
+                _ui(on_done, str(ex))
+        # a fresh control-channel login cookie for the "auth" field
+        self.ctrl.get_auth_cookie(lambda cookie, _r: threading.Thread(target=run, args=(cookie,), daemon=True).start())

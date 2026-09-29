@@ -10,29 +10,37 @@ from .files_panel import FilesPanel
 from .desktop_panel import DesktopPanel
 from .tools_panel import ProcessesPanel, ServicesPanel, ConsolePanel
 from .admin_panel import UsersPanel, UserGroupsPanel, ServerEventsPanel, AccountPanel
+from .server_files_panel import ServerFilesPanel
+from . import rights
 
 POWER = {"wake": 100, "off": 2, "reset": 3, "sleep": 4}
 
-# (label, class, online_only)
+# (label, class, online_only, required rights.NodeCaps attribute or None)
 DEVICE_TABS = [
-    ("General", GeneralPanel, False),
-    ("Desktop", DesktopPanel, True),
-    ("Terminal", TerminalPanel, True),
-    ("Files", FilesPanel, True),
-    ("Processes", ProcessesPanel, True),
-    ("Services", ServicesPanel, True),
-    ("Console", ConsolePanel, True),
-    ("Hardware", HardwarePanel, False),
-    ("Network", NetworkPanel, True),
-    ("Events", EventsPanel, False),
-    ("Notes", NotesPanel, False),
+    ("General", GeneralPanel, False, None),
+    ("Desktop", DesktopPanel, True, "desktop"),
+    ("Terminal", TerminalPanel, True, "terminal"),
+    ("Files", FilesPanel, True, "files"),
+    ("Processes", ProcessesPanel, True, "tools"),
+    ("Services", ServicesPanel, True, "tools"),
+    ("Console", ConsolePanel, True, "console"),
+    ("Hardware", HardwarePanel, False, None),
+    ("Network", NetworkPanel, True, None),
+    ("Events", EventsPanel, False, None),
+    ("Notes", NotesPanel, False, None),
 ]
+# (label, class, required site right or None). ServerFilesPanel explains a missing right itself.
 SERVER_TABS = [
-    ("Users", UsersPanel),
-    ("User Groups", UserGroupsPanel),
-    ("Server Events", ServerEventsPanel),
-    ("My Account", AccountPanel),
+    ("My Files", ServerFilesPanel, None),
+    ("Users", UsersPanel, rights.SITE_MANAGEUSERS),
+    ("User Groups", UserGroupsPanel, rights.SITE_USERGROUPS),
+    ("Server Events", ServerEventsPanel, None),
+    ("My Account", AccountPanel, None),
 ]
+_TAB_DENIED = {
+    "desktop": "remote desktop", "terminal": "the terminal", "files": "file access",
+    "tools": "device tools (processes and services)", "console": "the agent console",
+}
 
 
 class MainWindow(Gtk.ApplicationWindow):
@@ -379,14 +387,19 @@ class MainWindow(Gtk.ApplicationWindow):
             nb.remove_page(0)
         self._device_tabs = []
         online = ui.is_online(node)
-        for label, cls, online_only in DEVICE_TABS:
+        caps = rights.node_caps(self.ctrl, self.meshes, node)
+        for label, cls, online_only, cap in DEVICE_TABS:
             container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
             tab_label = Gtk.Label(label=label)
-            if online_only and not online:
+            allowed = cap is None or getattr(caps, cap)
+            if (online_only and not online) or not allowed:
                 tab_label.set_sensitive(False)
+            if not allowed:
+                tab_label.set_tooltip_text("Your account does not have permission for this")
             nb.append_page(container, tab_label)
             self._device_tabs.append({"label": label, "cls": cls, "online_only": online_only,
-                                      "container": container, "panel": None, "node": node})
+                                      "container": container, "panel": None, "node": node,
+                                      "allowed": allowed, "cap": cap})
         nb.show_all()
         self.actions.update(node)
         self.content.set_visible_child_name("device")
@@ -401,6 +414,16 @@ class MainWindow(Gtk.ApplicationWindow):
         if tab["panel"] is not None:      # already built (panel, "offline" or "error")
             return False
         node = tab["node"]
+        if not tab.get("allowed", True):
+            what = _TAB_DENIED.get(tab.get("cap"), "this")
+            msg = Gtk.Label(label=f"Your account does not have permission to use {what} on this device.\n"
+                                  "An administrator can change this in the device group's permissions.",
+                            justify=Gtk.Justification.CENTER)
+            msg.get_style_context().add_class("dim-label")
+            tab["container"].pack_start(msg, True, True, 0)
+            tab["container"].show_all()
+            tab["panel"] = "denied"
+            return False
         if tab["online_only"] and not ui.is_online(node):
             msg = Gtk.Label(label="This device is offline.")
             msg.get_style_context().add_class("dim-label")
@@ -457,11 +480,18 @@ class MainWindow(Gtk.ApplicationWindow):
     # ---- server view -------------------------------------------------------
     def show_server(self):
         if not self._server_panels:
-            for label, cls in SERVER_TABS:
-                panel = cls(self.app, None)
+            for label, cls, site_bit in SERVER_TABS:
+                if site_bit is not None and not rights.has_site(self.ctrl, site_bit):
+                    panel = Gtk.Label(label="Your account does not have permission for this.",
+                                      justify=Gtk.Justification.CENTER)
+                    panel.get_style_context().add_class("dim-label")
+                    tab_label = Gtk.Label(label=label, sensitive=False)
+                else:
+                    panel = cls(self.app, None)
+                    tab_label = Gtk.Label(label=label)
                 panel._mcd_started = False
                 self._server_panels.append(panel)
-                self.server_notebook.append_page(panel, Gtk.Label(label=label))
+                self.server_notebook.append_page(panel, tab_label)
             self.server_notebook.show_all()
         self.content.set_visible_child_name("server")
         self.server_notebook.set_current_page(0)

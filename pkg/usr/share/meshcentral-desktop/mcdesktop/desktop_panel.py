@@ -16,6 +16,7 @@ functions, connectDesktop) via run_javascript.
 import json
 import time
 
+from . import rights
 import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("WebKit2", "4.1")
@@ -93,6 +94,7 @@ class DesktopPanel(Gtk.Box):
         cad.connect("clicked", lambda *_: self._send_cad())
         bar.pack_start(cad, False, False, 0)
         self._ctrl_widgets.append(cad)
+        self._input_widgets = [cad]                    # disabled for view-only accounts
 
         clip = Gtk.Box()
         clip.get_style_context().add_class("linked")
@@ -111,6 +113,7 @@ class DesktopPanel(Gtk.Box):
         clip.add(copyr)
         bar.pack_start(clip, False, False, 0)
         self._ctrl_widgets += [paste, typeb, copyr]
+        self._input_widgets += [paste, typeb]
 
         full = Gtk.Button.new_from_icon_name("view-fullscreen-symbolic", Gtk.IconSize.BUTTON)
         full.set_tooltip_text("Fullscreen (Ctrl+Alt+F)")
@@ -439,9 +442,20 @@ class DesktopPanel(Gtk.Box):
             self._waiting_agent = False
             self.start_flow()
 
+    @property
+    def caps(self):
+        return rights.node_caps(self.app.ctrl, self.app.meshes, self.node)
+
     def _set_controls_enabled(self, on):
         for w in self._ctrl_widgets:
             w.set_sensitive(on)
+        if on and not self.caps.desktop_input:
+            # View-only account: the agent ignores our input anyway; say so instead.
+            for w in self._input_widgets:
+                w.set_sensitive(False)
+                w.set_tooltip_text("View only, your account may not control this device")
+            self.hotkeys.set_sensitive(False)
+            self._flash_status("View only", 5)
 
     def _js(self, code, cb=None):
         def done(view, res):
@@ -672,6 +686,7 @@ class DesktopPanel(Gtk.Box):
 
     def _kb_update(self):
         want = (self._connected and not self._closing and self.hotkeys.get_active()
+                and self.caps.desktop_input
                 and self.view.has_focus())
         if want and not self._kb_seat:
             top = self.get_toplevel()
@@ -746,7 +761,10 @@ class DesktopPanel(Gtk.Box):
         if not self.clip_sync.get_active() or self._sync_timer:
             return
         self._clip_listen()
-        self.app.ctrl.send_node_msg(self.node["_id"], "console", value=self._AGENT_PATCH)
+        if self.caps.console:
+            # The in-memory agent patch needs agent-console rights (it is a console eval).
+            # Without them, sync still uses plain getclip/setclip (fine on healthy agents).
+            self.app.ctrl.send_node_msg(self.node["_id"], "console", value=self._AGENT_PATCH)
         # Baselines: only CHANGES made after connecting are synced (connecting must not
         # overwrite either side's clipboard).
         self._sync_baseline = True
@@ -813,7 +831,7 @@ class DesktopPanel(Gtk.Box):
             if not text or not self._sync_timer or text == self._sync_last_local:
                 return
             self._sync_last_local = text
-            if text != self._sync_last_remote:
+            if text != self._sync_last_remote and self.caps.desktop_input:
                 self._sync_last_remote = text         # so the next poll doesn't echo it back
                 self.app.ctrl.send_node_msg(self.node["_id"], "setclip", data=text)
                 self._flash_status(f"Clipboard → remote ({len(text)} chars)")

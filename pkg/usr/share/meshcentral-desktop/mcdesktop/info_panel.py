@@ -366,7 +366,7 @@ class NotesPanel(Gtk.Box):
         if self._saved_pending:
             self._saved_pending = False
             self.status.set_text("Saved ✓")
-        else:
+        elif not getattr(self, "_readonly", False):
             self.status.set_text("")
 
     def _request(self):
@@ -386,6 +386,14 @@ class NotesPanel(Gtk.Box):
         if self._started:
             return
         self._started = True
+        from . import rights
+        if not rights.node_caps(self.app.ctrl, self.app.meshes, self.node).notes:
+            self.view.set_editable(False)
+            for w in self.get_children()[0].get_children():
+                if isinstance(w, Gtk.Button) and w.get_label() == "Save":
+                    w.set_sensitive(False)
+            self._readonly = True
+            self.status.set_text("Read-only, your account may not edit notes on this device")
         self._handler = self._on_reply
         self.app.ctrl.on("getNotes", self._handler)
         self._request()
