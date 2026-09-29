@@ -74,6 +74,10 @@ class DesktopPanel(Gtk.Box):
         self._sync_baseline = True
         self._status_hold = 0.0          # keep a transient status (e.g. clipboard) visible briefly
         self._kb_seat = None             # set while we hold the keyboard grab (hotkeys -> remote)
+        # True while the user wants a session (connect/reconnect) and has not pressed
+        # Disconnect/Cancel: an agent restart (e.g. agentupdate) then reconnects by itself.
+        self._want_session = False
+        self._waiting_agent = False
         self._hint_timer = None
 
         # --- toolbar row 1: session + view ---
@@ -284,6 +288,8 @@ class DesktopPanel(Gtk.Box):
 
     def start_flow(self):
         """Full (re)connect: end any session, reload the web UI, sign in, open the device."""
+        self._want_session = True
+        self._waiting_agent = False
         self._gen += 1
         self._logged_in = False
         self._navigated = False
@@ -414,7 +420,24 @@ class DesktopPanel(Gtk.Box):
         if self._cover_btn.get_label() == "Retry":
             self.start_flow()
         else:
-            self._toggle_connect()
+            self._toggle_connect()          # "Connect", or "Cancel" while waiting for the agent
+
+    def on_node_update(self, node):
+        """Called by the main window on every device refresh."""
+        self.node = node
+        online = bool((node.get("conn") or 0) & 1)
+        if not online and self._want_session and not self._waiting_agent and not self._closing:
+            # Agent went away (update/restart): end the dead session and wait for it.
+            self._gen += 1
+            self._js(self._END_SESSION_JS)
+            self._set_phase("idle")
+            self._waiting_agent = True
+            self._set_status("Agent offline")
+            self._cover_show("The remote agent went offline (restarting or updating?).\n"
+                             "Reconnecting automatically as soon as it is back…", button="Cancel")
+        elif online and self._waiting_agent and not self._closing:
+            self._waiting_agent = False
+            self.start_flow()
 
     def _set_controls_enabled(self, on):
         for w in self._ctrl_widgets:
@@ -474,8 +497,10 @@ class DesktopPanel(Gtk.Box):
             "catch(e){return 'err';}})()")
 
     def _toggle_connect(self, *_):
-        if self._phase != "idle":
-            # Disconnect when connected, Cancel while loading/connecting.
+        if self._phase != "idle" or self._waiting_agent:
+            # Disconnect when connected, Cancel while loading/connecting/waiting.
+            self._want_session = False
+            self._waiting_agent = False
             self._gen += 1
             self._js(self._END_SESSION_JS)
             self._set_phase("idle")
@@ -483,6 +508,7 @@ class DesktopPanel(Gtk.Box):
             self._cover_show("Disconnected", busy=False, button="Connect")
         elif self._page_ready:
             # The device view is already loaded: just start a new KVM session.
+            self._want_session = True
             self._gen += 1
             self._connect_attempts = 0
             self._set_phase("loading")

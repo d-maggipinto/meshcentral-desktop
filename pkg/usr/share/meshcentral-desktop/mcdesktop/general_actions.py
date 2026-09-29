@@ -10,20 +10,23 @@ RUN_TYPE = {"Windows Command": 0, "Windows PowerShell": 2, "Linux/macOS Shell": 
 
 
 class RunOutputDialog(Gtk.Dialog):
-    """Non-modal window that runs a command and shows its live output.
+    """Non-modal window that runs a command and shows its output.
 
-    A runcommands reply may arrive as one message or several (with reply:true the
-    agent streams output). We listen on the 'runcommands' action filtered by our
-    responseid, append any text we find, and stop listening when closed.
+    Ground truth (verified live): with reply:true the server first answers
+    {action:'runcommands', result:'OK', responseid}, only an ACK, and the command's
+    output arrives LATER as a separate {action:'msg', type:'runcommands', result:'<output>',
+    responseid, nodeid}. Listening only to the 'runcommands' action (as before) finished on
+    the ACK and never saw the output.
     """
+    TIMEOUT_S = 120
+
     def __init__(self, parent, ctrl, node, rid, request):
         super().__init__(title=f"Run command - {node.get('name')}", transient_for=parent)
         self.set_modal(False)
         self.set_default_size(760, 460)
         self.ctrl = ctrl
         self.rid = rid
-        self._got_output = False
-        self._status = None
+        self._done = False
 
         self.buffer = Gtk.TextBuffer()
         view = Gtk.TextView(buffer=self.buffer, editable=False, monospace=True,
@@ -36,7 +39,7 @@ class RunOutputDialog(Gtk.Dialog):
 
         self.spinner = Gtk.Spinner()
         self.spinner.start()
-        self.status_label = Gtk.Label(label="Running…", xalign=0)
+        self.status_label = Gtk.Label(label="Sending…", xalign=0)
         self.status_label.get_style_context().add_class("dim-label")
         hb = Gtk.Box(spacing=8, margin=6)
         hb.pack_start(self.spinner, False, False, 0)
@@ -47,54 +50,49 @@ class RunOutputDialog(Gtk.Dialog):
         self.connect("response", lambda *_: self.destroy())
         self.connect("destroy", self._cleanup)
 
-        self.ctrl.on("runcommands", self._on_reply)
+        self.ctrl.on("runcommands", self._on_ack)
+        self.ctrl.on("msg", self._on_output)
         self.ctrl.send(request)
-        # Safety: stop waiting after 60s if the agent never signals completion.
-        self._timeout_id = GLib.timeout_add_seconds(60, self._on_timeout)
+        self._timeout_id = GLib.timeout_add_seconds(self.TIMEOUT_S, self._on_timeout)
         self.show_all()
 
-    def _append(self, text):
-        if not text:
+    def _on_ack(self, msg):
+        if msg.get("responseid") != self.rid or self._done:
             return
-        self.buffer.insert(self.buffer.get_end_iter(), text if text.endswith("\n") else text + "\n")
-        self._got_output = True
-
-    def _on_reply(self, msg):
-        if msg.get("responseid") != self.rid:
-            return
-        # Output can appear under different keys depending on agent/server version.
-        for key in ("value", "data", "output", "cmdData"):
-            v = msg.get(key)
-            if isinstance(v, str) and v:
-                self._append(v)
         result = msg.get("result")
-        if isinstance(result, str):
-            self._status = result
-            if result != "OK":
-                self._append(result)
-        if msg.get("complete") or msg.get("done") or result in ("OK", "Access denied",
-                                                                 "Invalid nodeid", "Agent not connected"):
-            self._finish(result or "Done")
+        if result == "OK":
+            self.status_label.set_text("Running… waiting for the output")
+        elif isinstance(result, str) and result:
+            self._finish(f"Not run: {result}")            # e.g. "Access denied", "Agent not connected"
+
+    def _on_output(self, msg):
+        if msg.get("type") != "runcommands" or msg.get("responseid") != self.rid or self._done:
+            return
+        out = msg.get("result")
+        if isinstance(out, str) and out:
+            self.buffer.insert(self.buffer.get_end_iter(), out if out.endswith("\n") else out + "\n")
+            self._finish("Done.")
+        else:
+            self._finish("Done, the command produced no output.")
 
     def _on_timeout(self):
-        self._finish("Finished (no further output).")
+        self._timeout_id = None
+        self._finish(f"No output after {self.TIMEOUT_S} s, the agent may be offline or the "
+                     "command is still running. Use the Terminal tab for long-running commands.")
         return False
 
     def _finish(self, status):
+        self._done = True
         self.spinner.stop()
         self.spinner.hide()
-        if not self._got_output:
-            note = "Command sent." if status == "OK" else status
-            self.status_label.set_text(
-                f"{note} ,  this command returned no text output; use the Terminal tab for live output.")
-        else:
-            self.status_label.set_text(f"Done ({status}).")
+        self.status_label.set_text(status)
 
     def _cleanup(self, *_):
         if getattr(self, "_timeout_id", None):
             GLib.source_remove(self._timeout_id)
             self._timeout_id = None
-        self.ctrl.off("runcommands", self._on_reply)
+        self.ctrl.off("runcommands", self._on_ack)
+        self.ctrl.off("msg", self._on_output)
 
 
 class DeviceActions:

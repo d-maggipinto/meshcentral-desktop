@@ -191,6 +191,32 @@ class MainWindow(Gtk.ApplicationWindow):
                 self.nodes[n["_id"]] = n
                 groups.setdefault(meshid, []).append(n)
         self._rebuild_tree(groups)
+        self._notify_panels()
+
+    def _notify_panels(self):
+        """Hand the fresh node dict to the open device's panels (e.g. agent went offline or
+        came back after an update/restart), so they can react instead of looking frozen."""
+        if not self._open_node_id:
+            return
+        node = self.nodes.get(self._open_node_id)
+        if node is not None:
+            self._last_open_node = node
+        else:
+            # Some servers drop a disconnected agent from the nodes list entirely (seen on
+            # the rig while the agent restarts), treat "missing" as "offline".
+            last = getattr(self, "_last_open_node", None)
+            if not last or last.get("_id") != self._open_node_id:
+                last = self.current
+            if not last or last.get("_id") != self._open_node_id:
+                return
+            node = dict(last, conn=0)
+        for tab in self._device_tabs:
+            p = tab.get("panel")
+            if p is not None and not isinstance(p, str) and hasattr(p, "on_node_update"):
+                try:
+                    p.on_node_update(node)
+                except Exception as ex:
+                    print("on_node_update error:", tab["label"], ex)
 
     def _tree_signature(self, groups):
         sig = []

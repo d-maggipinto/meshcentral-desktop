@@ -338,7 +338,16 @@ class ConsolePanel(_MsgPanel):
         self.pack_start(entry_bar, False, False, 0)
 
     def _first_load(self):
+        self._online = ui.is_online(self.node)
         self._append("Agent console ready. Type 'help' for the list of MeshAgent commands.\n")
+
+    def on_node_update(self, node):
+        self.node = node
+        online = ui.is_online(node)
+        if getattr(self, "_online", online) != online:
+            self._append("*** Agent is back online ***\n" if online else
+                         "*** Agent went offline (restarting or updating?), waiting for it to reconnect ***\n")
+        self._online = online
 
     def _append(self, text):
         end = self.buffer.get_end_iter()
@@ -351,6 +360,9 @@ class ConsolePanel(_MsgPanel):
             return
         self.entry.set_text("")
         self._append(f"> {cmd}\n")
+        if not getattr(self, "_online", True):
+            self._append("(agent is offline, command not sent)\n")
+            return
         self.app.ctrl.send_node_msg(self.nodeid, "console", value=cmd)
 
     def _handle_msg(self, message):
