@@ -14,6 +14,7 @@ call the viewer's own JS API (desktop.m.sendcad, SendCompressionLevel, the clipb
 functions, connectDesktop) via run_javascript.
 """
 import json
+import time
 
 import gi
 gi.require_version("Gtk", "3.0")
@@ -62,6 +63,14 @@ class DesktopPanel(Gtk.Box):
         self._gen = 0
         self._page_ready = False         # the device desktop view is loaded in the WebView
         self._watchdog = None
+        # Automatic two-way clipboard sync (NoMachine-style), see "clipboard sync" below.
+        self._sync_timer = None
+        self._sync_owner_sig = None
+        self._sync_focus_sig = None
+        self._sync_last_local = None
+        self._sync_last_remote = None
+        self._sync_baseline = True
+        self._status_hold = 0.0          # keep a transient status (e.g. clipboard) visible briefly
 
         # --- toolbar row 1: session + view ---
         self._toolbar = bar = Gtk.Box(spacing=6, margin=6)
@@ -117,6 +126,12 @@ class DesktopPanel(Gtk.Box):
         # artifacts on the canvas. JPEG renders cleanly. (index 1 = JPEG)
         self.encoding = self._combo("Encoding", _ENCODING, 1, qbar)
         self.scale = self._combo("Scale", _SCALE, 0, qbar)
+        qbar.pack_start(Gtk.Label(label="Clipboard sync:"), False, False, 0)
+        self.clip_sync = Gtk.Switch(valign=Gtk.Align.CENTER,
+                                    active=bool(app.config.get("clipboard_sync", True)))
+        self.clip_sync.set_tooltip_text("Automatically share the clipboard both ways while connected")
+        self.clip_sync.connect("notify::active", self._on_sync_toggled)
+        qbar.pack_start(self.clip_sync, False, False, 0)
         for c in (self.quality, self.speed, self.encoding, self.scale):
             c.connect("changed", lambda *_: self._apply_compression(force=True))
             self._ctrl_widgets.append(c)
@@ -208,8 +223,13 @@ class DesktopPanel(Gtk.Box):
                        "{connectDesktop(null,0);}return 'ok';}catch(e){return 'err';}})()")
 
     def _set_phase(self, phase):
+        was_connected = self._phase == "connected"
         self._phase = phase
         self._connected = phase == "connected"
+        if self._connected and not was_connected:
+            self._sync_start()
+        elif was_connected and not self._connected:
+            self._sync_stop()
         self.connect_btn.set_label({"idle": "Connect", "connected": "Disconnect"}.get(phase, "Cancel"))
         if phase != "connected":
             self._set_controls_enabled(False)
@@ -269,6 +289,7 @@ class DesktopPanel(Gtk.Box):
         return True                                  # handled: never show a hidden dialog
 
     def teardown(self):
+        self._sync_stop()
         self._closing = True
         self._gen += 1
         if self._watchdog:
@@ -587,6 +608,104 @@ class DesktopPanel(Gtk.Box):
         GLib.timeout_add(1500, lambda: (self._apply_compression(force=True), False)[1])
         self.refit_soon()
 
+    # ---- clipboard sync (automatic, both directions) ----------------------------
+    # On connect we patch the running agent ONCE (in memory; reverts on agent restart):
+    #  * monitor-info.getXInfo: when it returns an empty display (the user's Kali target),
+    #    fall back to DISPLAY/XAUTHORITY of a desktop-user process from /proc;
+    #  * clipboard.dispatchWrite (Linux + xclip): keep the xclip that owns the selection
+    #    alive until someone else copies, the stock writer SIGKILLs it after 20 s, which
+    #    silently empties the remote clipboard.
+    # After that the agent's own getclip/setclip work, so sync uses them: getclip tag:3
+    # every second (the web UI's auto-clipboard path; the agent does NOT event-log tag 3)
+    # and setclip on local changes. Only the one-time patch goes through console eval.
+    _AGENT_PATCH = 'eval "(function(){var A=require(\'MeshAgent\');if(A.__mcdPatch==\'mcd1\'){return \'MCDPATCH:already\';}var fs=require(\'fs\'),NL=String.fromCharCode(10);function scan(uid){var ps=fs.readdirSync(\'/proc\');for(var i=0;i<ps.length;i++){var p=ps[i];if(!(parseInt(p)>0))continue;try{var ls=fs.readFileSync(\'/proc/\'+p+\'/status\').toString().split(NL);var u=-1;for(var j=0;j<ls.length;j++){if(ls[j].indexOf(\'Uid:\')==0){u=parseInt(ls[j].substring(4).trim());break;}}if(u!=uid)continue;var b=fs.readFileSync(\'/proc/\'+p+\'/environ\');var e={},st=0;for(var k=0;k<=b.length;k++){if(k==b.length||b[k]==0){if(k>st){var kv=b.slice(st,k).toString();var q=kv.indexOf(\'=\');if(q>0){e[kv.substring(0,q)]=kv.substring(q+1);}}st=k+1;}}if(e.DISPLAY){return {d:e.DISPLAY,a:e.XAUTHORITY};}}catch(x){}}return null;}var mi=require(\'monitor-info\');var o=A.__mcdOrigXInfo||mi.getXInfo;A.__mcdOrigXInfo=o;mi.getXInfo=function(uid){var r=null;try{r=o.call(mi,uid);}catch(e){}if(r&&r.display){return r;}var f=scan(uid);if(!f){return r;}if(!r){r={tty:\'?\',exportEnv:function(){return {XAUTHORITY:this.xauthority||\'\',DISPLAY:this.display};}};}r.display=f.d;if(f.a){r.xauthority=f.a;}return r;};var cb=require(\'clipboard\');var xc=cb.xclip;if(xc&&process.platform==\'linux\'){cb.dispatchWrite=function(data){var uid=require(\'user-sessions\').consoleUid();var xi=mi.getXInfo(uid);if(!xi||!xi.display){return;}var env={DISPLAY:xi.display};if(xi.xauthority){env.XAUTHORITY=xi.xauthority;}var c=require(\'child_process\').execFile(xc,[\'xclip\',\'-selection\',\'clipboard\',\'-i\'],{uid:uid,env:env});c.stdout.on(\'data\',function(){});c.stderr.on(\'data\',function(){});c.stdin.write(\'\'+data,function(){this.end();});A.__mcdWriter=c;};}A.__mcdPatch=\'mcd1\';return \'MCDPATCH:ok:\'+(xc?\'xclip\':\'native\');})()"'
+    _SYNC_POLL_MS = 1000
+
+    def _on_sync_toggled(self, sw, _pspec):
+        self.app.config["clipboard_sync"] = sw.get_active()
+        self.app.save_config()
+        if sw.get_active() and self._connected:
+            self._sync_start()
+        elif not sw.get_active():
+            self._sync_stop()
+
+    def _sync_start(self):
+        if not self.clip_sync.get_active() or self._sync_timer:
+            return
+        self._clip_listen()
+        self.app.ctrl.send_node_msg(self.node["_id"], "console", value=self._AGENT_PATCH)
+        # Baselines: only CHANGES made after connecting are synced (connecting must not
+        # overwrite either side's clipboard).
+        self._sync_baseline = True
+        self._sync_last_remote = None
+        self._sync_last_local = None
+        cb = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD)
+        cb.request_text(lambda _c, text: setattr(self, "_sync_last_local", text))
+        if not self._sync_owner_sig:
+            self._sync_owner_sig = cb.connect("owner-change", lambda *_: self._sync_check_local())
+        top = self.get_toplevel()
+        if isinstance(top, Gtk.Window) and not self._sync_focus_sig:
+            # Wayland only tells a client about clipboard changes while it has focus, so
+            # also re-check whenever the window gets focus back.
+            self._sync_focus_sig = (top, top.connect("focus-in-event",
+                                                     lambda *_: (self._sync_check_local(), False)[1]))
+        self._sync_timer = GLib.timeout_add(self._SYNC_POLL_MS, self._sync_poll)
+
+    def _sync_stop(self):
+        if self._sync_timer:
+            GLib.source_remove(self._sync_timer)
+            self._sync_timer = None
+        if self._sync_owner_sig:
+            Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).disconnect(self._sync_owner_sig)
+            self._sync_owner_sig = None
+        if self._sync_focus_sig:
+            top, sig = self._sync_focus_sig
+            try:
+                top.disconnect(sig)
+            except Exception:
+                pass
+            self._sync_focus_sig = None
+
+    def _flash_status(self, text, secs=3.0):
+        self._set_status(text)
+        self._status_hold = time.monotonic() + secs
+
+    def _sync_poll(self):
+        if self._closing or not self._connected or not self.clip_sync.get_active():
+            self._sync_timer = None
+            return False
+        self.app.ctrl.send_node_msg(self.node["_id"], "getclip", tag=3)
+        return True
+
+    def _sync_on_remote(self, data):
+        if not isinstance(data, str) or not self._sync_timer:
+            return
+        if self._sync_baseline:
+            self._sync_baseline = False
+            self._sync_last_remote = data
+            return
+        if data == self._sync_last_remote:
+            return
+        self._sync_last_remote = data
+        if data != self._sync_last_local:
+            self._sync_last_local = data              # so owner-change doesn't echo it back
+            Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(data, -1)
+            self._flash_status(f"Clipboard ← remote ({len(data)} chars)")
+
+    def _sync_check_local(self):
+        if not self._sync_timer:
+            return
+
+        def got(_c, text):
+            if not text or not self._sync_timer or text == self._sync_last_local:
+                return
+            self._sync_last_local = text
+            if text != self._sync_last_remote:
+                self._sync_last_remote = text         # so the next poll doesn't echo it back
+                self.app.ctrl.send_node_msg(self.node["_id"], "setclip", data=text)
+                self._flash_status(f"Clipboard → remote ({len(text)} chars)")
+        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).request_text(got)
+
     # ---- clipboard: native, over OUR control connection ------------------------
     # getclip/setclip are plain control-channel messages; the agent's reply is routed
     # back to the session that asked (with nodeid set), so we don't need the web page,
@@ -731,7 +850,9 @@ class DesktopPanel(Gtk.Box):
         if self._closing or msg.get("nodeid") != self.node["_id"]:
             return
         t = msg.get("type")
-        if t == "getclip" and msg.get("tag") == 2:
+        if t == "getclip" and msg.get("tag") == 3:
+            self._sync_on_remote(msg.get("data"))
+        elif t == "getclip" and msg.get("tag") == 2:
             data = msg.get("data")
             if isinstance(data, str) and data and not self._clip_read_done:
                 self._clip_got_text(data)
@@ -860,7 +981,7 @@ class DesktopPanel(Gtk.Box):
         if self._closing:
             return
         now_connected = text.lower().startswith("connected")
-        if self._connected:
+        if self._connected and time.monotonic() >= self._status_hold:
             self._set_status(text or "")
         # Only a session WE started counts: a stale "Connected" from the page being left
         # behind during a reconnect is ignored because the phase isn't "connecting".
