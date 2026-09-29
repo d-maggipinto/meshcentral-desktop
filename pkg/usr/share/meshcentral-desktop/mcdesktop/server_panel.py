@@ -15,6 +15,7 @@ Protocol (meshuser.js / webserver.js), all gated server-side by site rights
   {action:'serverconsole', value} -> {action:'serverconsole', value}
   GET /backup.zip, POST /restoreserver.ashx (datafile)  , web session (client.WebSession)
 """
+import json
 import math
 import os
 import time
@@ -461,6 +462,96 @@ def _epoch(t):
         return None
 
 
+# Server trace sources, grouped exactly like the web UI's "Server Tracing" dialog (p41)
+TRACE_GROUPS = [
+    ("Core Server", [("cookie", "Cookie encoder"), ("dispatch", "Message Dispatcher"),
+                     ("main", "Main Server Messages"), ("peer", "MeshCentral Server Peering"),
+                     ("agent", "MeshAgent traffic"), ("agentupdate", "MeshAgent update"),
+                     ("cert", "Server Certificate"), ("db", "Server Database"),
+                     ("email", "Email/SMS/Push Traffic")]),
+    ("Web Server", [("web", "Web Server"), ("webrequest", "Web Server Requests"),
+                    ("relay", "Web Socket Relay"), ("httpheaders", "Web Server HTTP Headers"),
+                    ("authlog", "User Authentication Log")]),
+    ("Intel\u00ae AMT", [("amt", "Intel AMT manager"), ("webrelay", "Connection Relay"),
+                         ("mps", "CIRA Server"), ("mpscmd", "CIRA Server Commands")]),
+]
+TRACE_NAMES = {k: n for _g, items in TRACE_GROUPS for k, n in items}
+TRACE_LIMITS = [100, 250, 500, 1000]
+
+
+class StatsRecorder:
+    """Records the server's live 5-minute stats samples (event 'servertimelinestats', sent to the
+    whole session, no page needs to be open) from sign-in, and keeps their CPU load on disk.
+
+    Why: MeshCentral's MongoDB / NeDB backends drop `cpu` when returning the stats history, so a
+    client only ever has the CPU samples it received live. The web UI shows those while its page
+    is open; the app records them for as long as it runs and remembers them across restarts, so
+    its CPU chart shows the same points as the web UI (and more over time)."""
+    KEEP_S = 30 * 86400
+
+    def __init__(self, ctrl, data_dir):
+        host = "".join(c if c.isalnum() or c in "-." else "_" for c in ctrl.server.host)
+        self.path = os.path.join(data_dir, f"serverstats-{host}.json")
+        self.samples = []            # [{"time": iso, "cpu": [..], "first": bool}]
+        self._load()
+        ctrl.on("event", self._on_event)
+
+    def _load(self):
+        try:
+            with open(self.path) as f:
+                data = json.load(f)
+            self.samples = [s for s in data if isinstance(s, dict) and _epoch(s.get("time"))]
+        except (OSError, ValueError):
+            self.samples = []
+
+    def _save(self):
+        cutoff = time.time() - self.KEEP_S
+        self.samples = [s for s in self.samples if (_epoch(s["time"]) or 0) >= cutoff]
+        try:
+            os.makedirs(os.path.dirname(self.path), exist_ok=True)
+            tmp = self.path + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(self.samples, f)
+            os.replace(tmp, self.path)
+        except OSError:
+            pass
+
+    def _on_event(self, msg):
+        ev = msg.get("event") or {}
+        d = ev.get("data")
+        if ev.get("action") != "servertimelinestats" or not isinstance(d, dict) or _cpu1(d.get("cpu")) is None:
+            return
+        rec = {"time": d.get("time"), "cpu": d.get("cpu"), "first": bool(d.get("first"))}
+        if d.get("s") is not None:
+            rec["s"] = d["s"]
+        key = round(_epoch(rec["time"]) or 0)
+        if any(round(_epoch(s["time"]) or 0) == key for s in self.samples[-20:]):
+            return
+        self.samples.append(rec)
+        self._save()
+
+    def merge_into(self, history):
+        """History samples + recorded CPU: fill `cpu` where the history lacks it (same timestamp)
+        and add recorded samples the history does not contain."""
+        by_time = {}
+        merged = []
+        for s in history:
+            t = _epoch(s.get("time"))
+            if t is None:
+                continue
+            s = dict(s)
+            by_time[round(t)] = s
+            merged.append(s)
+        for r in self.samples:
+            k = round(_epoch(r["time"]) or 0)
+            h = by_time.get(k)
+            if h is None:
+                merged.append(dict(r))
+            elif _cpu1(h.get("cpu")) is None:
+                h["cpu"] = r["cpu"]
+        return merged
+
+
 class MyServerPanel(Gtk.Box):
     def __init__(self, app, node=None):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -470,10 +561,7 @@ class MyServerPanel(Gtk.Box):
         self._handlers = []
         self._web = None
         self.full_admin = rights.site_rights(self.ctrl) == rights.FULL
-        # CPU history: MeshCentral's MongoDB/NeDB backends drop `cpu` when returning the stats
-        # history (find(..., {cpu: 0})), so we also collect the live 10-second serverstats load
-        # while this page exists and merge it into the CPU chart.
-        self._cpu_live = []
+
         self.can_backup = rights.has_site(self.ctrl, rights.SITE_BACKUP)
         self.can_restore = rights.has_site(self.ctrl, rights.SITE_RESTORE)
         self.can_update = rights.has_site(self.ctrl, rights.SITE_UPDATE)
@@ -485,6 +573,7 @@ class MyServerPanel(Gtk.Box):
         self.stack.add_titled(ui.scrolled(self._build_general()), "general", "General")
         self.stack.add_titled(self._build_stats(), "stats", "Stats")
         self.stack.add_titled(self._build_console(), "console", "Console")
+        self.stack.add_titled(self._build_trace(), "trace", "Trace")
         self.stack.connect("notify::visible-child-name", lambda *_: self._on_page())
         self.show_all()
 
@@ -592,11 +681,6 @@ class MyServerPanel(Gtk.Box):
 
     def _on_stats(self, msg):
         cpu = msg.get("cpuavg") or []
-        if cpu and isinstance(cpu[0], (int, float)):
-            self._cpu_live.append((time.time(), float(cpu[0])))
-            del self._cpu_live[:-20000]
-            if self.stack.get_visible_child_name() == "stats" and CHART_KINDS[self.chart_kind.get_active()][0] == "cpu":
-                self._render_chart()
         if cpu:
             self.cpu_gauge.set_fraction(cpu[0])
             self.cpu_label.set_markup("<b>" + ", ".join(f"{c:.2f}".rstrip("0").rstrip(".") for c in cpu) + "</b>")
@@ -673,7 +757,7 @@ class MyServerPanel(Gtk.Box):
         ev = msg.get("event") or {}
         if ev.get("action") == "servertimelinestats" and isinstance(ev.get("data"), dict):
             self._timeline.append(ev["data"])
-            self._render_chart()
+            GLib.idle_add(lambda: (self._render_chart(), False)[1])
 
     def _render_chart(self):
         kind = CHART_KINDS[self.chart_kind.get_active()][0]
@@ -681,12 +765,13 @@ class MyServerPanel(Gtk.Box):
         series = build_series(self._timeline, kind)
         cpu_note = ""
         if kind == "cpu":
-            hist = [(t, v) for t, v in (series[0][2] if series else []) if v is not None]
-            pts = sorted((series[0][2] if series else []) + self._cpu_live, key=lambda p: p[0])
-            series = [("CPU", (158, 151, 16), pts)]
-            if not hist:
-                cpu_note = (" · this server's database does not keep CPU history, showing live values "
-                            "since My Server was opened (every 10 s)")
+            hist_has_cpu = any(_cpu1(s.get("cpu")) is not None for s in self._timeline)
+            rec = getattr(self.app, "stats_recorder", None)
+            if rec is not None:
+                series = build_series(rec.merge_into(self._timeline), kind)
+            if not hist_has_cpu:
+                cpu_note = (" · CPU is not kept in this server's history (NeDB/MongoDB), showing the "
+                            "5-minute samples this app recorded while running, like the web UI")
         # The window starts at now - range (client clock, like the web UI's x.min) but ENDS at the
         # newest sample if that is later: a server clock slightly ahead of ours must not hide the
         # most recent samples (e.g. the only CPU samples right after a server upgrade).
@@ -697,8 +782,7 @@ class MyServerPanel(Gtk.Box):
         t0 = now - self._hours() * 3600
         n = sum(1 for s in self._timeline if (_epoch(s.get("time")) or 0) >= t0)
         with_data = len({t for _n, _c, pts in series for t, v in pts if v is not None and t >= t0})
-        if kind == "cpu":
-            with_data = min(with_data, n)       # live 10 s readings are not server samples
+
         info = f"{n} sample{'s' if n != 1 else ''}"
         if with_data < n:
             what = {"cpu": "CPU", "in": "traffic", "out": "traffic"}.get(kind, "chart")
@@ -786,6 +870,175 @@ class MyServerPanel(Gtk.Box):
         if self.console_view is not None and msg.get("value") is not None:
             self._console_append(str(msg["value"]).rstrip("\n") + "\n")
 
+    # ---- Trace ---------------------------------------------------------------------
+    # {action:'traceinfo', traceSources:[...]} sets the server-wide trace sources (full admins only;
+    # [] = off). Every full-admin session then receives {action:'trace', source, args, time}. The
+    # current sources arrive at sign-in and as event {action:'traceinfo'} whenever anyone changes them.
+    def _build_trace(self):
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=16, margin_top=4, spacing=8)
+        title = Gtk.Label(xalign=0)
+        title.set_markup("<span size='x-large' weight='bold'>My Server Tracing</span>")
+        box.pack_start(title, False, False, 0)
+        self._trace = []                                  # newest first
+        if not self.full_admin:
+            l = Gtk.Label(label="Server tracing is only available to full administrators.")
+            l.get_style_context().add_class("dim-label")
+            box.pack_start(l, True, True, 0)
+            self.trace_tree = None
+            return box
+        bar = Gtk.Box(spacing=8)
+        b = Gtk.Button(label="Tracing\u2026", image=Gtk.Image.new_from_icon_name("system-search-symbolic",
+                       Gtk.IconSize.BUTTON), always_show_image=True)
+        b.set_tooltip_text("Choose which server components to trace")
+        b.connect("clicked", lambda *_: self._trace_dialog())
+        bar.pack_start(b, False, False, 0)
+        self.trace_status = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
+        bar.pack_start(self.trace_status, True, True, 0)
+        dl = Gtk.Button.new_from_icon_name("document-save-symbolic", Gtk.IconSize.BUTTON)
+        dl.set_tooltip_text("Download trace (.csv)")
+        dl.connect("clicked", lambda *_: self._trace_download())
+        clear = Gtk.Button(label="Clear")
+        clear.connect("clicked", lambda *_: self._trace_clear())
+        self.trace_limit = Gtk.ComboBoxText()
+        for n in TRACE_LIMITS:
+            self.trace_limit.append_text(f"Last {n}")
+        self.trace_limit.set_active(0)
+        self.trace_limit.connect("changed", lambda *_: self._trace_trim())
+        for w in (dl, clear, self.trace_limit, Gtk.Label(label="Show")):
+            bar.pack_end(w, False, False, 0)
+        box.pack_start(bar, False, False, 0)
+        # time, SOURCE, message, index into self._trace
+        self.trace_store = Gtk.ListStore(str, str, str, int)   # column 3 = stable event id
+        self._trace_seq = 0
+        self.trace_tree = Gtk.TreeView(model=self.trace_store, enable_search=True, search_column=2)
+        for i, (t, expand) in enumerate((("Time", False), ("Source", False), ("Message", True))):
+            self.trace_tree.append_column(ui.text_column(t, i, expand))
+        ui.row_tooltip(self.trace_tree, 2)
+        self.trace_tree.connect("row-activated", lambda tv, path, _c: self._trace_show(path))
+        box.pack_start(ui.scrolled(self.trace_tree), True, True, 0)
+        self.trace_hint = Gtk.Label(xalign=0, wrap=True)
+        self.trace_hint.get_style_context().add_class("dim-label")
+        box.pack_start(self.trace_hint, False, False, 0)
+        self._trace_status(self.ctrl.tracesources)
+        return box
+
+    def _trace_status(self, sources):
+        if self.trace_tree is None:
+            return
+        sources = sources or []
+        names = [TRACE_NAMES.get(s, s) for s in sources]
+        if sources:
+            self.trace_status.set_markup("<b>Active:</b> " + GLib.markup_escape_text(", ".join(names)))
+            self.trace_hint.set_text("Tracing is server-wide: every full administrator receives these messages, "
+                                     "and it stays on until switched off (Tracing\u2026 \u2192 Delete). Double-click a "
+                                     "line for details.")
+        else:
+            self.trace_status.set_markup("<span alpha='60%'>None</span>")
+            self.trace_hint.set_text("Tracing is off. Use Tracing\u2026 to choose server components.")
+        self.trace_status.set_tooltip_text(", ".join(names) or "None")
+        self._trace_sources = list(sources)
+
+    def _on_traceinfo(self, msg):
+        self._trace_status(msg.get("traceSources"))
+
+    def _on_trace_event(self, msg):
+        ev = msg.get("event") or {}
+        if ev.get("action") == "traceinfo":
+            self._trace_status(ev.get("traceSources"))
+
+    @staticmethod
+    def _trace_text(args):
+        return ", ".join(json.dumps(a) if isinstance(a, (dict, list)) else str(a) for a in (args or []))
+
+    def _on_trace(self, msg):
+        if self.trace_tree is None:
+            return
+        self._trace_seq += 1
+        msg = dict(msg, _id=self._trace_seq)
+        self._trace.insert(0, msg)
+        t = msg.get("time")
+        ts = time.strftime("%H:%M:%S", time.localtime(t / 1000)) if isinstance(t, (int, float)) else ""
+        self.trace_store.prepend([ts, str(msg.get("source") or "").upper(),
+                                  self._trace_text(msg.get("args")).replace("\n", " "), self._trace_seq])
+        self._trace_trim()
+
+    def _trace_trim(self):
+        limit = TRACE_LIMITS[max(0, self.trace_limit.get_active())]
+        del self._trace[limit:]
+        keep = {e["_id"] for e in self._trace}
+        it = self.trace_store.get_iter_first()
+        while it is not None:
+            nxt = self.trace_store.iter_next(it)
+            if self.trace_store[it][3] not in keep:
+                self.trace_store.remove(it)
+            it = nxt
+
+    def _trace_clear(self):
+        self._trace = []
+        self.trace_store.clear()
+
+    def _trace_show(self, path):
+        eid = self.trace_tree.get_model()[path][3]          # works whatever the sort order
+        e = next((x for x in self._trace if x["_id"] == eid), None)
+        if e is None:
+            return
+        parts = [json.dumps(a, indent=2) if isinstance(a, (dict, list)) else str(a) for a in (e.get("args") or [])]
+        self._text_dialog(f"Server trace \u2014 {str(e.get('source') or '').upper()}", "\n\n".join(parts))
+
+    def _trace_dialog(self):
+        d = Gtk.Dialog(title="Server Tracing", transient_for=self.get_toplevel(), modal=True)
+        d.set_default_size(380, 520)
+        area = d.get_content_area()
+        area.set_border_width(10)
+        inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
+        checks = {}
+        for group, items in TRACE_GROUPS:
+            h = Gtk.Label(xalign=0, margin_top=8)
+            h.set_markup(f"<b>{GLib.markup_escape_text(group)}</b>")
+            inner.pack_start(h, False, False, 0)
+            inner.pack_start(Gtk.Separator(), False, False, 2)
+            for key, name in items:
+                cb = Gtk.CheckButton(label=name, active=key in self._trace_sources)
+                if key in ("httpheaders", "authlog"):
+                    cb.set_tooltip_text("May include sensitive data (headers, cookies, user names)")
+                checks[key] = cb
+                inner.pack_start(cb, False, False, 0)
+        area.pack_start(ui.scrolled(inner), True, True, 0)
+        d.add_button("Delete", 2).get_style_context().add_class("destructive-action")
+        d.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        ok = d.add_button("OK", Gtk.ResponseType.OK)
+        ok.get_style_context().add_class("suggested-action")
+        d.show_all()
+        r = d.run()
+        chosen = [k for k, cb in checks.items() if cb.get_active()]
+        d.destroy()
+        if r == Gtk.ResponseType.OK:
+            self.ctrl.send({"action": "traceinfo", "traceSources": chosen})
+        elif r == 2:
+            self.ctrl.send({"action": "traceinfo", "traceSources": []})
+
+    def _trace_download(self):
+        ch = Gtk.FileChooserNative.new("Save server trace", self.get_toplevel(), Gtk.FileChooserAction.SAVE,
+                                       "_Save", "_Cancel")
+        ch.set_current_name("servertrace.csv")
+        ch.set_do_overwrite_confirmation(True)
+        if ch.run() != Gtk.ResponseType.ACCEPT:
+            ch.destroy()
+            return
+        dest = ch.get_filename()
+        ch.destroy()
+        q = lambda v: '"' + str(v).replace('"', '""') + '"'
+        lines = ["time,source,message"]
+        for e in reversed(self._trace):                   # oldest first in the file
+            t = e.get("time")
+            ts = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(t / 1000)) if isinstance(t, (int, float)) else ""
+            lines.append(",".join((q(ts), q(e.get("source") or ""), q(self._trace_text(e.get("args"))))))
+        try:
+            with open(dest, "w") as f:
+                f.write("\r\n".join(lines) + "\r\n")
+        except OSError as ex:
+            ui.message(self.get_toplevel(), "Cannot save file", str(ex), Gtk.MessageType.ERROR)
+
     # ---- lifecycle ----------------------------------------------------------------
     def on_shown(self):
         if self._started:
@@ -794,7 +1047,8 @@ class MyServerPanel(Gtk.Box):
         self._render_warnings(self.ctrl.serverwarnings)
         for action, cb in (("serverstats", self._on_stats), ("servertimelinestats", self._on_timeline),
                            ("serverconsole", self._on_console), ("serverwarnings", self._on_warnings),
-                           ("event", self._on_live_sample)):
+                           ("event", self._on_live_sample), ("trace", self._on_trace),
+                           ("traceinfo", self._on_traceinfo), ("event", self._on_trace_event)):
             self.ctrl.on(action, cb)
             self._handlers.append((action, cb))
         self.ctrl.send({"action": "serverstats", "interval": STATS_INTERVAL_MS})

@@ -75,6 +75,7 @@ class ControlConnection:
         self.serverinfo = {}
         self.userinfo = {}
         self.serverwarnings = []     # sent ONCE right after sign-in (before any page exists)
+        self.tracesources = None     # server trace sources (sent at sign-in to full admins; list or None)
         self.on_open = None
         self.on_close = None         # fn(reason_dict_or_None)
         self._close_reason = None
@@ -131,6 +132,10 @@ class ControlConnection:
             self.serverinfo = msg.get("serverinfo", {})
         elif action == "userinfo":
             self.userinfo = msg.get("userinfo", {})
+        elif action == "traceinfo":
+            self.tracesources = msg.get("traceSources")
+        elif action == "event" and (msg.get("event") or {}).get("action") == "traceinfo":
+            self.tracesources = msg["event"].get("traceSources")
         elif action == "serverwarnings":
             self.serverwarnings = msg.get("warnings") or []
         elif action == "authcookie":

@@ -66,6 +66,10 @@ class App(Gtk.Application):
     def on_login(self, ctrl):
         self.ctrl = ctrl
         self.login_win = None
+        # Record the server's live 5-minute stats samples from sign-in (CPU history, see
+        # server_panel.StatsRecorder), independent of whether My Server is ever opened.
+        from .server_panel import StatsRecorder
+        self.stats_recorder = StatsRecorder(ctrl, DATA_DIR)
         self.main_win = MainWindow(self, ctrl)
         # Panels resolve device-group names via app.meshes; share the main window's dict.
         self.meshes = self.main_win.meshes
