@@ -594,6 +594,20 @@ class DesktopPanel(Gtk.Box):
     # dropped SILENTLY by the server when domain ClipboardGet/ClipboardSet is false, and
     # the agent only answers getclip when the remote clipboard has text, hence timeouts.
     _CLIP_TIMEOUT_MS = 6000
+    _CLIP_FAST_MS = 2500           # getclip gets this long before the eval fallback starts
+
+    # Fallback read via the agent console (admin "eval"). The agent's own getclip
+    # swallows every read error (no reply at all), which is what happens on a Linux
+    # agent running as a root service. Here the same dispatchRead() runs, but its result
+    # OR its error is parked on the agent and fetched by a second eval. eval replies go
+    # only to OUR session (console output without a sessionid would be broadcast to
+    # every admin's console, so the clipboard text is never printed that way).
+    _CLIP_EVAL_START = ('eval "(function(){var A=require(\'MeshAgent\');A.__mcdc=null;try{'
+                        'require(\'clipboard\').dispatchRead().then(function(s){A.__mcdc={ok:(s==null?'
+                        '\'\':\'\'+s)};},function(e){A.__mcdc={err:\'\'+e};});}catch(e){A.__mcdc='
+                        '{err:\'\'+e};}return \'MCDCLIP0:started\';})()"')
+    _CLIP_EVAL_FETCH = ('eval "(function(){var A=require(\'MeshAgent\');var r=A.__mcdc;'
+                        'if(r){A.__mcdc=null;}return \'MCDCLIP1:\'+JSON.stringify(r);})()"')
 
     # The web page must NOT touch the clipboard: if the server enables auto-clipboard,
     # the viewer polls readText() every second and would push stale text to the remote.
@@ -633,24 +647,84 @@ class DesktopPanel(Gtk.Box):
 
     def _clip_from_remote(self):
         self._clip_listen()
+        self._clip_read_gen = getattr(self, "_clip_read_gen", 0) + 1
+        self._clip_read_done = False
         self.app.ctrl.send_node_msg(self.node["_id"], "getclip", tag=2)
         self._set_status("Reading remote clipboard…")
         if self._clip_get_timer:
             GLib.source_remove(self._clip_get_timer)
-        self._clip_get_timer = GLib.timeout_add(self._CLIP_TIMEOUT_MS, self._clip_get_timeout)
+        self._clip_get_timer = GLib.timeout_add(self._CLIP_FAST_MS, self._clip_eval_start,
+                                                self._clip_read_gen)
+
+    def _clip_got_text(self, data):
+        self._clip_read_done = True
+        if self._clip_get_timer:
+            GLib.source_remove(self._clip_get_timer)
+            self._clip_get_timer = None
+        if data:
+            Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(data, -1)
+            self._set_status(f"Remote clipboard copied here ({len(data)} chars)")
+        else:
+            self._set_status("")
+            self._note("The remote clipboard is empty (or holds no text). On the remote computer, "
+                       "copy with Ctrl+C (Ctrl+Shift+C in a terminal), just selecting text is not enough.")
+
+    def _clip_eval_start(self, gen):
+        self._clip_get_timer = None
+        if gen != self._clip_read_gen or self._clip_read_done or self._closing:
+            return False
+        self.app.ctrl.send_node_msg(self.node["_id"], "console", value=self._CLIP_EVAL_START)
+        self._clip_fetch_tries = 0
+        self._clip_get_timer = GLib.timeout_add(500, self._clip_eval_fetch, gen)
+        return False
+
+    def _clip_eval_fetch(self, gen):
+        self._clip_get_timer = None
+        if gen != self._clip_read_gen or self._clip_read_done or self._closing:
+            return False
+        self._clip_fetch_tries += 1
+        if self._clip_fetch_tries > 14:                 # ~7 s: agent never finished the read
+            self._clip_read_done = True
+            self._clip_get_timeout()
+            return False
+        self.app.ctrl.send_node_msg(self.node["_id"], "console", value=self._CLIP_EVAL_FETCH)
+        self._clip_get_timer = GLib.timeout_add(500, self._clip_eval_fetch, gen)
+        return False
+
+    def _on_clip_eval_reply(self, value):
+        # value is the JSON-encoded eval result, e.g. "\"MCDCLIP1:{\\\"ok\\\":\\\"text\\\"}\""
+        try:
+            v = json.loads(value)
+        except (TypeError, ValueError):
+            v = value
+        if not isinstance(v, str) or not v.startswith("MCDCLIP1:") or self._clip_read_done:
+            return
+        try:
+            r = json.loads(v[len("MCDCLIP1:"):])
+        except ValueError:
+            return
+        if r is None:
+            return                                      # not finished yet; keep polling
+        if "ok" in r:
+            self._clip_got_text(r["ok"])
+        else:
+            self._clip_read_done = True
+            if self._clip_get_timer:
+                GLib.source_remove(self._clip_get_timer)
+                self._clip_get_timer = None
+            self._set_status("")
+            self._note("The remote agent could not read its clipboard: " + str(r.get("err")))
 
     def _on_clip_msg(self, msg):
         if self._closing or msg.get("nodeid") != self.node["_id"]:
             return
         t = msg.get("type")
         if t == "getclip" and msg.get("tag") == 2:
-            if self._clip_get_timer:
-                GLib.source_remove(self._clip_get_timer)
-                self._clip_get_timer = None
             data = msg.get("data")
-            if isinstance(data, str) and data:
-                Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(data, -1)
-                self._set_status(f"Remote clipboard copied here ({len(data)} chars)")
+            if isinstance(data, str) and data and not self._clip_read_done:
+                self._clip_got_text(data)
+        elif t == "console" and "MCDCLIP" in str(msg.get("value")):
+            self._on_clip_eval_reply(msg.get("value"))
         elif t == "setclip":
             if self._clip_set_timer:
                 GLib.source_remove(self._clip_set_timer)
@@ -660,9 +734,9 @@ class DesktopPanel(Gtk.Box):
     def _clip_get_timeout(self):
         self._clip_get_timer = None
         self._set_status("")
-        self._note("No clipboard came back from the remote computer. Either its clipboard is empty "
-                   "(text only), clipboard reading is disabled on the server (ClipboardGet), or the "
-                   "agent cannot reach the logged-in desktop's clipboard.")
+        self._note("The remote agent did not return its clipboard (it started the read but never "
+                   "finished, and reported no error). Clipboard reading may be disabled on the server "
+                   "(ClipboardGet), or your account lacks agent-console rights for the fallback.")
         return False
 
     def _clip_set_timeout(self):

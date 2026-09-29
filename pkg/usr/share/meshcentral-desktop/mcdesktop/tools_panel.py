@@ -282,5 +282,7 @@ class ConsolePanel(_MsgPanel):
         if message.get("type") != "console":
             return
         val = message.get("value")
+        if val and "MCDCLIP" in str(val):
+            return            # the desktop panel's private clipboard-fallback traffic
         if val:
             self._append(str(val) + "\n")
