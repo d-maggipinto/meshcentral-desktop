@@ -31,6 +31,47 @@ STATE_NAMES = [("UserAccounts", "User Accounts"), ("DeviceGroups", "Device Group
                ("UsersSessions", "Users Sessions"), ("RelaySessions", "Relay Sessions"),
                ("RelayCount", "Relay Count"), ("ConnectedIntelAMT", "Connected Intel® AMT"),
                ("ConnectedIntelAMTCira", "Connected Intel® AMT CIRA"), ("RelayErrors", "Relay Errors")]
+# Server warning texts by id (same table as the web UI; {0}, {1} = args)
+WARNINGS = {
+    2: "Missing WebDAV parameters.", 3: "Unrecognized configuration option \"{0}\".",
+    4: "WebSocket compression is disabled, this feature is broken in NodeJS v11.11 to v12.15 and v13.2",
+    5: "Unable to load Intel AMT TLS root certificate for default domain.",
+    6: "Unable to load Intel AMT TLS root certificate for domain {0}.",
+    7: "CIRA local FQDN's ignored when server in LAN-only or WAN-only mode.",
+    8: "Can't have more than 4 CIRA local FQDN's. Ignoring value.",
+    9: "Agent hash checking is being skipped, this is unsafe.", 10: "Missing Let's Encrypt email address.",
+    11: "Invalid Let's Encrypt host names.", 12: "Invalid Let's Encrypt names, can't contain a *.",
+    13: "Unable to setup Let's Encrypt module.", 14: "Invalid Let's Encrypt names, unable to resolve: {0}",
+    15: "Invalid Let's Encrypt email address, unable to resolve: {0}",
+    16: "Unable to load CloudFlare trusted proxy IPv6 address list.",
+    17: "SendGrid server has limited use in LAN mode.", 18: "SMTP server has limited use in LAN mode.",
+    19: "SMS gateway has limited use in LAN mode.", 20: "Invalid \"LoginCookieEncryptionKey\" in config.json.",
+    21: "Backup path can't be set within meshcentral-data folder, backup settings ignored.",
+    22: "Failed to sign agent {0}: {1}", 23: "Unable to load agent icon file: {0}.",
+    24: "Unable to load agent logo file: {0}.", 25: "This NodeJS version does not support OpenID.",
+    26: "This NodeJS version does not support Discord.js.",
+    27: "Firebase now requires a service account JSON file, Firebase disabled.",
+}
+# Short explanations for warnings admins commonly ask about
+WARNING_HINTS = {
+    22: "MeshCentral re-signs its Windows agent installers and timestamps the signature through an online "
+        "timestamp server. This usually means the server could not reach it (outbound HTTP, DNS or IPv6). "
+        "Linux agents and existing agents are not affected.",
+}
+
+
+def warning_text(w):
+    if isinstance(w, str):
+        return w, None
+    tmpl = WARNINGS.get(w.get("id"))
+    if tmpl is None:
+        return str(w.get("msg") or w), None
+    args = [str(a) for a in (w.get("args") or [])]
+    for i, a in enumerate(args):
+        tmpl = tmpl.replace("{%d}" % i, a)
+    return tmpl, WARNING_HINTS.get(w.get("id"))
+
+
 RANGES = [("Last hour", 1), ("Last 6 hours", 6), ("Last 24 hours", 24), ("Last 7 days", 168),
           ("Last 30 days", 720)]
 CHARTS = {
@@ -256,7 +297,34 @@ class MyServerPanel(Gtk.Box):
         self.updated = Gtk.Label(xalign=0, margin_top=10)
         self.updated.get_style_context().add_class("dim-label")
         box.pack_start(self.updated, False, False, 0)
+
+        # Server warnings (sent once at sign-in; cached by ControlConnection)
+        self.warn_head = _section("Server warnings")
+        self.warn_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin_start=8)
+        for w in (self.warn_head, self.warn_box):
+            w.set_no_show_all(True)
+            box.pack_start(w, False, False, 0)
         return box
+
+    def _render_warnings(self, warnings):
+        for c in self.warn_box.get_children():
+            self.warn_box.remove(c)
+        for w in warnings or []:
+            text, hint = warning_text(w)
+            l = Gtk.Label(xalign=0, wrap=True, selectable=True)
+            l.set_markup("<span foreground='#e01b24'><b>WARNING: " + GLib.markup_escape_text(text) + "</b></span>")
+            self.warn_box.pack_start(l, False, False, 0)
+            if hint:
+                h = Gtk.Label(label=hint, xalign=0, wrap=True, max_width_chars=110)
+                h.get_style_context().add_class("dim-label")
+                self.warn_box.pack_start(h, False, False, 0)
+        show = bool(warnings)
+        self.warn_head.set_visible(show)
+        self.warn_box.set_visible(show)
+        self.warn_box.show_all()
+
+    def _on_warnings(self, msg):
+        self._render_warnings(msg.get("warnings") or [])
 
     def _tile(self, name, value, alert=False):
         f = Gtk.Frame()
@@ -405,8 +473,9 @@ class MyServerPanel(Gtk.Box):
         if self._started:
             return
         self._started = True
+        self._render_warnings(self.ctrl.serverwarnings)
         for action, cb in (("serverstats", self._on_stats), ("servertimelinestats", self._on_timeline),
-                           ("serverconsole", self._on_console)):
+                           ("serverconsole", self._on_console), ("serverwarnings", self._on_warnings)):
             self.ctrl.on(action, cb)
             self._handlers.append((action, cb))
         self.ctrl.send({"action": "serverstats", "interval": STATS_INTERVAL_MS})
@@ -495,34 +564,59 @@ class MyServerPanel(Gtk.Box):
         self.ctrl.send({"action": "serverconfig"})
 
     def check_version(self):
-        def reply(msg):
-            if msg.get("result") != "OK":
-                ui.message(self.get_toplevel(), "Cannot check the server version", str(msg.get("result")))
-                return
-            tags = msg.get("tags") or {}
-            cur, latest, stable = tags.get("current"), tags.get("latest"), tags.get("stable")
-            d = Gtk.MessageDialog(transient_for=self.get_toplevel(), modal=True,
-                                  message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.NONE,
-                                  text=f"MeshCentral {cur}")
-            d.format_secondary_text(f"Latest version: {latest}\nStable version: {stable}")
-            offers = []
-            if latest and latest != cur:
-                offers.append((f"Update to {latest}", latest))
-            if stable and stable != cur and stable != latest:
-                offers.append((f"Install {stable} (stable)", stable))
-            for i, (label, _v) in enumerate(offers):
-                d.add_button(label, 100 + i)
-            d.add_button("Close", Gtk.ResponseType.CLOSE)
-            r = d.run()
-            d.destroy()
-            if r >= 100:
-                version = offers[r - 100][1]
-                if ui.confirm(self.get_toplevel(), f"Install MeshCentral {version}?",
-                              "The server downloads the new version and RESTARTS. All users and agents are "
-                              "disconnected for a short time.", "Install and restart", destructive=True):
-                    self.ctrl.send({"action": "serverupdate", "version": version})
-                    self.app.notify("Server update started", f"Installing MeshCentral {version}")
-        self.ctrl.send({"action": "serverversion"}, reply)
+        # Listen for the ACTION, not the responseid: the server answers {action:'serverversion'}
+        # with {action:'serverversion', tags} without needing an echo, so this works on older
+        # releases too. The server asks the npm registry, which can take a while.
+        self._progress_show("Checking the server version… (the server asks the npm registry)", 0, 0)
+        pulse = GLib.timeout_add(200, lambda: (self.progress.pulse(), True)[1])
+
+        def stop_pulse():
+            GLib.source_remove(pulse)
+            self.progress.hide()
+
+        def timeout():
+            stop_pulse()
+            ui.message(self.get_toplevel(), "No answer from the server",
+                       "The server did not report its version within 30 seconds. It may be unable to reach "
+                       "the npm registry, or version checks are disabled for this domain (myserver.upgrade).")
+
+        def got(msg):
+            stop_pulse()
+            self._version_dialog(msg)
+        self._once("serverversion", got, timeout_s=30, on_timeout=timeout)
+        self.ctrl.send({"action": "serverversion"})
+
+    def _version_dialog(self, msg):
+        if msg.get("result") not in (None, "OK"):
+            ui.message(self.get_toplevel(), "Cannot check the server version", str(msg.get("result")))
+            return
+        tags = msg.get("tags") or {}
+        cur, latest, stable = tags.get("current"), tags.get("latest"), tags.get("stable")
+        if not cur:
+            ui.message(self.get_toplevel(), "Cannot check the server version",
+                       "The server could not determine the available versions (npm registry unreachable?).")
+            return
+        d = Gtk.MessageDialog(transient_for=self.get_toplevel(), modal=True,
+                              message_type=Gtk.MessageType.INFO, buttons=Gtk.ButtonsType.NONE,
+                              text=f"MeshCentral {cur}")
+        d.format_secondary_text(f"Current version: {cur}\nStable version: {stable}\nLatest version: {latest}")
+        offers = []
+        if latest and latest != cur:
+            offers.append((f"Update to {latest}", latest))
+        if stable and stable != cur and stable != latest:
+            offers.append((f"Install {stable} (stable)", stable))
+        for i, (label, _v) in enumerate(offers):
+            d.add_button(label, 100 + i)
+        d.add_button("Close", Gtk.ResponseType.CLOSE)
+        r = d.run()
+        d.destroy()
+        if r >= 100:
+            version = offers[r - 100][1]
+            if ui.confirm(self.get_toplevel(), f"Install MeshCentral {version}?",
+                          "The server downloads the new version and RESTARTS. All users and agents are "
+                          "disconnected for a short time.", "Install and restart", destructive=True):
+                self.ctrl.send({"action": "serverupdate", "version": version})
+                self.app.notify("Server update started", f"Installing MeshCentral {version}")
 
     def _progress_show(self, text, done, total):
         self.progress.show()

@@ -74,6 +74,7 @@ class ControlConnection:
         self.pending = {}            # responseid -> callback
         self.serverinfo = {}
         self.userinfo = {}
+        self.serverwarnings = []     # sent ONCE right after sign-in (before any page exists)
         self.on_open = None
         self.on_close = None         # fn(reason_dict_or_None)
         self._close_reason = None
@@ -130,6 +131,8 @@ class ControlConnection:
             self.serverinfo = msg.get("serverinfo", {})
         elif action == "userinfo":
             self.userinfo = msg.get("userinfo", {})
+        elif action == "serverwarnings":
+            self.serverwarnings = msg.get("warnings") or []
         elif action == "authcookie":
             waiters, self._cookie_waiters = self._cookie_waiters, []
             for w in waiters:
