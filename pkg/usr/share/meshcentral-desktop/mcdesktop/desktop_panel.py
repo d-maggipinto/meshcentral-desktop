@@ -22,8 +22,19 @@ from gi.repository import Gtk, Gdk, WebKit2, GLib
 
 # Native combo choices -> viewer values
 _QUALITY = [("Low", 30), ("Medium", 50), ("High", 80)]
-_SPEED = [("Fast", 100), ("Medium", 300), ("Slow", 700)]          # ms between frames
+_SPEED = [("Fastest", 50), ("Fast", 100), ("Medium", 300), ("Slow", 700)]   # ms between frames
 _ENCODING = [("WEBP", 4), ("JPEG", 1), ("PNG", 2)]                # SendCompressionLevel type
+# Agent-side scaling (1024 = 100%). "Auto" streams at the size we actually display, so a
+# big / multi-monitor remote isn't sent at full resolution just to be shrunk locally.
+_SCALE = [("Auto", 0), ("100%", 1024), ("75%", 768), ("50%", 512)]
+_TYPE_MAX = 20000          # chars; typing is one key message pair per char
+
+_COVER_CSS = b"""
+.mcd-desk-cover { background-color: #16181c; }
+.mcd-desk-cover label { color: #d8dade; }
+.mcd-desk-cover .mcd-cover-title { font-size: 15pt; font-weight: bold; }
+"""
+_cover_css_installed = False
 
 
 class DesktopPanel(Gtk.Box):
@@ -41,6 +52,10 @@ class DesktopPanel(Gtk.Box):
         self._clip_handler = None
         self._clip_get_timer = None
         self._clip_set_timer = None
+        self._connect_attempts = 0
+        self._reveal_timer = None
+        self._displays_sig = None
+        self._display_updating = False
 
         # --- toolbar row 1: session + view ---
         self._toolbar = bar = Gtk.Box(spacing=6, margin=6)
@@ -64,10 +79,15 @@ class DesktopPanel(Gtk.Box):
         copyr = Gtk.Button.new_from_icon_name("edit-copy-symbolic", Gtk.IconSize.BUTTON)
         copyr.set_tooltip_text("Copy the remote clipboard to this computer")
         copyr.connect("clicked", lambda *_: self._clip_from_remote())
+        typeb = Gtk.Button.new_from_icon_name("input-keyboard-symbolic", Gtk.IconSize.BUTTON)
+        typeb.set_tooltip_text("Type this computer's clipboard text into the remote computer "
+                               "(works even when clipboard sharing does not)")
+        typeb.connect("clicked", lambda *_: self._type_clipboard())
         clip.add(paste)
+        clip.add(typeb)
         clip.add(copyr)
         bar.pack_start(clip, False, False, 0)
-        self._ctrl_widgets += [paste, copyr]
+        self._ctrl_widgets += [paste, typeb, copyr]
 
         full = Gtk.Button.new_from_icon_name("view-fullscreen-symbolic", Gtk.IconSize.BUTTON)
         full.set_tooltip_text("Fullscreen")
@@ -86,13 +106,24 @@ class DesktopPanel(Gtk.Box):
         # --- toolbar row 2: image quality controls ---
         self._qbar = qbar = Gtk.Box(spacing=6, margin_start=6, margin_end=6, margin_bottom=4)
         self.quality = self._combo("Quality", _QUALITY, 1, qbar)
-        self.speed = self._combo("Speed", _SPEED, 0, qbar)
+        self.speed = self._combo("Speed", _SPEED, 1, qbar)
         # Default to JPEG: WebKitGTK's WebP tile decoding can leave green/torn-tile
         # artifacts on the canvas. JPEG renders cleanly. (index 1 = JPEG)
         self.encoding = self._combo("Encoding", _ENCODING, 1, qbar)
-        for c in (self.quality, self.speed, self.encoding):
-            c.connect("changed", lambda *_: self._apply_compression())
+        self.scale = self._combo("Scale", _SCALE, 0, qbar)
+        for c in (self.quality, self.speed, self.encoding, self.scale):
+            c.connect("changed", lambda *_: self._apply_compression(force=True))
             self._ctrl_widgets.append(c)
+        # Display picker: only populated/shown when the agent reports >1 display
+        # (SetDisplay on a number the agent didn't list breaks the stream).
+        self._display_lbl = Gtk.Label(label="Display:")
+        self.display = Gtk.ComboBoxText()
+        self._display_ids = []
+        self.display.connect("changed", self._on_display_changed)
+        qbar.pack_start(self._display_lbl, False, False, 0)
+        qbar.pack_start(self.display, False, False, 0)
+        for w in (self._display_lbl, self.display):
+            w.set_no_show_all(True)
         self.pack_start(qbar, False, False, 0)
 
         self.info = Gtk.InfoBar(revealed=False, show_close_button=True)
@@ -110,9 +141,39 @@ class DesktopPanel(Gtk.Box):
         self.view.connect("load-changed", self._on_load)
         self.view.connect("size-allocate", self._on_view_resize)
         self._resize_timer = None
-        self.pack_start(self.view, True, True, 0)
+
+        # Native cover over the WebView: hides the web login page, SPA routing and the
+        # viewer's own "connecting" UI, so the user only ever sees the remote screen.
+        global _cover_css_installed
+        if not _cover_css_installed:
+            prov = Gtk.CssProvider()
+            prov.load_from_data(_COVER_CSS)
+            Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov,
+                                                     Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+            _cover_css_installed = True
+        self._cover = Gtk.EventBox()
+        self._cover.get_style_context().add_class("mcd-desk-cover")
+        cbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14,
+                       halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        self._cover_spinner = Gtk.Spinner()
+        self._cover_spinner.set_size_request(36, 36)
+        title = Gtk.Label(label=node.get("name", "Remote desktop"))
+        title.get_style_context().add_class("mcd-cover-title")
+        self._cover_label = Gtk.Label(wrap=True, justify=Gtk.Justification.CENTER, max_width_chars=60)
+        self._cover_btn = Gtk.Button(label="Connect", halign=Gtk.Align.CENTER)
+        self._cover_btn.get_style_context().add_class("suggested-action")
+        self._cover_btn.connect("clicked", lambda *_: self._cover_action())
+        self._cover_btn.set_no_show_all(True)
+        for w in (self._cover_spinner, title, self._cover_label, self._cover_btn):
+            cbox.pack_start(w, False, False, 0)
+        self._cover.add(cbox)
+        overlay = Gtk.Overlay()
+        overlay.add(self.view)
+        overlay.add_overlay(self._cover)
+        self.pack_start(overlay, True, True, 0)
         self.show_all()
         self._set_controls_enabled(False)
+        self._cover_show("Starting…")
 
     def _combo(self, label, items, active, bar):
         bar.pack_start(Gtk.Label(label=label + ":"), False, False, 0)
@@ -136,13 +197,18 @@ class DesktopPanel(Gtk.Box):
         self._connect_tried = False
         self._retry_connect = False
         self._connected = False
+        self._connect_attempts = 0
         self._set_controls_enabled(False)
+        self._cover_show("Connecting…")
         self._set_status("Opening…")
         self.view.load_uri(self.app.ctrl.server.url + "/")
 
     def teardown(self):
         self._closing = True
         self._clip_unlisten()
+        if self._reveal_timer:
+            GLib.source_remove(self._reveal_timer)
+            self._reveal_timer = None
         try:
             self.view.load_uri("about:blank")
         except Exception:
@@ -201,11 +267,38 @@ class DesktopPanel(Gtk.Box):
 
     def _set_status(self, text):
         self.status.set_text(text)
+        if self._cover.get_visible() and self._cover_spinner.get_visible() and text:
+            self._cover_label.set_text(text)
 
     def _note(self, text):
+        if not self._connected:
+            # Before the remote screen is up, errors belong on the cover itself.
+            self._cover_show(text, busy=False, button="Retry")
+            return
         self.info_label.set_text(text)
         self.info.set_message_type(Gtk.MessageType.WARNING)
         self.info.set_revealed(True)
+
+    # ---- cover -------------------------------------------------------------
+    def _cover_show(self, text, busy=True, button=None):
+        self._cover_label.set_text(text)
+        self._cover_spinner.set_visible(busy)
+        (self._cover_spinner.start if busy else self._cover_spinner.stop)()
+        self._cover_btn.set_visible(bool(button))
+        if button:
+            self._cover_btn.set_label(button)
+        self._cover.show()
+
+    def _cover_hide(self):
+        self._cover_spinner.stop()
+        self._cover.hide()
+        self.view.grab_focus()           # keyboard goes straight to the remote screen
+
+    def _cover_action(self):
+        if self._cover_btn.get_label() == "Retry":
+            self.start_flow()
+        else:
+            self._toggle_connect()
 
     def _set_controls_enabled(self, on):
         for w in self._ctrl_widgets:
@@ -239,17 +332,30 @@ class DesktopPanel(Gtk.Box):
             "(function(){try{if(typeof " + fn + "==='function'){" + fn + "();return 'ok';}"
             "return 'notready';}catch(e){return 'err';}})()")
 
-    def _apply_compression(self):
+    def _apply_compression(self, force=False):
         if not self._connected:
             return
         q = _QUALITY[self.quality.get_active()][1]
         fr = _SPEED[self.speed.get_active()][1]
         enc = _ENCODING[self.encoding.get_active()][1]
+        sc = _SCALE[self.scale.get_active()][1]
+        # Auto scale: fit the remote's NATIVE size (recorded while still at 100%) into the
+        # displayed area in device pixels; never upscale, never below 25%. Only re-sent
+        # when something actually changed, since it can make the agent resend frames.
         self._js(
-            "(function(){try{if(typeof desktop!=='undefined'&&desktop&&desktop.State===3"
-            "&&desktop.m&&desktop.m.SendCompressionLevel){"
-            f"desktop.m.SendCompressionLevel({enc},{q},1024,{fr});return 'ok';}}"
-            "return 'notready';}catch(e){return 'err';}})()")
+            "(function(){try{if(typeof desktop==='undefined'||!desktop||desktop.State!==3"
+            "||!desktop.m||!desktop.m.SendCompressionLevel)return 'notready';var m=desktop.m;"
+            "if(!window.__mcdNative&&(m.ScalingLevel||1024)==1024&&m.ScreenWidth>8&&m.ScreenHeight>8)"
+            "{window.__mcdNative=[m.ScreenWidth,m.ScreenHeight];}"
+            f"var sc={sc};if(sc===0){{var n=window.__mcdNative;if(!n)return 'nonative';"
+            "var p=document.getElementById('DeskParent');var r=window.devicePixelRatio||1;"
+            "var vw=((p&&p.clientWidth)||innerWidth)*r,vh=((p&&p.clientHeight)||innerHeight)*r;"
+            "sc=Math.max(256,Math.min(1024,Math.floor(1024*Math.min(vw/n[0],vh/n[1]))));"
+            "sc=Math.round(sc/32)*32;}"
+            f"var key=[{enc},{q},sc,{fr}].join(',');"
+            f"if(!{str(force).lower()}&&window.__mcdComp===key)return 'same';"
+            f"window.__mcdComp=key;m.SendCompressionLevel({enc},{q},sc,{fr});return 'ok:'+sc;}}"
+            "catch(e){return 'err';}})()")
 
     def _toggle_connect(self, *_):
         if self._connected:
@@ -259,9 +365,10 @@ class DesktopPanel(Gtk.Box):
             self._set_controls_enabled(False)
             self.connect_btn.set_label("Connect")
             self._set_status("Disconnected")
+            self._cover_show("Disconnected", busy=False, button="Connect")
         else:
-            self._connect_tried = False
-            self._retry_connect = False
+            self._connect_attempts = 0
+            self._cover_show("Connecting…")
             self._click_connect()
 
     def _toggle_fullscreen(self):
@@ -312,6 +419,8 @@ class DesktopPanel(Gtk.Box):
                  "window.dispatchEvent(new Event('resize'));"
                  "if(typeof deskAdjust==='function'){deskAdjust();}"
                  "return 'ok';}catch(e){return 'err';}})()")
+        if _SCALE[self.scale.get_active()][1] == 0:
+            self._apply_compression()      # display size changed -> maybe new auto scale
         return False
 
     # ---- Ctrl+Alt+Del: inject the real key sequence (works on Linux too, like NoMachine) ----
@@ -327,6 +436,81 @@ class DesktopPanel(Gtk.Box):
             "m.SendKeyMsgKC(2,46,true);m.SendKeyMsgKC(2,18,false);m.SendKeyMsgKC(2,17,false);"
             "return 'ok';}catch(e){return 'err';}})()",
             lambda r: self._set_status("Ctrl+Alt+Del sent" if r == "ok" else "Connect the desktop first"))
+
+    # ---- type clipboard as keystrokes -------------------------------------------
+    # Independent of the agent's clipboard support (fragile when the agent runs as a
+    # root service on Linux): the text goes over the KVM keyboard channel, the same
+    # path the web UI's "Type text" uses (SendKeyUnicode), with Enter/Tab as real keys.
+    def _type_clipboard(self):
+        text = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_text()
+        if not text:
+            self._note("This computer's clipboard is empty (no text to type).")
+            return
+        text = text.replace("\r\n", "\n").replace("\r", "\n")
+        if len(text) > _TYPE_MAX:
+            self._note(f"Clipboard text is too long to type ({len(text)} characters; max {_TYPE_MAX}).")
+            return
+        self._js(
+            "(function(){try{if(typeof desktop==='undefined'||!desktop||desktop.State!==3||!desktop.m)"
+            "return 'notready';var m=desktop.m,t=" + json.dumps(text) + ";"
+            "for(var i=0;i<t.length;i++){var c=t.charCodeAt(i);"
+            "if(c==10){m.SendKeyMsgKC(1,13,false);m.SendKeyMsgKC(2,13,false);}"
+            "else if(c==9){m.SendKeyMsgKC(1,9,false);m.SendKeyMsgKC(2,9,false);}"
+            "else{m.SendKeyUnicode(1,c);m.SendKeyUnicode(2,c);}}"
+            "return 'ok';}catch(e){return 'err';}})()",
+            lambda r: self._set_status(f"Typed {len(text)} characters" if r == "ok"
+                                       else "Connect the desktop first"))
+        self.view.grab_focus()
+
+    # ---- display picker (multi-monitor remotes) ---------------------------------
+    def _refresh_displays(self):
+        self._js("(function(){try{var m=desktop.m;return JSON.stringify({d:m.displays||{},"
+                 "s:m.selectedDisplay});}catch(e){return '';}})()", self._on_displays)
+
+    def _on_displays(self, raw):
+        try:
+            info = json.loads(raw) if raw else None
+        except ValueError:
+            info = None
+        if not info:
+            return
+        ids = sorted((int(k) for k in info.get("d", {})), key=lambda i: (i != 65535, i))
+        sig = (tuple(ids), info.get("s"))
+        if sig == self._displays_sig:
+            return
+        self._displays_sig = sig
+        show = len(ids) > 1
+        self._display_lbl.set_visible(show)
+        self.display.set_visible(show)
+        if not show:
+            return
+        self._display_updating = True
+        self.display.remove_all()
+        self._display_ids = ids
+        for i in ids:
+            self.display.append_text("All displays" if i == 65535 else f"Display {i}")
+        if info.get("s") in ids:
+            self.display.set_active(ids.index(info["s"]))
+        self._display_updating = False
+        # Re-apply a remembered choice for this device (only if the agent lists it).
+        want = (self.app.config.get("desktop_display") or {}).get(self.node["_id"])
+        if want in ids and want != info.get("s"):
+            self.display.set_active(ids.index(want))
+
+    def _on_display_changed(self, combo):
+        if self._display_updating or not self._connected:
+            return
+        i = combo.get_active()
+        if i < 0 or i >= len(self._display_ids):
+            return
+        num = self._display_ids[i]
+        self.app.config.setdefault("desktop_display", {})[self.node["_id"]] = num
+        self.app.save_config()
+        self._js(f"(function(){{try{{desktop.m.SetDisplay({num});window.__mcdNative=null;"
+                 "window.__mcdComp=null;return 'ok';}catch(e){return 'err';}})()")
+        # New display = new native size: re-measure at 100% then re-apply auto scale.
+        GLib.timeout_add(1500, lambda: (self._apply_compression(force=True), False)[1])
+        self.refit_soon()
 
     # ---- clipboard: native, over OUR control connection ------------------------
     # getclip/setclip are plain control-channel messages; the agent's reply is routed
@@ -452,20 +636,25 @@ class DesktopPanel(Gtk.Box):
         if not self._navigated:
             self._navigated = True
             self._set_status("Opening desktop…")
-            GLib.timeout_add(300, lambda: (self.view.load_uri(self.desk_url), False)[1])
+            self.view.load_uri(self.desk_url)
             return
-        # On the device desktop view: strip outer chrome, then click Connect.
+        # On the device desktop view: strip outer chrome, then click Connect as soon as
+        # the viewer's button exists (polled; no fixed delay).
         self._inject_style("mcd-chrome-css", self._CHROME_CSS)
-        GLib.timeout_add(2500, self._click_connect)
+        if not self._connect_tried:
+            self._connect_tried = True
+            self._set_status("Starting remote session…")
+            self._connect_attempts = 0
+            self._click_connect()
 
     def _after_login_submit(self, result):
         if result == "noform":
             self._note("Could not find the login form on this server's page.")
 
     def _click_connect(self):
-        if self._closing or self._connect_tried:
+        if self._closing:
             return False
-        self._connect_tried = True
+        self._connect_attempts += 1
         self._js(
             "(function(){try{"
             "var b=document.getElementById('connectbutton1');"
@@ -478,22 +667,19 @@ class DesktopPanel(Gtk.Box):
 
     def _after_connect(self, result):
         if result == "connected":
-            self._set_status("Connecting…")
+            self._set_status("Connecting to remote screen…")
             # Now safe to hide the viewer's own control row + bottom toolbar.
             self._inject_style("mcd-desk-css", self._DESK_CSS)
             self._install_clip_shim()
+            self._js("window.__mcdNative=null;window.__mcdComp=null;'ok'")
             if not self._polling:          # one poll loop per panel, not one per reconnect
                 self._polling = True
-                GLib.timeout_add(1500, self._poll_status)
-            # Apply the encoding/quality defaults (JPEG) once the stream is live.
-            GLib.timeout_add(2500, lambda: (self._apply_compression(), False)[1])
+                GLib.timeout_add(300, self._poll_status)
         elif result == "nobtn":
-            if not self._retry_connect:
-                self._retry_connect = True
-                self._connect_tried = False
-                GLib.timeout_add(2000, self._click_connect)
+            if self._connect_attempts < 80:          # ~20 s at 250 ms
+                GLib.timeout_add(250, self._click_connect)
             else:
-                self._note("The desktop did not start. Click Reconnect, or check the device is online.")
+                self._note("The desktop did not start. Check that the device is online, then Retry.")
         else:
             self._note("Could not start the desktop session. Click Reconnect to try again.")
 
@@ -508,15 +694,43 @@ class DesktopPanel(Gtk.Box):
     def _on_status(self, text):
         if self._closing:
             return
-        self._set_status(text or "")
         now_connected = text.lower().startswith("connected")
+        if now_connected or self._connected:
+            self._set_status(text or "")
         if now_connected and not self._connected:
             self._connected = True
             self._set_controls_enabled(True)
             self.connect_btn.set_label("Disconnect")
+            self._apply_compression(force=True)
+            self._wait_first_frame(0)
         elif not now_connected and self._connected:
             self._connected = False
             self._set_controls_enabled(False)
             self.connect_btn.set_label("Connect")
-        # keep polling while the panel is alive
-        GLib.timeout_add(2000, self._poll_status)
+            self._cover_show("The remote session ended.", busy=False, button="Retry")
+        if self._connected:
+            self._refresh_displays()
+        # keep polling while the panel is alive: fast while connecting, slow after
+        GLib.timeout_add(2000 if self._connected else 300, self._poll_status)
+
+    def _wait_first_frame(self, tries, hits=0):
+        # Reveal only once the viewer has drawn a frame, so the user never sees an empty,
+        # black or half-built view. The first tile makes onResize() size the canvas to the
+        # real screen and clear FirstDraw (the viewer starts with a 960x701 placeholder).
+        # Require it on two consecutive checks so the first frame has time to paint.
+        self._reveal_timer = None
+        if self._closing or not self._connected:
+            return False
+        def got(v):
+            h = hits + 1 if v == "drawn" else 0
+            if h >= 2 or tries >= 30:              # ~6 s cap, then show whatever is there
+                self._refit_canvas()
+                self._cover_hide()
+                self._set_status("Connected")
+            else:
+                self._reveal_timer = GLib.timeout_add(200, self._wait_first_frame, tries + 1, h)
+        self._js("(function(){try{var m=desktop.m,c=m.Canvas.canvas;"
+                 "var real=!(m.ScreenWidth==960&&m.ScreenHeight==701)&&m.ScreenWidth>8&&m.ScreenHeight>8;"
+                 "return (desktop.State===3&&real&&m.FirstDraw===false&&c.width===m.ScreenWidth)?'drawn':'wait';"
+                 "}catch(e){return 'wait';}})()", got)
+        return False
