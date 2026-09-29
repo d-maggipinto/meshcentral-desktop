@@ -37,6 +37,10 @@ class DesktopPanel(Gtk.Box):
         self._connect_tried = False
         self._connected = False
         self._ctrl_widgets = []
+        self._polling = False
+        self._clip_handler = None
+        self._clip_get_timer = None
+        self._clip_set_timer = None
 
         # --- toolbar row 1: session + view ---
         self._toolbar = bar = Gtk.Box(spacing=6, margin=6)
@@ -138,6 +142,7 @@ class DesktopPanel(Gtk.Box):
 
     def teardown(self):
         self._closing = True
+        self._clip_unlisten()
         try:
             self.view.load_uri("about:blank")
         except Exception:
@@ -167,16 +172,19 @@ class DesktopPanel(Gtk.Box):
     # Hide the header/footer toolbars AND make the screen container fill the whole
     # WebView, so the viewer's deskAdjust() sizes the canvas to the full area (this is
     # what makes the remote screen actually fill the panel, not sit letterboxed-small).
+    # #deskarea3x is pinned to the viewport (position:fixed) so no ancestor offset can
+    # shift it, and max-height is overridden too: the viewer sets an inline
+    # max-height:calc(100vh - 74px) on it, which left a black strip at the bottom.
+    # #DeskFocus is the viewer's red dotted "focus area" rectangle, never wanted here.
     _DESK_CSS = (
-        "#deskarea1,#deskarea4{display:none!important;}"
-        "#deskarea0{position:absolute!important;top:0!important;left:0!important;right:0!important;"
-        "bottom:0!important;width:auto!important;height:auto!important;margin:0!important;}"
-        "#deskarea3x{position:absolute!important;top:0!important;left:0!important;right:0!important;"
-        "bottom:0!important;width:auto!important;height:auto!important;overflow:hidden!important;}"
-        "#DeskFocus{width:100%!important;height:100%!important;}"
-        "#DeskParent{width:100%!important;height:100%!important;display:flex!important;"
-        "align-items:center!important;justify-content:center!important;overflow:hidden!important;"
-        "margin:0!important;}"
+        "html,body{overflow:hidden!important;}"
+        "#deskarea1,#deskarea4,#DeskFocus{display:none!important;}"
+        "#deskarea3x{position:fixed!important;top:0!important;left:0!important;right:0!important;"
+        "bottom:0!important;width:auto!important;height:auto!important;max-height:none!important;"
+        "margin:0!important;overflow:hidden!important;z-index:9999!important;background:#000!important;}"
+        "#DeskParent{position:absolute!important;top:0!important;left:0!important;width:100%!important;"
+        "height:100%!important;overflow:hidden!important;margin:0!important;}"
+        "#Desk{outline:none!important;}"
     )
 
     def _inject_style(self, style_id, css):
@@ -262,7 +270,7 @@ class DesktopPanel(Gtk.Box):
         # to plain window fullscreen if the main window doesn't support it.
         mw = self.app.main_win if getattr(self.app, "main_win", None) else None
         if mw is not None and hasattr(mw, "toggle_desktop_fullscreen"):
-            mw.toggle_desktop_fullscreen(self)
+            mw.toggle_desktop_fullscreen(self)      # calls refit_soon() itself
         else:
             win = self.get_toplevel()
             if isinstance(win, Gtk.Window):
@@ -271,11 +279,12 @@ class DesktopPanel(Gtk.Box):
                     win.unfullscreen()
                 else:
                     win.fullscreen()
-        for delay in (150, 400, 800):
-            GLib.timeout_add(delay, self._refit_canvas)
+            self.refit_soon()
 
     def refit_soon(self):
-        for delay in (150, 400, 800):
+        # The fullscreen transition can take well over a second on some WMs; keep
+        # refitting until the allocation has settled.
+        for delay in (150, 400, 800, 1500, 2500):
             GLib.timeout_add(delay, self._refit_canvas)
 
     def set_chrome_visible(self, visible):
@@ -319,59 +328,90 @@ class DesktopPanel(Gtk.Box):
             "return 'ok';}catch(e){return 'err';}})()",
             lambda r: self._set_status("Ctrl+Alt+Del sent" if r == "ok" else "Connect the desktop first"))
 
-    # ---- clipboard: run the viewer's own functions through the KVM session, with a
-    #      navigator.clipboard shim (WebKit blocks the real clipboard API) ----------
-    _CLIP_SHIM = ("(function(){try{if(window.__mcdClipInstalled)return 'exists';"
-                  "window.__mcdClip={text:''};"
-                  "try{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{"
-                  "writeText:function(t){window.__mcdClip.text=(t==null?'':''+t);return Promise.resolve();},"
-                  "readText:function(){return Promise.resolve(window.__mcdClip.text||'');}}});}"
-                  "catch(e){window.__mcdClip.fallback=true;}"
-                  "window.__mcdClipInstalled=true;return 'ok';}catch(e){return 'err';}})()")
+    # ---- clipboard: native, over OUR control connection ------------------------
+    # getclip/setclip are plain control-channel messages; the agent's reply is routed
+    # back to the session that asked (with nodeid set), so we don't need the web page,
+    # its document.hasFocus() gate or a navigator.clipboard shim at all. Note both are
+    # dropped SILENTLY by the server when domain ClipboardGet/ClipboardSet is false, and
+    # the agent only answers getclip when the remote clipboard has text, hence timeouts.
+    _CLIP_TIMEOUT_MS = 6000
+
+    # The web page must NOT touch the clipboard: if the server enables auto-clipboard,
+    # the viewer polls readText() every second and would push stale text to the remote.
+    _CLIP_SHIM = ("(function(){try{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{"
+                  "writeText:function(){return Promise.resolve();},"
+                  "readText:function(){return Promise.reject(new Error('disabled'));}}});"
+                  "return 'ok';}catch(e){return 'err';}})()")
 
     def _install_clip_shim(self):
         self._js(self._CLIP_SHIM)
 
+    def _clip_listen(self):
+        if not self._clip_handler:
+            self._clip_handler = self._on_clip_msg
+            self.app.ctrl.on("msg", self._clip_handler)
+
+    def _clip_unlisten(self):
+        if self._clip_handler:
+            self.app.ctrl.off("msg", self._clip_handler)
+            self._clip_handler = None
+        for attr in ("_clip_get_timer", "_clip_set_timer"):
+            if getattr(self, attr):
+                GLib.source_remove(getattr(self, attr))
+                setattr(self, attr, None)
+
     def _clip_to_remote(self):
         text = Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).wait_for_text()
-        if text is None:
+        if not text:
             self._note("This computer's clipboard is empty (no text to send).")
             return
-        payload = json.dumps(text)
-        # Put the text into the shim, then let the viewer's own send-to-remote run over
-        # its KVM session (same path the web UI uses).
-        self._js(
-            "(function(){try{window.__mcdClip=window.__mcdClip||{};window.__mcdClip.text=" + payload + ";"
-            "if(typeof deskClipboardOutFunction==='function'){deskClipboardOutFunction();return 'fn';}"
-            "if(typeof desktop!=='undefined'&&desktop&&desktop.m&&desktop.m.setClipboard){desktop.m.setClipboard(" + payload + ");return 'm';}"
-            "if(typeof meshserver!=='undefined'&&typeof currentNode!=='undefined'&&currentNode){"
-            "meshserver.send({action:'msg',type:'setclip',nodeid:currentNode._id,data:" + payload + "});return 'srv';}"
-            "return 'no';}catch(e){return 'err';}})()",
-            lambda r: self._set_status("Clipboard sent to remote" if r in ("fn", "m", "srv") else "Connect the desktop first"))
+        self._clip_listen()
+        self.app.ctrl.send_node_msg(self.node["_id"], "setclip", data=text)
+        self._set_status("Sending clipboard…")
+        if self._clip_set_timer:
+            GLib.source_remove(self._clip_set_timer)
+        self._clip_set_timer = GLib.timeout_add(self._CLIP_TIMEOUT_MS, self._clip_set_timeout)
 
     def _clip_from_remote(self):
-        # The viewer only writes the remote clipboard through when the page has focus
-        # (document.hasFocus()); grab focus first, reset the dedup guard, then trigger it.
-        self.view.grab_focus()
-        self._js(
-            "(function(){try{window.focus();window.__mcdClip=window.__mcdClip||{};window.__mcdClip.text='';"
-            "if(typeof deskLastClipboardReceived!=='undefined'){deskLastClipboardReceived=null;}"
-            "if(typeof deskClipboardInFunction==='function'){deskClipboardInFunction();return 'fn';}"
-            "if(typeof meshserver!=='undefined'&&typeof currentNode!=='undefined'&&currentNode){"
-            "meshserver.send({action:'msg',type:'getclip',nodeid:currentNode._id,tag:2});return 'srv';}"
-            "return 'no';}catch(e){return 'err';}})()",
-            lambda r: GLib.timeout_add(900, self._read_clip_shim) if r in ("fn", "srv") else self._note("Connect the desktop first"))
+        self._clip_listen()
+        self.app.ctrl.send_node_msg(self.node["_id"], "getclip", tag=2)
+        self._set_status("Reading remote clipboard…")
+        if self._clip_get_timer:
+            GLib.source_remove(self._clip_get_timer)
+        self._clip_get_timer = GLib.timeout_add(self._CLIP_TIMEOUT_MS, self._clip_get_timeout)
 
-    def _read_clip_shim(self, _tries=0):
-        def got(text):
-            if text:
-                Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)
-                self._set_status("Remote clipboard copied here")
-            elif _tries < 4:
-                GLib.timeout_add(600, lambda: self._read_clip_shim(_tries + 1))
-            else:
-                self._note("The remote clipboard is empty, or clipboard sharing is disabled on the server.")
-        self._js("(function(){try{return (window.__mcdClip&&window.__mcdClip.text)||'';}catch(e){return '';}})()", got)
+    def _on_clip_msg(self, msg):
+        if self._closing or msg.get("nodeid") != self.node["_id"]:
+            return
+        t = msg.get("type")
+        if t == "getclip" and msg.get("tag") == 2:
+            if self._clip_get_timer:
+                GLib.source_remove(self._clip_get_timer)
+                self._clip_get_timer = None
+            data = msg.get("data")
+            if isinstance(data, str) and data:
+                Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(data, -1)
+                self._set_status(f"Remote clipboard copied here ({len(data)} chars)")
+        elif t == "setclip":
+            if self._clip_set_timer:
+                GLib.source_remove(self._clip_set_timer)
+                self._clip_set_timer = None
+            self._set_status("Clipboard sent to remote" if msg.get("success") else "Remote rejected the clipboard")
+
+    def _clip_get_timeout(self):
+        self._clip_get_timer = None
+        self._set_status("")
+        self._note("No clipboard came back from the remote computer. Either its clipboard is empty "
+                   "(text only), clipboard reading is disabled on the server (ClipboardGet), or the "
+                   "agent cannot reach the logged-in desktop's clipboard.")
+        return False
+
+    def _clip_set_timeout(self):
+        self._clip_set_timer = None
+        self._set_status("")
+        self._note("The remote computer did not confirm the clipboard. Clipboard writing may be "
+                   "disabled on the server (ClipboardSet), or the agent cannot reach the "
+                   "logged-in desktop's clipboard.")
         return False
 
     # ---- state machine -----------------------------------------------------
@@ -442,7 +482,9 @@ class DesktopPanel(Gtk.Box):
             # Now safe to hide the viewer's own control row + bottom toolbar.
             self._inject_style("mcd-desk-css", self._DESK_CSS)
             self._install_clip_shim()
-            GLib.timeout_add(1500, self._poll_status)
+            if not self._polling:          # one poll loop per panel, not one per reconnect
+                self._polling = True
+                GLib.timeout_add(1500, self._poll_status)
             # Apply the encoding/quality defaults (JPEG) once the stream is live.
             GLib.timeout_add(2500, lambda: (self._apply_compression(), False)[1])
         elif result == "nobtn":
@@ -457,6 +499,7 @@ class DesktopPanel(Gtk.Box):
 
     def _poll_status(self):
         if self._closing:
+            self._polling = False
             return False
         self._js("(function(){var d=document.getElementById('deskstatus');"
                  "return d?d.innerText.trim():'';})()", self._on_status)

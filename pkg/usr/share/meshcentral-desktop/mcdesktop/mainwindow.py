@@ -269,6 +269,7 @@ class MainWindow(Gtk.ApplicationWindow):
             sidebar.hide()
         self.action_bar.hide()
         self.device_notebook.set_show_tabs(False)
+        self.device_notebook.set_show_border(False)
         if hasattr(panel, "set_chrome_visible"):
             panel.set_chrome_visible(False)
         if not getattr(self, "_fs_key_handler", None):
@@ -285,6 +286,7 @@ class MainWindow(Gtk.ApplicationWindow):
             sidebar.show()
         self.action_bar.show()
         self.device_notebook.set_show_tabs(True)
+        self.device_notebook.set_show_border(True)
         panel = getattr(self, "_desk_fs_panel", None)
         if panel is not None and hasattr(panel, "set_chrome_visible"):
             panel.set_chrome_visible(True)
@@ -477,8 +479,9 @@ class MainWindow(Gtk.ApplicationWindow):
         return pop
 
     def _about(self, *_):
+        from . import __version__
         a = Gtk.AboutDialog(transient_for=self, modal=True, program_name="MeshCentral Desktop",
-                            version="2.7.5", comments="Native client for MeshCentral",
+                            version=__version__, comments="Native client for MeshCentral",
                             website=self.ctrl.server.url, logo_icon_name="meshcentral-desktop")
         a.run()
         a.destroy()
