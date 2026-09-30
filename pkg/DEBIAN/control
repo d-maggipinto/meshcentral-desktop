@@ -1,5 +1,5 @@
 Package: meshcentral-desktop
-Version: 2.22.1
+Version: 2.23.0
 Section: net
 Priority: optional
 Architecture: all
@@ -8,9 +8,12 @@ Depends: python3, python3-gi, python3-websocket, python3-cairo,
 Recommends: xdg-utils, gnome-keyring, python3-qrcode
 Maintainer: Denis Maggipinto (CYVELION LTD) <d.maggipinto@cyvelion.co.uk>
 Homepage: https://github.com/d-maggipinto/meshcentral-desktop
-Description: Native desktop client for MeshCentral
- A native GTK application for managing devices on a MeshCentral server.
- Connect with a server address, username, password and optional two-factor
- code. Browse device groups, run power actions and commands, open a native
- terminal and file manager for each device, and launch remote desktop
- sessions - all in dedicated native windows rather than a browser tab.
+Description: Unofficial native desktop client for MeshCentral
+ A native GTK application for managing devices on a MeshCentral server:
+ device tree, remote desktop, terminal, file manager, processes, services,
+ agent console, server storage, server statistics, users, user groups and
+ account settings. It signs in with a username, password and optional
+ two-factor code and talks to the server over the documented control channel.
+ .
+ This is an independent project by CYVELION LTD. It is not affiliated with or
+ endorsed by the MeshCentral project.

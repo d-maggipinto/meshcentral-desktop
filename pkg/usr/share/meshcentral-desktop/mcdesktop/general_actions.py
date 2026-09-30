@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Device action bar, power/more menus and right-click context menu."""
 import secrets
 
@@ -73,7 +75,7 @@ class RunOutputDialog(Gtk.Dialog):
             self.buffer.insert(self.buffer.get_end_iter(), out if out.endswith("\n") else out + "\n")
             self._finish("Done.")
         else:
-            self._finish("Done, the command produced no output.")
+            self._finish("Done. The command produced no output.")
 
     def _on_timeout(self):
         self._timeout_id = None
@@ -293,7 +295,7 @@ class DeviceActions:
 
 
 class NotesDialog(Gtk.Dialog):
-    """Quick view/edit of the notes of a device, or of a user (Users page), getNotes / setNotes
+    """Quick view/edit of the notes of a device, or of a user (Users page): getNotes / setNotes
     with the object's id; `node` only needs "_id" and "name"."""
 
     def __init__(self, parent, ctrl, node, editable=True, what="device"):

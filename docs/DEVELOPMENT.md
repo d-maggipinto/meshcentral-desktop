@@ -1,0 +1,143 @@
+# Development
+
+MeshCentral Desktop is plain Python 3 with GTK 3 (PyGObject), WebKitGTK and VTE. There is no build
+step besides packaging: the source in `pkg/usr/share/meshcentral-desktop/` is what gets installed.
+
+## Requirements
+
+```bash
+sudo apt install python3 python3-gi python3-websocket python3-cairo \
+  gir1.2-gtk-3.0 gir1.2-vte-2.91 gir1.2-secret-1 gir1.2-webkit2-4.1 \
+  fakeroot dpkg-dev
+# optional, for the authenticator QR code in My Account:
+sudo apt install python3-qrcode
+# for the rig tests:
+sudo apt install xvfb nodejs npm xclip
+```
+
+The app is developed and tested on Debian and Debian based distributions (Debian 12, Ubuntu 22.04
+and later, Kali Linux). Keep the code compatible with **Python 3.11** (Debian 12): no Python 3.12
+f-string syntax (backslashes or reused quotes inside `{...}`).
+
+## Run from source
+
+```bash
+python3 pkg/usr/share/meshcentral-desktop/main.py
+```
+
+The app is single instance: if an installed copy is already running, this command only brings it to
+the front. Quit it first (`pkill -f meshcentral-desktop`).
+
+## Build the package
+
+1. Set the version in both places: `pkg/DEBIAN/control` (`Version:`) and
+   `pkg/usr/share/meshcentral-desktop/mcdesktop/__init__.py` (`__version__`). The About dialog and
+   the window subtitle read `__version__`.
+2. Run the build script:
+
+   ```bash
+   scripts/build-deb.sh
+   ```
+
+   It checks that both versions match, normalises file permissions, runs a syntax check, removes
+   all Python bytecode (the build machine's Python may differ from the target's) and writes
+   `dist/meshcentral-desktop_<version>_all.deb`.
+
+## Tests
+
+**Unit tests** (no server, no display):
+
+```bash
+python3 -m unittest discover -s tests/unit -v
+```
+
+They cover the pure logic: import parsing and validation, CSV export, permission labels, rights
+calculation, formatting. GitHub Actions runs them on every push, together with the package build.
+
+**Rig tests** drive the real application against a local MeshCentral server and, for remote
+desktop features, a real agent. They are in [`tests/rig/`](../tests/rig/README.md) with an index.
+
+### Local test server
+
+All protocol work is verified against a **local** MeshCentral server, never against a production
+server.
+
+```bash
+mkdir -p ~/mcd-rig/mctest && cd ~/mcd-rig/mctest
+npm install meshcentral            # or meshcentral@<version> to match the server you target
+node node_modules/meshcentral/meshcentral --cert 127.0.0.1 --createaccount admin --pass Test-1234
+node node_modules/meshcentral/meshcentral --adminaccount admin
+node node_modules/meshcentral/meshcentral --cert 127.0.0.1 --port 8443 --redirport 8080 --exactports &
+```
+
+Then, over the control channel as `admin`, create a device group (`createmesh`), a restricted test
+user `limited` (`adduser` with `siteadmin: 0`, then `addmeshuser` with `meshadmin: 0x100 | 0x100000`)
+and a user group (`createusergroup`, `addusertousergroup`).
+
+Features that depend on server settings must be tested in each mode. For example the Users page on
+a server where the email address is the user name: set `"userNameIsEmail": true` (and, to test
+password rules, `"passwordRequirements": {"min": 8, "upper": 1, "numeric": 1}`) in `domains.""` of
+`meshcentral-data/config.json`, restart the server, and restore the file afterwards.
+
+Devices without an agent (for permission tests): create a device group with `meshtype: 3` and add a
+device with `addlocaldevice {meshid, devicename, hostname, type: 4}`.
+
+**Agent** (remote desktop, terminal, files, tools): download the Linux agent from
+`GET /meshagents?id=6` and its settings from
+`GET /meshsettings?id=<URL encoded part of the mesh id after "mesh//">` (save as `meshagent.msh`),
+then run `./meshagent connect &` from a normal desktop shell. **The agent controls the computer it
+runs on.**
+
+The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
+`views/default.handlebars` (web interface), `meshuser.js` (control channel), `webserver.js` (HTTP),
+`agents/meshcore.js` (agent), `public/scripts/agent-desktop-0.0.2.js` (desktop viewer).
+
+### Testing rules
+
+- **Run GUI tests under Xvfb**, so windows, keyboard grabs and system dialogs never touch your
+  session:
+  ```bash
+  GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 xvfb-run -a -s "-screen 0 1920x1080x24" python3 tests/rig/<script>.py
+  ```
+  Under Xvfb the app's clipboard is separate from the desktop session's, which makes clipboard sync
+  tests meaningful.
+- Test instances use their own application id (`rigenv.TEST_APP_ID`). With the default id a
+  running installed copy would be activated instead, and the test would exit silently.
+- For the self-signed local certificate the scripts turn off TLS verification (WebSocket client,
+  WebKit and HTTP transfers). **Local testing only.**
+- The test agent drives the real desktop it runs on: when testing keyboard handling, stub the
+  viewer's `desktop.m.send`. Do not restart the agent from inside `xvfb-run` (it would capture the
+  virtual display).
+- `pkill -f` with a pattern that also appears in your own command line kills your shell: use bracket
+  patterns such as `pkill -f "[m]eshagent connect"` in a separate command.
+- Stop the test agent with SIGTERM, never SIGKILL. A killed agent can corrupt its local database
+  (`Unable to open database` on the next start; move `meshagent.db` aside to re-register). Never
+  run two agent instances from the same folder. When a test restarts the agent, restore its
+  original environment (read `/proc/<pid>/environ` before stopping it).
+
+### Regression scenarios
+
+| Area | Checks |
+|---|---|
+| Remote desktop | connect, reconnect while connected, disconnect, quick connect, cancel, connect after cancel; first-frame reveal; fullscreen geometry |
+| Agent restart | offline detection, console notices, automatic desktop reconnect, no main-loop stalls |
+| Keyboard | AltGr filtering, hotkey grab and release, Ctrl+Alt+F, Esc not intercepted |
+| Clipboard | agent patch with the empty-display bug simulated, local to remote, remote to local, no echo loops |
+| Services / General | systemctl listing speed and states; agent type and core version |
+| My Files | folder, upload, download (checksum), rename, copy, edit, delete |
+| Permissions | full admin and restricted account: tabs, actions, server tabs, view-only desktop, read-only notes |
+| Broadcast | send from the app to a user group; receive web-style broadcasts (auto-close and sticky) |
+| Run command | `whoami` output |
+| My Account | authenticator (TOTP verified), backup codes, login tokens, image upload and read back, new device group, language, connection cards, password change, delete account; always on throwaway accounts |
+| Users | list with live session counts, filter, Select All, Group Action; New Account (plain and email-as-user-name server, password policy); import and export; user page: every edit dialog, memberships, notes, password change, previous logins, account image, events, delete |
+| Groups | list counts, Select All, Group Action delete, New Group, Duplicate Group; group page: rename, description, consent, members with suggestions, device group and device permissions, delete |
+| Layout / My Server | rail entries per account, only the visible device page is built, fullscreen hides the rail; live statistics, history, server console, backup download |
+
+## Release checklist
+
+1. Version set in both places, `scripts/build-deb.sh` succeeds.
+2. Unit tests pass; rig tests pass for the areas that changed.
+3. `CHANGELOG.md` updated; `README.md` and `docs/` updated for behaviour changes.
+4. Tag the release (`vX.Y.Z`) and attach the `.deb` from `dist/` to the GitHub release.
+5. Upgrade note for users: quit the running app (`pkill -f meshcentral-desktop`) before installing
+   the new package, because the app is single instance.

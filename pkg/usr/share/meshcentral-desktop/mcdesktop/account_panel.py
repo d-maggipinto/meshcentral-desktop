@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """My Account (web UI "My Account"): account security (authenticator app, backup codes, security
 keys), account actions (previous logins, notification / localization settings, change password,
 login tokens, delete account), device groups (+ New) and the profile image.
@@ -368,7 +370,7 @@ class AccountPanel(Gtk.Box):
                                "Two-step sign-in is now on. Consider creating backup codes (Manage backup codes) "
                                "in case you lose the phone.")
                 else:
-                    status.set_markup("<span foreground='#e01b24'>Wrong code, check the phone's time and try again.</span>")
+                    status.set_markup("<span foreground='#e01b24'>Wrong code. Check the phone's time and try again.</span>")
                     code.set_text("")
             self._once("otpauth-setup", res)
             self.ctrl.send({"action": "otpauth-setup", "secret": secret, "token": code.get_text()})
@@ -649,7 +651,7 @@ class AccountPanel(Gtk.Box):
                            Gtk.MessageType.ERROR)
                 return
             rd, ra = self._dialog("Login token created", 460)
-            ra.pack_start(Gtk.Label(label="Copy the password now, it is shown only once.", xalign=0), False, False, 0)
+            ra.pack_start(Gtk.Label(label="Copy the password now. It is shown only once.", xalign=0), False, False, 0)
             g = Gtk.Grid(column_spacing=10, row_spacing=6)
             for i, (label, val) in enumerate((("Username", msg["tokenUser"]), ("Password", msg.get("tokenPass") or ""))):
                 g.attach(Gtk.Label(label=label, xalign=1), 0, i, 1, 1)

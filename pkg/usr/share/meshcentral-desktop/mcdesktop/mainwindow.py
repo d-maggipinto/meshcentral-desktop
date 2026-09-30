@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Main window: one window, device tree on the left, embedded panel tabs on the right."""
 import time
 
@@ -721,9 +723,16 @@ class MainWindow(Gtk.ApplicationWindow):
 
     def _about(self, *_):
         from . import __version__
-        a = Gtk.AboutDialog(transient_for=self, modal=True, program_name="MeshCentral Desktop",
-                            version=__version__, comments="Native client for MeshCentral",
-                            website=self.ctrl.server.url, logo_icon_name="meshcentral-desktop")
+        a = Gtk.AboutDialog(
+            transient_for=self, modal=True, program_name="MeshCentral Desktop", version=__version__,
+            logo_icon_name="meshcentral-desktop",
+            comments="Unofficial native desktop client for MeshCentral.\n"
+                     "Not affiliated with or endorsed by the MeshCentral project.",
+            website="https://github.com/d-maggipinto/meshcentral-desktop", website_label="Project on GitHub",
+            copyright="Author: Denis Maggipinto\nCopyright 2026 CYVELION LTD", license_type=Gtk.License.APACHE_2_0,
+            authors=["Denis Maggipinto (CYVELION LTD) https://github.com/d-maggipinto"])
+        a.add_credit_section("Developed with", ["Claude Code by Anthropic"])
+        a.add_credit_section("Built for", ["MeshCentral by Ylian Saint-Hilaire and contributors https://meshcentral.com"])
         a.run()
         a.destroy()
 

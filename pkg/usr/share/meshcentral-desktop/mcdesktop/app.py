@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Application object: owns config, the control connection, and top-level windows."""
 import json
 import os

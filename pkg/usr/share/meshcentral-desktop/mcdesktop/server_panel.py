@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """My Server (web UI viewmode=6): General (server actions, live statistics, server state),
 Stats (history charts) and Console (server console).
 
@@ -11,9 +13,9 @@ Protocol (meshuser.js / webserver.js), all gated server-side by site rights
   {action:'serverversion', responseid} -> {result:'OK', tags:{current, latest, stable}}
   {action:'serverupdate', version?}      (server downloads the version and restarts)
   {action:'servererrors'} -> {data}   {action:'serverclearerrorlog'}
-  {action:'serverconfig'} -> {data}   (config.json, sensitive)
+  {action:'serverconfig'} -> {data}   (config.json: sensitive)
   {action:'serverconsole', value} -> {action:'serverconsole', value}
-  GET /backup.zip, POST /restoreserver.ashx (datafile)  , web session (client.WebSession)
+  GET /backup.zip, POST /restoreserver.ashx (datafile)  : web session (client.WebSession)
 """
 import json
 import math
@@ -778,7 +780,7 @@ class MyServerPanel(Gtk.Box):
         newest = max((t for _n, _c, pts in series for t, v in pts if v is not None), default=now)
         self.chart.set_data(series, now - self._hours() * 3600, max(now, newest), Y_TITLES[kind],
                             stacked=kind in ("in", "out"), log=self.chart_log.get_active(),
-                            empty_text="No samples in this range, the server records one every 5 minutes.")
+                            empty_text="No samples in this range. The server records one every 5 minutes.")
         t0 = now - self._hours() * 3600
         n = sum(1 for s in self._timeline if (_epoch(s.get("time")) or 0) >= t0)
         with_data = len({t for _n, _c, pts in series for t, v in pts if v is not None and t >= t0})
@@ -833,7 +835,7 @@ class MyServerPanel(Gtk.Box):
             box.pack_start(l, True, True, 0)
             self.console_view = None
             return box
-        hint = Gtk.Label(label="MeshCentral server console, type “help” for the list of commands.",
+        hint = Gtk.Label(label="MeshCentral server console: type “help” for the list of commands.",
                          xalign=0, margin=8)
         hint.get_style_context().add_class("dim-label")
         box.pack_start(hint, False, False, 0)

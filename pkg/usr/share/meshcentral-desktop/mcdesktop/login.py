@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Login window: server address, username, password, optional MFA token."""
 import gi
 gi.require_version("Secret", "1")

@@ -1,4 +1,6 @@
-"""Remote desktop panel, embeds MeshCentral's OWN web desktop KVM viewer but wraps it
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
+"""Remote desktop panel: embeds MeshCentral's OWN web desktop KVM viewer but wraps it
 in NATIVE controls so it feels like part of the app rather than a web page.
 
 Flow (verified live -> status "Connected"):
@@ -453,7 +455,7 @@ class DesktopPanel(Gtk.Box):
             # View-only account: the agent ignores our input anyway; say so instead.
             for w in self._input_widgets:
                 w.set_sensitive(False)
-                w.set_tooltip_text("View only, your account may not control this device")
+                w.set_tooltip_text("View only. Your account may not control this device")
             self.hotkeys.set_sensitive(False)
             self._flash_status("View only", 5)
 

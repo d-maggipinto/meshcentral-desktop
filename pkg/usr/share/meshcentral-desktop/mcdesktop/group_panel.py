@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Groups: the web UI's "My User Groups" list and "User Group - <name>" page (views 50 / 51).
 
 Control-channel actions (same as the web UI):

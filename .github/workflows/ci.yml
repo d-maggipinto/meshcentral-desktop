@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends python3 python3-gi python3-websocket \
+            python3-cairo gir1.2-gtk-3.0 gir1.2-vte-2.91 gir1.2-secret-1 gir1.2-webkit2-4.1 \
+            fakeroot dpkg-dev
+
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests/unit -v
+
+      - name: Build package
+        run: scripts/build-deb.sh
+
+      - name: Check package
+        run: |
+          dpkg-deb --info dist/*.deb
+          dpkg-deb --contents dist/*.deb
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: meshcentral-desktop-deb
+          path: dist/*.deb
+
+      - name: Release notes from CHANGELOG.md
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          awk -v v="$VER" '$0 ~ "^## \\[" v "\\]" {on=1; next} on && /^## \[/ {exit} on {print}' CHANGELOG.md > release-notes.md
+          test -s release-notes.md || { echo "No CHANGELOG.md section for $VER" >&2; exit 1; }
+
+      - name: Attach package to the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.deb
+          body_path: release-notes.md

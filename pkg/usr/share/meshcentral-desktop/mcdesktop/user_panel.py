@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Users → one user's page, like the web UI's "General - <user>" / "Events" (views 30/31).
 
 Everything goes through the documented control-channel actions the web UI uses:
@@ -27,7 +29,7 @@ FEAT_LDAP_SSPI = 0x80000
 FEAT_PASSWORD_HINT = 0x10000
 FEAT_SMS = 0x02000000
 
-# (bit, label, indent, mesh_only), web UI p20showAddMeshUserDialog
+# (bit, label, indent, mesh_only): web UI p20showAddMeshUserDialog
 DEVICE_RIGHTS = [
     (1, "Edit Device Group", 0, True), (2, "Manage Device Group Users", 0, True),
     (4, "Manage Device Group Computers", 0, True),
@@ -549,7 +551,7 @@ class UserPage(Gtk.Box):
         return self.user.get("_id") == self._me().get("_id")
 
     def _user_admin(self):
-        """web: userAdminRights, manage-users right and the target is not a full admin, or we are."""
+        """web: userAdminRights: manage-users right and the target is not a full admin, or we are."""
         sa, tsa = self._my_sa(), self.user.get("siteadmin")
         return (bool(sa & 2) and tsa != FULL) or sa == FULL
 

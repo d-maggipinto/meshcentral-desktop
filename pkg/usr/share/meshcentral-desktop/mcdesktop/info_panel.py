@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Device information panels: General, Hardware, Network, Events, Notes.
 
 Each is an embeddable Gtk.Box following the panel contract (see PANEL_CONTRACT.md):
@@ -391,7 +393,7 @@ class NotesPanel(Gtk.Box):
                 if isinstance(w, Gtk.Button) and w.get_label() == "Save":
                     w.set_sensitive(False)
             self._readonly = True
-            self.status.set_text("Read-only, your account may not edit notes on this device")
+            self.status.set_text("Read-only. Your account may not edit notes on this device")
         self._handler = self._on_reply
         self.app.ctrl.on("getNotes", self._handler)
         self._request()

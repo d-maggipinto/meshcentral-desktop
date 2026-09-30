@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Account permissions: what the signed-in user may do on a device and on the server.
 
 The server enforces every right itself; this module only decides what the app OFFERS, so a

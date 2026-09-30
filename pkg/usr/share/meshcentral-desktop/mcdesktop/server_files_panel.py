@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Server-side file storage ("My Files" in the web UI, viewmode=5).
 
 The server stores a personal folder per user ("My Files") plus one folder per device group

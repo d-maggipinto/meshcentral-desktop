@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Embeddable file manager panel using the agent file relay (protocol 5).
 
 Ported from files.py (the standalone window) into a Gtk.Box panel that plugs into
@@ -115,6 +117,15 @@ class FilesPanel(Gtk.Box):
         if self.tunnel:
             self.tunnel.stop()
             self.tunnel = None
+        # a transfer interrupted by closing the device: close its file, drop the partial download
+        if self.download:
+            self._finish_download(ok=False)
+        if self.upload and self.upload.get("fh"):
+            try:
+                self.upload["fh"].close()
+            except Exception:
+                pass
+            self.upload = None
 
     # ---- connection --------------------------------------------------------
     def connect_tunnel(self):

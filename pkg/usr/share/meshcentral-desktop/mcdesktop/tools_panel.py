@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Embeddable device-tool panels: Processes, Services and Agent Console.
 
 Each panel talks to the agent over the control channel using the "msg" envelope
@@ -354,7 +356,7 @@ class ConsolePanel(_MsgPanel):
         self.entry.set_text("")
         self._append(f"> {cmd}\n")
         if not getattr(self, "_online", True):
-            self._append("(agent is offline, command not sent)\n")
+            self._append("(agent is offline. Command not sent)\n")
             return
         self.app.ctrl.send_node_msg(self.nodeid, "console", value=cmd)
 

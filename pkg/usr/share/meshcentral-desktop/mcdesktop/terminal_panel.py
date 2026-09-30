@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Embeddable terminal panel: a VTE terminal connected to the agent through the relay."""
 import gi
 gi.require_version("Vte", "2.91")

@@ -15,7 +15,15 @@ https://meshcentral.com  https://github.com/Ylianst/MeshCentral
 Licensed under the Apache License, Version 2.0.
 
 This client talks to a MeshCentral server using the same control-channel messages as the
-MeshCentral web interface. Where present, the account and device permission rules follow the web
-interface functions GetMeshRights, GetNodeRights and removeUserRights, and option labels and bit
-values match the web interface. The remote desktop view embeds the MeshCentral web viewer served
-by the user's own MeshCentral server at run time; it is not copied into this project.
+MeshCentral web interface. The following parts follow MeshCentral's source code:
+
+  * mcdesktop/rights.py: the account and device permission rules are a port of the web
+    interface functions GetMeshRights, GetNodeRights and removeUserRights
+    (views/default.handlebars) and of the matching checks in meshuser.js.
+  * mcdesktop/info_panel.py: the agent type names (agentsStr in the web interface).
+  * mcdesktop/user_panel.py, group_panel.py, admin_panel.py: the wording and bit values of the
+    permission, feature and consent options, and the user list export columns, match the web
+    interface so that both clients show the same information.
+
+The remote desktop view embeds the MeshCentral web viewer that is served by the user's own
+MeshCentral server at run time. That viewer is not copied into or distributed with this project.

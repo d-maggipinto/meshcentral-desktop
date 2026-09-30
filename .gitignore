@@ -1,0 +1,20 @@
+# build output
+*.deb
+dist/
+
+# Python bytecode (never ship it inside the package)
+__pycache__/
+*.pyc
+
+# editor / OS noise
+*.swp
+*~
+.DS_Store
+
+# private developer notes and local AI tooling (not published)
+CLAUDE.md
+.claude/
+.graphifyignore
+.venv-graphify/
+graphify-out/
+PROTOCOL_TRUTH.md

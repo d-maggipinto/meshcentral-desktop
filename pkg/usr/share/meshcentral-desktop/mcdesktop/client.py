@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """MeshCentral protocol layer: control channel (control.ashx) and relay tunnels (meshrelay.ashx).
 
 All network I/O runs on background threads; every callback is marshalled back onto the

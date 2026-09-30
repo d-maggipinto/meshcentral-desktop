@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Server-wide admin panels: users, user groups, server events, my account.
 
 These panels take node=None. They read from the control connection with the same
@@ -224,7 +226,7 @@ def validate_import_entry(e, email_is_name=False):
     if em is not None and (not isinstance(em, str) or not 1 <= len(em) <= 128 or not _EMAIL_RE.match(em)):
         return "invalid email address"
     if email_is_name and em is None and not _EMAIL_RE.match(u):
-        return "this server uses email addresses as user names, add an email or use one as user"
+        return "this server uses email addresses as user names. Add an email or use one as user"
     if "resetNextLogin" in e and not isinstance(e["resetNextLogin"], bool):
         return "resetNextLogin must be true or false"
     return None
@@ -331,7 +333,7 @@ class UserImportDialog(Gtk.Dialog):
         if not self.entries:
             self._set_result("The file contains no accounts.", True)
         elif bad:
-            self._set_result(f"{bad} invalid row(s), fix the file and choose it again "
+            self._set_result(f"{bad} invalid row(s). Fix the file and choose it again "
                              "(the server rejects the whole batch if any row is invalid).", True)
         elif not self.to_send:
             self._set_result("All accounts in the file already exist.")
@@ -400,7 +402,7 @@ class UserImportDialog(Gtk.Dialog):
         else:
             self._set_result(f"Created {n} of {total} account(s). " + (reason or
                              "The server did not confirm the others (they may have been created by "
-                             "someone else meanwhile), check the user list."), True)
+                             "someone else meanwhile). Check the user list."), True)
         for row in self.store:
             if row[0].lower() in self.created:
                 row[3] = "Created"
@@ -427,7 +429,7 @@ class NewAccountDialog(Gtk.Dialog):
     With a responseid the server answers {action:'adduser', result:'ok' | error text}."""
     ERRORS = {"maxUsersExceed": "The server's account limit was reached.",
               "passwordHashError": "The server could not store the password.",
-              "Invalid password": "Invalid password, it does not meet the server's password requirements."}
+              "Invalid password": "Invalid password. It does not meet the server's password requirements."}
 
     def __init__(self, parent, ctrl, on_done=None):
         super().__init__(title="Create Account", transient_for=parent, modal=True)
