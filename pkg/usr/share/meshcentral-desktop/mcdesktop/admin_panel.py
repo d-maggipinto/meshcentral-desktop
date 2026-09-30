@@ -98,8 +98,7 @@ def _has_2fa(u):
 
 def _rights_summary(u):
     sa = u.get("siteadmin")
-    if sa is None:
-        return ""
+    # accounts created without server rights have NO siteadmin field (web UI: "User")
     if sa == 0xFFFFFFFF or (isinstance(sa, int) and sa & 0xFFFFFFFF == 0xFFFFFFFF):
         return "Full administrator"
     if not sa:
