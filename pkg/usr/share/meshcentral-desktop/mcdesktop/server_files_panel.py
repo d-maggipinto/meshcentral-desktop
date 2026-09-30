@@ -55,7 +55,7 @@ class ServerFilesPanel(Gtk.Box):
 
         self.allowed = rights.has_site(app.ctrl, rights.SITE_FILEACCESS)
         if not self.allowed:
-            msg = Gtk.Label(label="Your account does not have access to server files (“My Files”).\n"
+            msg = Gtk.Label(label="Your account does not have access to server files (called “My Files” in the web interface).\n"
                                   "An administrator can grant the “Server Files” permission.",
                             justify=Gtk.Justification.CENTER)
             msg.get_style_context().add_class("dim-label")

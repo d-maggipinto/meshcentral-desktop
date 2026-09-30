@@ -55,9 +55,9 @@ def _site_any(ctrl, *bits):
 # Sections the account cannot use are hidden (the server enforces the rights anyway).
 NAV = [
     ("devices", "computer-symbolic", "Devices", None, None),
-    ("files", "folder-symbolic", "My Files",
+    ("files", "folder-symbolic", "Files",
      lambda c: rights.has_site(c, rights.SITE_FILEACCESS), ServerFilesPanel),
-    ("server", "network-server-symbolic", "My Server",
+    ("server", "network-server-symbolic", "Server",
      lambda c: _site_any(c, rights.SITE_BACKUP, rights.SITE_RESTORE, rights.SITE_UPDATE), MyServerPanel),
     ("users", "avatar-default-symbolic", "Users",
      lambda c: rights.has_site(c, rights.SITE_MANAGEUSERS), UsersPanel),
@@ -66,7 +66,7 @@ NAV = [
     ("events", "document-open-recent-symbolic", "Events", None, ServerEventsPanel),
     ("account", "emblem-system-symbolic", "Account", None, AccountPanel),
 ]
-_NAV_TITLES = {"devices": "Devices", "files": "My Files", "server": "My Server", "users": "Users",
+_NAV_TITLES = {"devices": "Devices", "files": "Files", "server": "Server", "users": "Users",
                "usergroups": "User Groups", "events": "Server Events", "account": "My Account"}
 _TAB_DENIED = {
     "desktop": "remote desktop", "terminal": "the terminal", "files": "file access",
@@ -189,7 +189,11 @@ class MainWindow(Gtk.ApplicationWindow):
             b.add(inner)
             b.set_tooltip_text(_NAV_TITLES[pid])
             b.connect("toggled", lambda w, p=pid: w.get_active() and self.show_page(p))
-            rail.pack_start(b, False, False, 0)
+            if pid == "account":                           # the account sits at the bottom of the rail
+                b.set_margin_bottom(6)
+                rail.pack_end(b, False, False, 0)
+            else:
+                rail.pack_start(b, False, False, 0)
             self._nav_buttons[pid] = b
         return rail
 

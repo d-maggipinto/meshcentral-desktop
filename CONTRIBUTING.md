@@ -10,7 +10,7 @@ Open an issue with the **Bug report** template and include:
 
 - the app version (window subtitle or *About*),
 - your distribution and version, and whether the session is X11 or Wayland,
-- your MeshCentral server version (*My Server*, *Check server version*),
+- your MeshCentral server version (*Server*, *Check server version*),
 - the exact error text or a screenshot, and the steps to reproduce.
 
 Never post passwords, login tokens, server addresses you want to keep private, or screenshots that

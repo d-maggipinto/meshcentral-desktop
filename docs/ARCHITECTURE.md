@@ -34,8 +34,8 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `info_panel.py` | General, Hardware, Network, Events, Notes |
 | `admin_panel.py` | Users (online / offline tree with checkboxes, Select All, Group Action, filter, live session counts from `wssessioncount`; `NewAccountDialog`, export CSV/JSON, `UserImportDialog` batch import; double-click opens `user_panel.UserPage`), User Groups (+ details, broadcast), Server Events, `BroadcastDialog` |
 | `account_panel.py` | My Account: 2FA (authenticator + QR, backup codes, security keys), previous logins, notification / localization settings, password, login tokens, delete account, device groups, account image |
-| `server_panel.py` | *My Server*: server actions, live statistics (cairo gauges), history charts, server console |
-| `server_files_panel.py` | *My Files* server-side storage |
+| `server_panel.py` | *Server*: server actions, live statistics (cairo gauges), history charts, server console |
+| `server_files_panel.py` | *Files*: server-side storage (*My Files* in the web interface) |
 | `group_panel.py` | Groups: `UserGroupsPanel` (list, Select All, Group Action, New / Duplicate Group) and `GroupPage` (group page) |
 | `user_panel.py` | Users → one user's page (`UserPage`: General + Events, edit dialogs, `RightsDialog` for device-group / device permissions, `show_previous_logins` and `choose_account_image` shared with My Account) |
 | `ui.py` | Small shared helpers (online/OS detection, formatting, dialogs, JSON tree view) |
@@ -49,7 +49,7 @@ pkg/                                   Debian package root (built with dpkg-deb)
 3. `MainWindow` requests `meshes` and `nodes`, builds the tree and listens for `event` messages
    (node changes are debounced into a refresh) and `msg`/`notify` (broadcast cards).
    The window is a **navigation rail** (`NAV`) next to a `Gtk.Stack` of pages. "devices" is the tree +
-   device area; every other page (My Files, My Server, Users, Groups, Events, Account) is constructed
+   device area; every other page (Files, Server, Users, Groups, Events, Account) is constructed
    on its first visit (`show_page`). Rail entries the account cannot use are not created.
 4. Selecting a device creates **empty** page containers in three group notebooks (`DEVICE_GROUPS`:
    Overview / Remote / Tools, switched by a `Gtk.StackSwitcher`). A panel is constructed only when its
@@ -74,7 +74,7 @@ Server panels follow the same contract with `node=None`.
 - `ControlConnection` and each `Tunnel` run their WebSocket on a daemon thread.
 - Every callback into application code is marshalled onto the GTK main loop with
   `GLib.idle_add` (`client._ui`), so UI code never runs on a network thread.
-- `WebSession` transfers (My Files upload / download) run on their own threads and report progress
+- `WebSession` transfers (Files upload / download) run on their own threads and report progress
   through the same mechanism.
 - Sending is thread-safe; the main loop is never blocked by network I/O.
 

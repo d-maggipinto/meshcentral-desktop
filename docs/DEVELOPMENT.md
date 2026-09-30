@@ -124,14 +124,14 @@ The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
 | Keyboard | AltGr filtering, hotkey grab and release, Ctrl+Alt+F, Esc not intercepted |
 | Clipboard | agent patch with the empty-display bug simulated, local to remote, remote to local, no echo loops |
 | Services / General | systemctl listing speed and states; agent type and core version |
-| My Files | folder, upload, download (checksum), rename, copy, edit, delete |
+| Files | folder, upload, download (checksum), rename, copy, edit, delete |
 | Permissions | full admin and restricted account: tabs, actions, server tabs, view-only desktop, read-only notes |
 | Broadcast | send from the app to a user group; receive web-style broadcasts (auto-close and sticky) |
 | Run command | `whoami` output |
 | My Account | authenticator (TOTP verified), backup codes, login tokens, image upload and read back, new device group, language, connection cards, password change, delete account; always on throwaway accounts |
 | Users | list with live session counts, filter, Select All, Group Action; New Account (plain and email-as-user-name server, password policy); import and export; user page: every edit dialog, memberships, notes, password change, previous logins, account image, events, delete |
 | Groups | list counts, Select All, Group Action delete, New Group, Duplicate Group; group page: rename, description, consent, members with suggestions, device group and device permissions, delete |
-| Layout / My Server | rail entries per account, only the visible device page is built, fullscreen hides the rail; live statistics, history, server console, backup download |
+| Layout / Server | rail entries per account, only the visible device page is built, fullscreen hides the rail; live statistics, history, server console, backup download |
 
 ## Release checklist
 

@@ -7,6 +7,11 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [2.24.0] - 2026-09-30
+### Changed
+- Navigation rail: *My Files* is now **Files** and *My Server* is now **Server** (window title and
+  page headings too); **Account** moved to the bottom of the rail, apart from the other sections.
+
 ## [2.23.0] - 2026-09-30
 First release published on GitHub. Earlier versions are available as archived builds.
 ### Added

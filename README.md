@@ -17,7 +17,7 @@ application instead of a browser tab.
   channel as the MeshCentral web interface. No server changes or plugins are needed.
 - **Debian package** (`.deb`), developed and tested on Debian and Debian based distributions.
 
-Current version: **2.23.0**, see the [changelog](CHANGELOG.md).
+Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
 
 ![Users list](docs/images/users.png)
 
@@ -68,11 +68,11 @@ Current version: **2.23.0**, see the [changelog](CHANGELOG.md).
   MeshAgent console.
 
 ### Server administration
-- **My Server**: download a server backup, restore from a backup, check the version and update,
+- **Server** (*My Server* in the web interface): download a server backup, restore from a backup, check the version and update,
   error log, configuration, server warnings, live CPU, memory and server state, history charts
   (connections, memory, CPU, inbound and outbound traffic, CSV export), server console and server
   tracing.
-- **My Files**: the server side file storage (personal folder and device group folders): upload,
+- **Files** (*My Files* in the web interface): the server side file storage (personal folder and device group folders): upload,
   download, new folder, rename, delete, cut, copy and paste, edit small text files.
 - **Users**, like the web interface's *My Users*: online and offline users with live session
   counts, device group count, last access, permissions, filter, Select All and **Group Action**
@@ -106,8 +106,8 @@ not allowed are greyed out with an explanation instead of failing silently. See
 | Sign in | Devices |
 | ![User page](docs/images/user-page.png) | ![Group page](docs/images/group-page.png) |
 | User page | User group page |
-| ![My Server](docs/images/my-server.png) | ![My Account](docs/images/my-account.png) |
-| My Server | My Account |
+| ![Server](docs/images/my-server.png) | ![Account](docs/images/my-account.png) |
+| Server | Account |
 
 The screenshots were taken on a local test server with sample data.
 
@@ -128,7 +128,7 @@ Download the latest `.deb` and `SHA256SUMS` from the
 
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS      # verify the download
-sudo apt install ./meshcentral-desktop_2.23.0_all.deb
+sudo apt install ./meshcentral-desktop_2.24.0_all.deb
 meshcentral-desktop
 ```
 
@@ -178,7 +178,7 @@ system shortcuts. Choose **Allow**.
 - **TLS**: connections to the server are verified against the system certificate store.
 - **Embedded viewer sign-in**: the remote desktop uses MeshCentral's web viewer, so the app signs in
   to the web interface inside its own private WebKit profile (`~/.local/share/meshcentral-desktop/`).
-- **My Files transfers and server backups** use a separate web session that is kept in memory only.
+- **Transfers in Files and server backups** use a separate web session that is kept in memory only.
   The server configuration viewer shows `config.json`, which can contain secrets; it is only
   available to accounts with the server update right.
 - **Clipboard sync agent patch**: on Linux agents, MeshCentral's own clipboard support is unreliable
@@ -199,7 +199,7 @@ Please report security problems privately, see [SECURITY.md](SECURITY.md).
   viewed.
 - Linux agents only share the **X11** clipboard; applications that run only on Wayland on the remote
   side do not see it.
-- Large file downloads from *My Files* need a web sign-in; accounts that must enter a two-factor code
+- Large file downloads from *Files* need a web sign-in; accounts that must enter a two-factor code
   at every web sign-in are limited to files under 200 KB there.
 - Security keys (WebAuthn) can be listed and removed but not registered, because registering needs
   a web browser.

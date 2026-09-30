@@ -35,14 +35,14 @@ Server-wide ("site") rights come from `userinfo.siteadmin`; `0xFFFFFFFF` is a fu
 | Rename, edit tags | Manage devices `4` |
 | Message box, toast | `8` |
 | Clipboard agent patch | `8` + `16` |
-| Device group folder in *My Files* | Server files `32` on that group |
+| Device group folder in *Files* | Server files `32` on that group |
 
 ## Site rights → app features
 
 | Feature | Required (site rights) |
 |---|---|
-| *My Files* | File access `8` |
-| *My Server* (statistics, history) | Backup `1`, restore `4` or update `16` |
+| *Files* | File access `8` |
+| *Server* (statistics, history) | Backup `1`, restore `4` or update `16` |
 | Download server backup | Backup `1` |
 | Restore server | Restore `4` |
 | Check version / update, error log, configuration | Update `16` |
@@ -63,7 +63,7 @@ Server-wide ("site") rights come from `userinfo.siteadmin`; `0xFFFFFFFF` is a fu
 - Action-bar buttons, power menu items and context-menu entries are disabled individually.
 - The desktop opens in **view-only** mode with a "View only" status.
 - Notes open read-only.
-- Server tabs the account cannot use are greyed out; *My Files* explains how to get access.
+- Server tabs the account cannot use are greyed out; *Files* explains how to get access.
 - The Services tab falls back to the agent's (slower) service list when the account may not run commands.
 
 ## Testing

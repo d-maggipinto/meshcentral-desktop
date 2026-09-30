@@ -583,7 +583,7 @@ class MyServerPanel(Gtk.Box):
     def _build_general(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=16, margin_top=4)
         title = Gtk.Label(xalign=0)
-        title.set_markup("<span size='x-large' weight='bold'>My Server</span>")
+        title.set_markup("<span size='x-large' weight='bold'>Server</span>")
         box.pack_start(title, False, False, 0)
 
         box.pack_start(_section("Server actions"), False, False, 0)
@@ -708,7 +708,7 @@ class MyServerPanel(Gtk.Box):
     def _build_stats(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=16, margin_top=4, spacing=8)
         title = Gtk.Label(xalign=0)
-        title.set_markup("<span size='x-large' weight='bold'>My Server Stats</span>")
+        title.set_markup("<span size='x-large' weight='bold'>Server Stats</span>")
         box.pack_start(title, False, False, 0)
         bar = Gtk.Box(spacing=8)
         refresh = Gtk.Button(label="Refresh", image=Gtk.Image.new_from_icon_name("view-refresh-symbolic",
@@ -879,7 +879,7 @@ class MyServerPanel(Gtk.Box):
     def _build_trace(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=16, margin_top=4, spacing=8)
         title = Gtk.Label(xalign=0)
-        title.set_markup("<span size='x-large' weight='bold'>My Server Tracing</span>")
+        title.set_markup("<span size='x-large' weight='bold'>Server Tracing</span>")
         box.pack_start(title, False, False, 0)
         self._trace = []                                  # newest first
         if not self.full_admin:
