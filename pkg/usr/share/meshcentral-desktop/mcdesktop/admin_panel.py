@@ -4,6 +4,12 @@ These panels take node=None. They read from the control connection with the same
 documented actions the MeshCentral web UI uses (users / usergroups / events) and
 from the already-cached app.ctrl.userinfo / app.ctrl.serverinfo.
 """
+import csv
+import io
+import json
+import re
+import time
+
 from gi.repository import Gtk, GLib, Pango
 
 from . import ui, rights
@@ -105,6 +111,291 @@ def _rights_summary(u):
     return ", ".join(names) if names else "Admin (%s)" % sa
 
 
+# ---- user list export / batch import (web UI "My Users" download + upload icons) ----------
+
+EXPORT_CSV_COLUMNS = ["id", "name", "email", "creation", "lastlogin", "groups", "authfactors",
+                      "siteadmin", "useradmin", "locked"]
+# Same regex as the server's common.validateEmail: the web UI's own example "x1@x" is REJECTED
+# by the server (no TLD) and would fail the whole batch.
+_EMAIL_RE = re.compile(r'^(([^<>()\[\]\\.,;:\s@"]+(\.[^<>()\[\]\\.,;:\s@"]+)*)|(".+"))@'
+                       r'((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$')
+
+
+def _export_time(secs):
+    return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(secs)) if secs else ""
+
+
+def users_to_csv(users):
+    """userlist.csv with the web UI's columns (p4downloadUserInfoCSV). Dates are local time
+    instead of JavaScript's Date string; fields are properly quoted/escaped; a full admin is never
+    reported as locked."""
+    out = io.StringIO()
+    w = csv.writer(out, quoting=csv.QUOTE_NONNUMERIC, lineterminator="\r\n")
+    w.writerow(EXPORT_CSV_COLUMNS)
+    for u in users:
+        sa = u.get("siteadmin") if isinstance(u.get("siteadmin"), int) else 0
+        factors = []
+        if u.get("otpsecret") or u.get("otphkeys"):      # web UI: backup codes only count with a real factor
+            if u.get("otpsecret"):
+                factors.append("AuthApp")
+            if u.get("otphkeys"):
+                factors.append("SecurityKey")
+            if u.get("otpkeys"):
+                factors.append("BackupCodes")
+        w.writerow([u.get("_id", ""), u.get("name", ""), u.get("email") or "",
+                    _export_time(u.get("creation")), _export_time(u.get("login")),
+                    ",".join(u.get("groups") or []), ",".join(factors),
+                    # the web UI tests `& 32` on 0xFFFFFFFF too and marks every full admin "locked"
+                    1 if sa == 0xFFFFFFFF else 0, 1 if sa & 2 else 0,
+                    1 if sa != 0xFFFFFFFF and sa & 32 else 0])
+    return out.getvalue()
+
+
+def users_to_json(users):
+    """userlist.json = the user objects exactly as the server sent them (CloneSafeUser: no
+    password hashes or 2FA secrets), like p4downloadUserInfoJSON."""
+    return json.dumps(list(users), indent=2)
+
+
+def parse_user_import(text, name=""):
+    """JSON array or CSV (header user,pass,email,resetNextLogin[,realname]) → list of dicts.
+    CSV like the web UI: blank rows skipped, empty cells omitted, "true" → True.
+    Raises ValueError with a readable message."""
+    stripped = text.lstrip("﻿ \t\r\n")
+    if name.lower().endswith(".json") or (not name.lower().endswith(".csv") and stripped.startswith("[")):
+        try:
+            data = json.loads(stripped)
+        except ValueError as ex:
+            raise ValueError("Invalid JSON file: %s" % ex)
+        if not isinstance(data, list) or not all(isinstance(e, dict) for e in data):
+            raise ValueError("The JSON file must contain an array of objects.")
+        return data
+    rows = list(csv.reader(io.StringIO(stripped)))
+    if not rows:
+        raise ValueError("The file is empty.")
+    headers = [h.strip() for h in rows[0]]
+    if "user" not in headers or "pass" not in headers:
+        raise ValueError("The CSV header must contain at least the columns user and pass.")
+    out = []
+    for row in rows[1:]:
+        if not any(c.strip() for c in row):
+            continue
+        entry = {}
+        for h, v in zip(headers, row):
+            v = v.strip()
+            if h and v:
+                entry[h] = True if v.lower() == "true" else v
+        out.append(entry)
+    return out
+
+
+def validate_import_entry(e):
+    """Mirror the checks of the web UI and of meshuser.js serverCommandAddUserBatch, so a bad row
+    is shown here, the server rejects the WHOLE batch and does not say which row failed.
+    Password strength rules are only known to the server (not sent on the control channel)."""
+    u, p, em = e.get("user"), e.get("pass"), e.get("email")
+    if not isinstance(u, str) or not 1 <= len(u) <= 64:
+        return "user name must be 1-64 characters"
+    if any(c in u for c in ' ",') or u.startswith("~") or "/" in u:
+        return "user name contains a space, quote, comma, / or starts with ~"
+    if not isinstance(p, str) or not 1 <= len(p) <= 256:
+        return "password must be 1-256 characters"
+    if em is not None and (not isinstance(em, str) or not 1 <= len(em) <= 128 or not _EMAIL_RE.match(em)):
+        return "invalid email address"
+    if "resetNextLogin" in e and not isinstance(e["resetNextLogin"], bool):
+        return "resetNextLogin must be true or false"
+    return None
+
+
+class UserImportDialog(Gtk.Dialog):
+    """"User Account Import": pick a JSON/CSV file, preview + validate every row, then send
+    {action:'adduserbatch', users}. The server replies ONLY on error (with our responseid); on
+    success it just emits one {event:{action:'accountcreate'}} per new account and silently skips
+    names that already exist, so we count those events to report the result."""
+    WAIT_S = 15
+
+    def __init__(self, parent, ctrl, existing_names, on_done=None):
+        super().__init__(title="User Account Import", transient_for=parent, modal=True)
+        self.ctrl, self.on_done = ctrl, on_done
+        self.existing = {n.lower() for n in existing_names}
+        self.entries, self.to_send, self.created = [], [], set()
+        self._listening = False
+        self._timer = None
+        self.set_default_size(820, 540)
+        box = self.get_content_area()
+        box.set_spacing(8)
+        box.set_border_width(12)
+        help_text = ("Create many accounts at once by importing a JSON or CSV file.\n\n"
+                     "JSON:  [ {\"user\":\"x1\",\"pass\":\"…\",\"email\":\"x1@example.com\"},\n"
+                     "         {\"user\":\"x2\",\"pass\":\"…\",\"resetNextLogin\":true} ]\n\n"
+                     "CSV:   user,pass,email,resetNextLogin\n"
+                     "       x1,…,x1@example.com,\n"
+                     "       x2,…,,true")
+        lbl = Gtk.Label(label=help_text, xalign=0, selectable=True)
+        lbl.get_style_context().add_class("monospace")
+        box.pack_start(lbl, False, False, 0)
+        self.chooser = Gtk.FileChooserButton(title="Choose a JSON or CSV file")
+        filt = Gtk.FileFilter()
+        filt.set_name("JSON or CSV files")
+        for pat in ("*.json", "*.csv", "*.JSON", "*.CSV"):
+            filt.add_pattern(pat)
+        self.chooser.add_filter(filt)
+        self.chooser.connect("file-set", lambda *_: self._load())
+        box.pack_start(self.chooser, False, False, 0)
+        # user, email, reset, status
+        self.store = Gtk.ListStore(str, str, str, str)
+        tv = Gtk.TreeView(model=self.store)
+        for i, (title, expand) in enumerate([("User", False), ("Email", False),
+                                             ("Reset password", False), ("Status", True)]):
+            tv.append_column(ui.text_column(title, i, expand))
+        ui.row_tooltip(tv, 3)
+        box.pack_start(ui.scrolled(tv), True, True, 0)
+        self.result = Gtk.Label(xalign=0, wrap=True)
+        box.pack_start(self.result, False, False, 0)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.ok_btn = self.add_button("Import", Gtk.ResponseType.OK)
+        self.ok_btn.get_style_context().add_class("suggested-action")
+        self.ok_btn.set_sensitive(False)
+        self.connect("response", self._on_response)
+        self.connect("destroy", lambda *_: self._stop())
+        self.show_all()
+
+    def _set_result(self, text, error=False):
+        if error:
+            self.result.set_markup(f"<span foreground='#e01b24'>{GLib.markup_escape_text(text)}</span>")
+        else:
+            self.result.set_text(text)
+
+    def load_file(self, path):
+        self.chooser.set_filename(path)
+        self._load(path)
+
+    def _load(self, path=None):
+        path = path or self.chooser.get_filename()
+        self.store.clear()
+        self.entries, self.to_send = [], []
+        self.ok_btn.set_sensitive(False)
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                self.entries = parse_user_import(f.read(), path)
+        except (OSError, UnicodeDecodeError, ValueError) as ex:
+            self._set_result(str(ex), True)
+            return
+        bad = skipped = 0
+        seen = set()
+        for e in self.entries:
+            err = validate_import_entry(e)
+            name = e.get("user") if isinstance(e.get("user"), str) else ""
+            if err:
+                status, bad = "Invalid: " + err, bad + 1
+            elif name.lower() in seen:
+                status, bad = "Invalid: duplicate user name in the file", bad + 1
+            elif name.lower() in self.existing:
+                status, skipped = "Already exists, will be skipped", skipped + 1
+            else:
+                status = "New"
+                self.to_send.append(e)
+            seen.add(name.lower())
+            self.store.append([name, e.get("email") or "", "Yes" if e.get("resetNextLogin") is True else "",
+                               status])
+        if not self.entries:
+            self._set_result("The file contains no accounts.", True)
+        elif bad:
+            self._set_result(f"{bad} invalid row(s), fix the file and choose it again "
+                             "(the server rejects the whole batch if any row is invalid).", True)
+        elif not self.to_send:
+            self._set_result("All accounts in the file already exist.")
+        else:
+            extra = f", {skipped} already exist" if skipped else ""
+            self._set_result(f"{len(self.to_send)} new account(s){extra}.")
+            self.ok_btn.set_sensitive(True)
+
+    def _on_response(self, _d, resp):
+        if resp != Gtk.ResponseType.OK:
+            self.destroy()
+            return
+        self.ok_btn.set_sensitive(False)
+        self.chooser.set_sensitive(False)
+        self.created = set()
+        self._pending = {e["user"].lower() for e in self.to_send}
+        self._set_result(f"Creating {len(self._pending)} account(s)…")
+        self.ctrl.on("event", self._on_event)
+        self.ctrl.on("msg", self._on_msg)
+        self._listening = True
+        self._timer = GLib.timeout_add_seconds(self.WAIT_S, self._timeout)
+        self.ctrl.send({"action": "adduserbatch", "users": self.to_send}, self._on_error_reply)
+
+    def _stop(self):
+        if self._listening:
+            self.ctrl.off("event", self._on_event)
+            self.ctrl.off("msg", self._on_msg)
+            self._listening = False
+        if self._timer:
+            GLib.source_remove(self._timer)
+            self._timer = None
+
+    def _on_error_reply(self, msg):
+        # only sent on failure: 'Access denied', 'Invalid password' (strength rules), LDAP/SSPI…
+        self._stop()
+        err = str(msg.get("result"))
+        if err == "Invalid password":
+            err += ", at least one password does not meet the server's password requirements"
+        self._set_result("Import failed: " + err + ". No accounts were created.", True)
+        self.chooser.set_sensitive(True)
+        self.ok_btn.set_sensitive(True)
+
+    def _on_event(self, msg):
+        ev = msg.get("event") or {}
+        name = (ev.get("account") or {}).get("name") or ev.get("username") or ""
+        if ev.get("action") == "accountcreate" and name.lower() in self._pending:
+            self.created.add(name.lower())
+            self._set_result(f"Created {len(self.created)} of {len(self._pending)} account(s)…")
+            if self.created == self._pending:
+                self._finish()
+
+    def _on_msg(self, msg):
+        if msg.get("type") == "notify" and msg.get("msgid") == 10:     # "Account limit reached."
+            self._finish("The server's account limit was reached.")
+
+    def _timeout(self):
+        self._timer = None
+        self._finish()
+        return False
+
+    def _finish(self, reason=None):
+        self._stop()
+        n, total = len(self.created), len(self._pending)
+        if n == total:
+            self._set_result(f"Created {n} account(s).")
+        else:
+            self._set_result(f"Created {n} of {total} account(s). " + (reason or
+                             "The server did not confirm the others (they may have been created by "
+                             "someone else meanwhile), check the user list."), True)
+        for row in self.store:
+            if row[0].lower() in self.created:
+                row[3] = "Created"
+        self.set_response_sensitive(Gtk.ResponseType.CANCEL, True)
+        self.get_widget_for_response(Gtk.ResponseType.CANCEL).set_label("Close")
+        if self.on_done:
+            self.on_done()
+
+
+def _save_text(parent, title, filename, text):
+    ch = Gtk.FileChooserNative.new(title, parent, Gtk.FileChooserAction.SAVE, "_Save", "_Cancel")
+    ch.set_current_name(filename)
+    ch.set_do_overwrite_confirmation(True)
+    ok = ch.run() == Gtk.ResponseType.ACCEPT
+    dest = ch.get_filename() if ok else None
+    ch.destroy()
+    if not dest:
+        return
+    try:
+        with open(dest, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+    except OSError as ex:
+        ui.message(parent, "Could not save the file", str(ex), Gtk.MessageType.ERROR)
+
+
 def _toolbar(refresh_cb):
     bar = Gtk.Box(spacing=6, margin=8)
     b = Gtk.Button(label="Refresh",
@@ -198,14 +489,49 @@ class UsersPanel(_TablePanel):
 
     def __init__(self, app, node=None):
         super().__init__(app, node)
+        self._users = []
+        manage = rights.has_site(app.ctrl, rights.SITE_MANAGEUSERS)
         bar = self.get_children()[0]
         b = Gtk.Button(label="Broadcast to all users",
                        image=Gtk.Image.new_from_icon_name("mail-send-symbolic", Gtk.IconSize.BUTTON),
                        always_show_image=True)
         b.connect("clicked", lambda *_: BroadcastDialog(self.get_toplevel(), self.app.ctrl))
-        b.set_sensitive(rights.has_site(app.ctrl, rights.SITE_MANAGEUSERS))
+        b.set_sensitive(manage)
         bar.pack_end(b, False, False, 0)
+        # web UI: "Batch create many user accounts" (upload icon)
+        self.import_btn = Gtk.Button(label="Import…", tooltip_text="Batch create many user accounts from a JSON or CSV file",
+                                     image=Gtk.Image.new_from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON),
+                                     always_show_image=True)
+        self.import_btn.connect("clicked", lambda *_: self.import_users())
+        self.import_btn.set_sensitive(False)          # until the list has loaded (existing-name check)
+        bar.pack_end(self.import_btn, False, False, 0)
+        # web UI: "Download user information" (download icon) → userlist.csv / userlist.json
+        menu = Gtk.Menu()
+        for label, fmt in (("CSV format (userlist.csv)", "csv"), ("JSON format (userlist.json)", "json")):
+            item = Gtk.MenuItem(label=label)
+            item.connect("activate", lambda _i, f=fmt: self.export_users(f))
+            menu.append(item)
+        menu.show_all()
+        self.export_btn = Gtk.MenuButton(popup=menu, tooltip_text="Download the list of users")
+        ebox = Gtk.Box(spacing=4)
+        ebox.pack_start(Gtk.Image.new_from_icon_name("document-save-symbolic", Gtk.IconSize.BUTTON), False, False, 0)
+        ebox.pack_start(Gtk.Label(label="Export"), False, False, 0)
+        ebox.pack_start(Gtk.Image.new_from_icon_name("pan-down-symbolic", Gtk.IconSize.BUTTON), False, False, 0)
+        self.export_btn.add(ebox)
+        self.export_btn.set_sensitive(False)          # until the list has loaded
+        bar.pack_end(self.export_btn, False, False, 0)
         bar.show_all()
+
+    def export_users(self, fmt):
+        users = sorted(self._users, key=lambda x: (x.get("name") or "").lower())
+        if fmt == "csv":
+            _save_text(self.get_toplevel(), "Export users", "userlist.csv", users_to_csv(users))
+        else:
+            _save_text(self.get_toplevel(), "Export users", "userlist.json", users_to_json(users))
+
+    def import_users(self):
+        return UserImportDialog(self.get_toplevel(), self.app.ctrl,
+                                [u.get("name") or "" for u in self._users], on_done=self.refresh)
 
     def request(self):
         self.app.ctrl.send({"action": "users"})
@@ -226,6 +552,9 @@ class UsersPanel(_TablePanel):
         userslist = msg.get("users") or []
         if isinstance(userslist, dict):
             userslist = list(userslist.values())
+        self._users = userslist
+        self.export_btn.set_sensitive(bool(userslist))
+        self.import_btn.set_sensitive(rights.has_site(self.app.ctrl, rights.SITE_MANAGEUSERS))
         for u in sorted(userslist, key=lambda x: (x.get("name") or "").lower()):
             self.store.append([u.get("name", ""), u.get("_id", ""),
                                _rights_summary(u), "Yes" if _has_2fa(u) else "No"])
