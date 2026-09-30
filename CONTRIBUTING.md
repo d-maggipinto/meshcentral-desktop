@@ -33,8 +33,7 @@ interface page you mean helps a lot.
    [docs/PROTOCOL.md](docs/PROTOCOL.md)) and respect the account's permissions (see
    [docs/PERMISSIONS.md](docs/PERMISSIONS.md)). The server enforces permissions; the app should only
    offer what the account may do.
-5. Run the unit tests (`python3 -m unittest discover -s tests/unit -v`) and build the package
-   (`scripts/build-deb.sh`). If your change touches protocol behaviour, test it against a local
+5. Build the package (`scripts/build-deb.sh`). If your change touches protocol behaviour, test it against a local
    MeshCentral server as described in [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md), never against a
    production server.
 6. Update `CHANGELOG.md` and the documentation when behaviour changes.

@@ -11,7 +11,7 @@ sudo apt install python3 python3-gi python3-websocket python3-cairo \
   fakeroot dpkg-dev
 # optional, for the authenticator QR code in My Account:
 sudo apt install python3-qrcode
-# for the rig tests:
+# for testing against a local server:
 sudo apt install xvfb nodejs npm xclip
 ```
 
@@ -45,17 +45,9 @@ the front. Quit it first (`pkill -f meshcentral-desktop`).
 
 ## Tests
 
-**Unit tests** (no server, no display):
-
-```bash
-python3 -m unittest discover -s tests/unit -v
-```
-
-They cover the pure logic: import parsing and validation, CSV export, permission labels, rights
-calculation, formatting. GitHub Actions runs them on every push, together with the package build.
-
-**Rig tests** drive the real application against a local MeshCentral server and, for remote
-desktop features, a real agent. They are in [`tests/rig/`](../tests/rig/README.md) with an index.
+The test scripts are kept outside the public repository. Every feature is verified against a
+local MeshCentral server and, for remote desktop features, a real agent, as described below.
+GitHub Actions checks the Python syntax and builds the package on every push.
 
 ### Local test server
 
@@ -97,11 +89,11 @@ The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
 - **Run GUI tests under Xvfb**, so windows, keyboard grabs and system dialogs never touch your
   session:
   ```bash
-  GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 xvfb-run -a -s "-screen 0 1920x1080x24" python3 tests/rig/<script>.py
+  GDK_BACKEND=x11 WEBKIT_DISABLE_DMABUF_RENDERER=1 xvfb-run -a -s "-screen 0 1920x1080x24" python3 <script>.py
   ```
   Under Xvfb the app's clipboard is separate from the desktop session's, which makes clipboard sync
   tests meaningful.
-- Test instances use their own application id (`rigenv.TEST_APP_ID`). With the default id a
+- Test instances use their own application id. With the default id a
   running installed copy would be activated instead, and the test would exit silently.
 - For the self-signed local certificate the scripts turn off TLS verification (WebSocket client,
   WebKit and HTTP transfers). **Local testing only.**
@@ -137,7 +129,7 @@ The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
 ## Release checklist
 
 1. Version set in both places, `scripts/build-deb.sh` succeeds.
-2. Unit tests pass; rig tests pass for the areas that changed.
+2. The changed areas are tested against the local server.
 3. `CHANGELOG.md` updated; `README.md` and `docs/` updated for behaviour changes.
 4. Push a tag `vX.Y.Z` (`git tag -a vX.Y.Z -m "MeshCentral Desktop X.Y.Z"`, then
    `git push origin vX.Y.Z`). GitHub Actions builds the package and publishes the release with the

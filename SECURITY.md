@@ -19,5 +19,5 @@ Problems in MeshCentral itself (the server, the agent or the web viewer) should 
 ## Scope notes
 
 - The app stores passwords only in the system keyring, and only when *Remember password* is ticked.
-- The rig test scripts in `tests/rig/` turn off TLS verification on purpose, for a local test
-  server on 127.0.0.1. They are not part of the installed package.
+- The installed package contains no test code. Development tests turn off TLS verification only
+  for a local test server on 127.0.0.1.

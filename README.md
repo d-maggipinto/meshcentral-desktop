@@ -227,13 +227,7 @@ Run from the source tree without installing:
 python3 pkg/usr/share/meshcentral-desktop/main.py
 ```
 
-Run the unit tests:
-
-```bash
-python3 -m unittest discover -s tests/unit -v
-```
-
-Build steps, the local test server, the rig tests and the release checklist are in
+Build steps, the local test server, the testing rules and the release checklist are in
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Roadmap
@@ -252,7 +246,6 @@ security improvements such as signed releases. See [ROADMAP.md](ROADMAP.md).
 | [docs/REMOTE_DESKTOP.md](docs/REMOTE_DESKTOP.md) | remote desktop, keyboard and clipboard internals |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | how MeshCentral rights map to app features |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | build, tests and release |
-| [tests/rig/README.md](tests/rig/README.md) | rig tests against a local MeshCentral server |
 | [ROADMAP.md](ROADMAP.md) | planned features |
 | [CHANGELOG.md](CHANGELOG.md) | release history |
 

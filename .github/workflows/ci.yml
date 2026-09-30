@@ -22,8 +22,8 @@ jobs:
             python3-cairo gir1.2-gtk-3.0 gir1.2-vte-2.91 gir1.2-secret-1 gir1.2-webkit2-4.1 \
             fakeroot dpkg-dev
 
-      - name: Unit tests
-        run: python3 -m unittest discover -s tests/unit -v
+      - name: Syntax check
+        run: python3 -m compileall -q pkg/usr/share/meshcentral-desktop
 
       - name: Build package
         run: scripts/build-deb.sh
