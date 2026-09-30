@@ -320,6 +320,8 @@ class Tunnel:
 # marshalled to the GTK loop.
 import http.cookiejar
 import os
+import re
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -402,6 +404,41 @@ class WebSession:
                 _ui(on_done, str(ex))
         threading.Thread(target=run, daemon=True).start()
 
+    def fetch_to_dir(self, path, folder, on_done=None, timeout=300):
+        """GET <server><path> into `folder`, named like a browser would: the server's
+        Content-Disposition file name (fallback: last part of the path). on_done(err, filepath)."""
+        def run():
+            tmp = None
+            try:
+                self._login()
+                req = urllib.request.Request(self.ctrl.server.url + path, headers={"User-Agent": USER_AGENT})
+                with self._opener().open(req, timeout=timeout) as r:
+                    cd = r.headers.get("Content-Disposition") or ""
+                    m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', cd)
+                    name = urllib.parse.unquote(m.group(1)) if m else path.split("?")[0].rsplit("/", 1)[-1]
+                    name = os.path.basename(name.replace("\\", "/")) or "download"
+                    fd, tmp = tempfile.mkstemp(dir=folder, prefix=".mcd-")
+                    with os.fdopen(fd, "wb") as f:
+                        while True:
+                            b = r.read(self.CHUNK)
+                            if not b:
+                                break
+                            f.write(b)
+                dest, root, ext, i = os.path.join(folder, name), *os.path.splitext(os.path.join(folder, name)), 1
+                while os.path.exists(dest):                  # never overwrite: "name (1).exe"
+                    dest, i = f"{root} ({i}){ext}", i + 1
+                os.replace(tmp, dest)
+                _ui(on_done, None, dest)
+            except Exception as ex:
+                self._logged_in = False
+                if tmp:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                _ui(on_done, str(ex), None)
+        threading.Thread(target=run, daemon=True).start()
+
     def upload(self, link, path, on_progress=None, on_done=None):
         """Upload local file `path` into server folder `link` (e.g. 'user//name/Public')."""
         self.post_file("/uploadfile.ashx", {"link": urllib.parse.quote(link, safe="")}, "files",
@@ -410,6 +447,11 @@ class WebSession:
     def post_file(self, url_path, fields, file_field, path, on_progress=None, on_done=None, timeout=300):
         """Multipart POST of one local file plus form fields (the control-channel auth cookie is
         added as field "auth"). Used by uploadfile.ashx and restoreserver.ashx."""
+        self.post_files(url_path, fields, file_field, [path], on_progress, on_done, timeout)
+
+    def post_files(self, url_path, fields, file_field, paths, on_progress=None, on_done=None, timeout=300):
+        """Multipart POST of several local files (same field name) plus form fields and the
+        control-channel login cookie as "auth" (e.g. uploadfilebatch.ashx)."""
         def run(cookie):
             try:
                 try:
@@ -417,31 +459,35 @@ class WebSession:
                 except Exception:
                     pass                                     # the "auth" cookie field may suffice
                 boundary = "----mcd" + secrets.token_hex(12)
-                name = os.path.basename(path)
 
                 def field(k, v):
                     return (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").encode()
-                head = b"".join(field(k, v) for k, v in fields.items()) + field("auth", cookie or "") + (
-                    f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
-                    f"filename=\"{name}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
-                tail = f"\r\n--{boundary}--\r\n".encode()
-                size = os.path.getsize(path)
+                head = b"".join(field(k, v) for k, v in fields.items()) + field("auth", cookie or "")
+                parts = [(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
+                          f"filename=\"{os.path.basename(p)}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
+                         for p in paths]
+                tail = f"--{boundary}--\r\n".encode()
+                size = sum(os.path.getsize(p) for p in paths)
+                length = len(head) + sum(len(h) for h in parts) + size + 2 * len(paths) + len(tail)
 
                 def body():
                     yield head
                     sent = 0
-                    with open(path, "rb") as f:
-                        while True:
-                            b = f.read(self.CHUNK)
-                            if not b:
-                                break
-                            sent += len(b)
-                            _ui(on_progress, sent, size)
-                            yield b
+                    for p, h in zip(paths, parts):
+                        yield h
+                        with open(p, "rb") as f:
+                            while True:
+                                b = f.read(self.CHUNK)
+                                if not b:
+                                    break
+                                sent += len(b)
+                                _ui(on_progress, sent, size)
+                                yield b
+                        yield b"\r\n"
                     yield tail
                 req = urllib.request.Request(
                     self.ctrl.server.url + url_path, data=body(), method="POST",
-                    headers={"User-Agent": USER_AGENT, "Content-Length": str(len(head) + size + len(tail)),
+                    headers={"User-Agent": USER_AGENT, "Content-Length": str(length),
                              "Content-Type": f"multipart/form-data; boundary={boundary}"})
                 self._opener().open(req, timeout=timeout).read()
                 _ui(on_done, None)

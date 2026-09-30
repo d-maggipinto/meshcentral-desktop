@@ -41,8 +41,14 @@ Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
 ## Features
 
 ### Devices
-- Device tree grouped by device group, with online status, operating system and address, and a
-  live search.
+- Device list like the web interface's *My Devices*: status filter (online, offline, sessions,
+  starred, tagged and more), seven sort orders, *Show OS name*, stars, and a filter box with the web
+  interface's search syntax (`tag:`, `ip:`, `group:`, `os:`, `user:`, `!`, `and`, `or`...).
+- **Group Action** on checked devices: export (CSV or JSON), move to another group, notification,
+  tags, run commands (with the output of each device), upload files, wake, sleep, reset, power off,
+  uninstall agent, delete.
+- Per device group: **Add Agent** (downloads and install commands for Windows, Linux, macOS, mobile
+  and MeshCentral Assistant) and **Invite** (link or email); **Add Device Group** and **MeshCmd**.
 - Device pages in three groups: **Overview** (General, Hardware, Network, Events, Notes),
   **Remote** (Desktop, Terminal, Files) and **Tools** (Processes, Services, Agent Console).
 - Actions: run commands and see their output, wake, sleep, restart, power off, message box, toast

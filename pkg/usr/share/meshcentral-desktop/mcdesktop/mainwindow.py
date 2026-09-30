@@ -15,6 +15,7 @@ from .desktop_panel import DesktopPanel
 from .tools_panel import ProcessesPanel, ServicesPanel, ConsolePanel
 from .admin_panel import UsersPanel, ServerEventsPanel
 from .group_panel import UserGroupsPanel
+from . import device_list as dl
 from .account_panel import AccountPanel
 from .server_files_panel import ServerFilesPanel
 from .server_panel import MyServerPanel
@@ -92,6 +93,14 @@ class MainWindow(Gtk.ApplicationWindow):
         self._open_node_id = None    # nodeid currently shown (guards selection re-fires)
         self._refresh_timer = None   # debounced device-refresh timer
         self._tree_sig = None        # signature of the last rendered device tree
+        # device list view (web UI "My Devices"): status filter, sort, OS name, stars, checked devices
+        self._view = app.config.setdefault("devices_view", {"filter": 0, "sort": 0, "osname": False})
+        self.stars = set(app.config.get("stars") or [])
+        self._checked = set()
+        self._collapsed = set()      # collapsed header keys (session only)
+        self._lastconnects = None    # {nodeid: ms} for the Last Seen sort
+        self._rebuilding = False
+        self.group_actions = dl.GroupActions(self)
 
         self.headerbar = hb = Gtk.HeaderBar(show_close_button=True, title="Devices")
         from . import __version__
@@ -105,7 +114,7 @@ class MainWindow(Gtk.ApplicationWindow):
         menu_btn.set_image(Gtk.Image.new_from_icon_name("open-menu-symbolic", Gtk.IconSize.BUTTON))
         menu_btn.set_popover(self._app_menu())
         hb.pack_end(menu_btn)
-        self.search = Gtk.SearchEntry(placeholder_text="Search devices")
+        self.search = Gtk.SearchEntry(placeholder_text="Filter devices", tooltip_text=dl.SEARCH_HELP, width_chars=22)
         self.search.connect("search-changed", lambda *_: self.filter_devices())
         hb.pack_end(self.search)
 
@@ -135,6 +144,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self.ctrl.on("meshes", self._on_meshes)
         self.ctrl.on("event", self._on_event)
         self.ctrl.on("msg", self._on_ctrl_msg)
+        self.ctrl.on("lastconnects", self._on_lastconnects)
         self.ctrl.on_close = self._on_disconnect
         self.connect("destroy", self._on_destroy)
         # Window-level shortcuts run BEFORE the focused WebView sees the key, so they work
@@ -148,14 +158,21 @@ class MainWindow(Gtk.ApplicationWindow):
     # ---- sidebar -----------------------------------------------------------
     def _build_sidebar(self):
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
-        # icon, name, subtitle-markup, nodeid, is_device
-        self.store = Gtk.TreeStore(str, str, str, str, bool)
-        self.filter = self.store.filter_new()
-        self.filter.set_visible_func(self._filter_func)
-        self.tree = Gtk.TreeView(model=self.filter, headers_visible=False)
+        box.pack_start(self._build_list_toolbar(), False, False, 0)
+        # icon, name, subtitle-markup, nodeid, is_device, checked, header key
+        self.store = Gtk.TreeStore(str, str, str, str, bool, bool, str)
+        self.tree = Gtk.TreeView(model=self.store, headers_visible=False)
+        self.tree.set_tooltip_column(-1)
         self.tree.get_selection().connect("changed", self._on_select)
         self.tree.connect("button-press-event", self._on_tree_click)
+        self.tree.connect("row-collapsed", lambda _t, it, _p: self._on_row_fold(it, True))
+        self.tree.connect("row-expanded", lambda _t, it, _p: self._on_row_fold(it, False))
         col = Gtk.TreeViewColumn("Device")
+        chk = Gtk.CellRendererToggle()
+        chk.connect("toggled", self._on_check_toggled)
+        col.pack_start(chk, False)
+        col.add_attribute(chk, "active", 5)
+        col.add_attribute(chk, "visible", 4)
         icon = Gtk.CellRendererPixbuf()
         icon.set_property("stock-size", Gtk.IconSize.LARGE_TOOLBAR)
         txt = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
@@ -165,7 +182,159 @@ class MainWindow(Gtk.ApplicationWindow):
         col.set_cell_data_func(txt, self._name_cell)
         self.tree.append_column(col)
         box.pack_start(ui.scrolled(self.tree), True, True, 0)
+        # selection bar (web UI Group Action), shown while devices are checked
+        self.sel_bar = Gtk.Box(spacing=6, margin=6)
+        self.sel_label = Gtk.Label(xalign=0)
+        self.sel_bar.pack_start(self.sel_label, True, True, 0)
+        ga = Gtk.Button(label="Group Action…")
+        ga.get_style_context().add_class("suggested-action")
+        ga.connect("clicked", lambda *_: self.group_actions.run(self.checked_nodes()))
+        clr = Gtk.Button(label="Clear")
+        clr.connect("clicked", lambda *_: self.clear_checked())
+        self.sel_bar.pack_end(clr, False, False, 0)
+        self.sel_bar.pack_end(ga, False, False, 0)
+        self.sel_bar.set_no_show_all(True)
+        box.pack_start(self.sel_bar, False, False, 0)
         return box
+
+    def _build_list_toolbar(self):
+        """Status filter, sort and a menu (OS Name, expand / collapse, select, add group, MeshCmd)."""
+        bar = Gtk.Box(spacing=4, margin=6)
+        self.filter_combo = Gtk.ComboBoxText(tooltip_text="Device filter")
+        for label, v in dl.FILTERS:
+            self.filter_combo.append(str(v), label)
+        self.filter_combo.set_active_id(str(self._view.get("filter", 0)))
+        self.filter_combo.connect("changed", lambda c: self._set_view("filter", int(c.get_active_id())))
+        self.sort_combo = Gtk.ComboBoxText(tooltip_text="Sort")
+        for i, label in enumerate(dl.SORTS):
+            self.sort_combo.append(str(i), label)
+        self.sort_combo.set_active_id(str(self._view.get("sort", 0)))
+        self.sort_combo.connect("changed", lambda c: self._set_view("sort", int(c.get_active_id())))
+        bar.pack_start(self.filter_combo, True, True, 0)
+        bar.pack_start(self.sort_combo, True, True, 0)
+        menu = Gtk.Menu()
+        self.osname_item = Gtk.CheckMenuItem(label="Show OS name", active=bool(self._view.get("osname")))
+        self.osname_item.set_tooltip_text("Show the computer's own host name instead of the device name")
+        self.osname_item.connect("toggled", lambda w: self._set_view("osname", w.get_active()))
+        self.selall_item = Gtk.MenuItem(label="Select All")
+        self.selall_item.connect("activate", lambda *_: self.toggle_select_all())
+        items = [self.osname_item, Gtk.SeparatorMenuItem(),
+                 ("Expand all", lambda: self._fold_all(False)), ("Collapse all", lambda: self._fold_all(True)),
+                 Gtk.SeparatorMenuItem(), self.selall_item]
+        sa = rights.site_rights(self.ctrl)
+        extra = []
+        if sa == rights.FULL or not sa & dl.SITE_NONEWGROUPS:
+            extra.append(("Add Device Group…", lambda: dl.add_device_group(self)))
+        if sa == rights.FULL or not sa & dl.SITE_NOMESHCMD:
+            extra.append(("MeshCmd…", lambda: dl.meshcmd_dialog(self)))
+        if extra:
+            items.append(Gtk.SeparatorMenuItem())
+            items += extra
+        for it in items:
+            if isinstance(it, tuple):
+                mi = Gtk.MenuItem(label=it[0])
+                mi.connect("activate", lambda _w, f=it[1]: f())
+                it = mi
+            menu.append(it)
+        menu.show_all()
+        mb = Gtk.MenuButton(popup=menu, tooltip_text="More",
+                            image=Gtk.Image.new_from_icon_name("view-more-symbolic", Gtk.IconSize.BUTTON))
+        bar.pack_end(mb, False, False, 0)
+        return bar
+
+    def _set_view(self, key, value):
+        self._view[key] = value
+        self.app.save_config()
+        if key == "sort" and value == 5 and self._lastconnects is None:
+            self.ctrl.send({"action": "lastconnects"})
+        self._collapsed.clear()
+        self._tree_sig = None
+        self._rebuild_tree()
+
+    def _on_lastconnects(self, msg):
+        lc = msg.get("lastconnects")
+        if isinstance(lc, dict):
+            self._lastconnects = lc
+            self._tree_sig = None
+            self._rebuild_tree()
+
+    # ---- checked devices (Group Action) ------------------------------------
+    def checked_nodes(self):
+        return [self.nodes[i] for i in sorted(self._checked) if i in self.nodes]
+
+    def _on_check_toggled(self, _r, path):
+        row = self.store[path]
+        if not row[4]:
+            return
+        nid = row[3]
+        (self._checked.discard if nid in self._checked else self._checked.add)(nid)
+        self._sync_checks()
+
+    def _sync_checks(self):
+        on = self._checked
+        self.store.foreach(lambda m, p, it: m.set_value(it, 5, m[it][3] in on) if m[it][4] else None)
+        n = len(on)
+        self.sel_label.set_text(f"{n} selected")
+        self.sel_bar.set_visible(n > 0)
+        for c in self.sel_bar.get_children():               # show_all() is a no-op on a no-show-all box
+            c.show()
+        self.selall_item.set_label("Select None" if n else "Select All")
+
+    def clear_checked(self):
+        self._checked.clear()
+        self._sync_checks()
+
+    def toggle_select_all(self):
+        """Web UI Select All: every listed device in an expanded section; Select None."""
+        if self._checked:
+            self._checked.clear()
+        else:
+            def add(m, _path, it):
+                if not m[it][4]:
+                    return
+                parent = m.iter_parent(it)                 # skip devices in collapsed sections
+                if parent is None or self.tree.row_expanded(m.get_path(parent)):
+                    self._checked.add(m[it][3])
+            self.store.foreach(add)
+        self._sync_checks()
+
+    # ---- folding -----------------------------------------------------------
+    def _on_row_fold(self, it, collapsed):
+        if self._rebuilding:
+            return
+        key = self.store[it][6]
+        if key:
+            (self._collapsed.add if collapsed else self._collapsed.discard)(key)
+
+    def _fold_all(self, collapse):
+        if collapse:
+            self.tree.collapse_all()
+        else:
+            self.tree.expand_all()
+
+    def toggle_star(self, node):
+        nid = node["_id"]
+        (self.stars.discard if nid in self.stars else self.stars.add)(nid)
+        self.app.config["stars"] = sorted(self.stars)
+        self.app.save_config()
+        self._tree_sig = None
+        self._rebuild_tree()
+
+    def _group_menu(self, event, meshid):
+        mesh = self.meshes.get(meshid)
+        add, invite = dl.mesh_actions(self.ctrl, mesh)
+        if not (add or invite):
+            return False
+        menu = Gtk.Menu()
+        for label, ok, cb in (("Add Agent…", add, lambda: dl.AddAgentDialog(self, mesh)),
+                              ("Invite…", invite, lambda: dl.InviteDialog(self, mesh))):
+            if ok:
+                mi = Gtk.MenuItem(label=label)
+                mi.connect("activate", lambda _w, f=cb: f())
+                menu.append(mi)
+        menu.show_all()
+        menu.popup_at_pointer(event)
+        return True
 
     # ---- navigation rail ---------------------------------------------------
     def _build_rail(self):
@@ -226,19 +395,14 @@ class MainWindow(Gtk.ApplicationWindow):
     def _name_cell(self, _c, cell, model, it, _d):
         name, sub = model[it][1], model[it][2]
         if model[it][4]:
-            cell.set_property("markup", f"{GLib.markup_escape_text(name)}\n<small>{sub}</small>")
+            star = "<span foreground='#e5a50a'>★</span> " if model[it][3] in self.stars else ""
+            cell.set_property("markup", f"{star}{GLib.markup_escape_text(name)}\n<small>{sub}</small>")
         else:
-            cell.set_property("markup", f"<b>{GLib.markup_escape_text(name)}</b>")
-
-    def _filter_func(self, model, it, _d):
-        q = self.search.get_text().lower().strip()
-        if not q or not model[it][4]:
-            return True
-        return q in model[it][1].lower() or q in (model[it][2] or "").lower()
+            cell.set_property("markup", f"<b>{GLib.markup_escape_text(name)}</b>  <small>{sub}</small>")
 
     def filter_devices(self):
-        self.filter.refilter()
-        self.tree.expand_all()
+        self._tree_sig = None
+        self._rebuild_tree()
 
     # ---- content -----------------------------------------------------------
     def _build_content(self):
@@ -322,47 +486,67 @@ class MainWindow(Gtk.ApplicationWindow):
                 except Exception as ex:
                     print("on_node_update error:", tab["label"], ex)
 
-    def _tree_signature(self, groups):
-        sig = []
-        for meshid in sorted(groups):
-            row = [self.meshes.get(meshid, {}).get("name", "")]
-            for n in groups[meshid]:
-                row.append((n["_id"], n.get("name"), ui.is_online(n), n.get("ip")))
-            sig.append((meshid, tuple(sorted(row[1:])), row[0]))
-        return tuple(sig)
+    def _tree_signature(self):
+        v = self._view
+        nodes = tuple(sorted((n["_id"], n.get("meshid"), n.get("name"), n.get("rname"), n.get("conn"), n.get("pwr"),
+                              n.get("ip"), n.get("osdesc"), tuple(n.get("tags") or ()), n.get("lastbootuptime"),
+                              tuple(sorted(k for k, x in (n.get("sessions") or {}).items() if x)))
+                             for n in self.nodes.values()))
+        meshes = tuple(sorted((m, x.get("name"), x.get("mtype")) for m, x in self.meshes.items()))
+        return (v.get("filter"), v.get("sort"), v.get("osname"), self.search.get_text(), tuple(sorted(self.stars)),
+                nodes, meshes, bool(self._lastconnects))
 
-    def _rebuild_tree(self, groups):
-        # Skip the (visible) rebuild entirely when nothing that shows in the tree
-        # changed, this is what stops the list jumping/scrolling on every event.
-        sig = self._tree_signature(groups)
+    def _rebuild_tree(self, groups=None):
+        """Render the device list: status filter + search, then the chosen sort's sections."""
+        sig = self._tree_signature()
         if sig == self._tree_sig:
             if self._open_node_id and self._open_node_id in self.nodes:
                 self.current = self.nodes[self._open_node_id]
             return
         self._tree_sig = sig
+        v, osname = self._view, bool(self._view.get("osname"))
+        f2 = (self.ctrl.serverinfo or {}).get("features2") or 0
+        mtype = lambda n: (self.meshes.get(n.get("meshid")) or {}).get("mtype")
+        query = self.search.get_text()
+        visible = [n for n in self.nodes.values()
+                   if dl.passes_status(n, v.get("filter", 0), self.stars, mtype(n))
+                   and dl.search_matches(n, query, self.meshes, self.stars, osname, f2)]
+        self._checked &= set(self.nodes)
+        sort = v.get("sort", 0)
+        sections = dl.buckets(visible, sort, self.meshes, osname, self._lastconnects)
+        if sort == 0 and not query.strip() and not v.get("filter"):
+            shown = {k for k, _t, _n in sections}
+            sections += [(m, x.get("name", "Group"), []) for m, x in self.meshes.items() if m not in shown]
+            sections.sort(key=lambda s: (dl._nat_key(s[1]), s[0] or ""))
 
-        # Preserve scroll position and highlighted row across the rebuild.
         vadj = self.tree.get_vadjustment()
         scroll_val = vadj.get_value() if vadj else 0
         sel = self.tree.get_selection()
         sel.handler_block_by_func(self._on_select)
+        self._rebuilding = True
         self.store.clear()
-        for meshid, nodelist in sorted(groups.items(),
-                                       key=lambda kv: (self.meshes.get(kv[0], {}).get("name") or "").lower()):
-            mesh = self.meshes.get(meshid, {})
-            online = sum(1 for n in nodelist if ui.is_online(n))
-            parent = self.store.append(None, ["", mesh.get("name", "Group"),
-                                              f"{online}/{len(nodelist)} online", "", False])
-            for n in sorted(nodelist, key=lambda x: (not ui.is_online(x), (x.get("name") or "").lower())):
-                self.store.append(parent, [self._node_icon(n), n.get("name", "?"),
-                                           self._node_sub(n), n["_id"], True])
+        for key, title, nodes in sections:
+            parent = None
+            if key is not None:
+                count = f"{len(nodes)} device{'s' if len(nodes) != 1 else ''}" if nodes else "No devices"
+                if sort == 0 and nodes and (self.meshes.get(key) or {}).get("mtype") != 3:
+                    count = f"{sum(1 for n in nodes if ui.is_online(n))}/{len(nodes)} online"
+                parent = self.store.append(None, ["", title, count, "", False, False, key])
+            for n in nodes:
+                self.store.append(parent, [self._node_icon(n), dl.node_name(n, osname) or "None", self._node_sub(n),
+                                           n["_id"], True, n["_id"] in self._checked, ""])
         self.tree.expand_all()
-        # Re-highlight the open device silently (no scroll_to_cell -> no jump).
+        def fold(m, path, it):
+            if m[it][6] in self._collapsed:
+                self.tree.collapse_row(path)
+        self.store.foreach(fold)
+        self._rebuilding = False
         if self._open_node_id:
             self._reselect_silent(self._open_node_id)
             if self._open_node_id in self.nodes:
                 self.current = self.nodes[self._open_node_id]
         sel.handler_unblock_by_func(self._on_select)
+        self._sync_checks()
         if vadj:
             GLib.idle_add(lambda: (vadj.set_value(scroll_val), False)[1])
 
@@ -372,12 +556,19 @@ class MainWindow(Gtk.ApplicationWindow):
                 self.tree.get_selection().select_path(path)
                 return True
             return False
-        self.filter.foreach(walk)
+        self.store.foreach(walk)
+
+    def _is_local(self, n):
+        """Agentless "local device" (device group type 3): no online state, like the web UI."""
+        return (self.meshes.get(n.get("meshid")) or {}).get("mtype") == 3
 
     def _node_icon(self, n):
-        return "computer-symbolic" if ui.is_online(n) else "network-offline-symbolic"
+        return "computer-symbolic" if ui.is_online(n) or self._is_local(n) else "network-offline-symbolic"
 
     def _node_sub(self, n):
+        if self._is_local(n):
+            parts = ["Local device", n.get("host") or n.get("ip")]
+            return " · ".join(GLib.markup_escape_text(p) for p in parts if p)
         parts = [p for p in (ui.node_os(n), "Online" if ui.is_online(n) else "Offline", n.get("ip")) if p]
         sub = " · ".join(GLib.markup_escape_text(p) for p in parts)
         color = "#2ecc71" if ui.is_online(n) else "#e74c3c"
@@ -591,9 +782,14 @@ class MainWindow(Gtk.ApplicationWindow):
         if event.button == 3:
             path = tree.get_path_at_pos(int(event.x), int(event.y))
             if path:
+                row = self.store[path[0]]
+                if not row[4]:
+                    return self._group_menu(event, row[6]) if self._view.get("sort", 0) == 0 else True
                 tree.get_selection().select_path(path[0])
                 if self.current:
-                    self.actions.context_menu(event, self.current)
+                    node = self.current
+                    star = ("Unstar" if node["_id"] in self.stars else "Star", lambda: self.toggle_star(node))
+                    self.actions.context_menu(event, node, extra=[star])
                 return True
         return False
 
@@ -668,8 +864,20 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         if action == "nodeconnect":
             self._notify_connection(msg.get("event") or {})
+        if action == "devicesessions":                     # live sessions / help requests (filters)
+            ev = msg.get("event") or {}
+            node = self.nodes.get(ev.get("nodeid"))
+            if node is not None:
+                sess = {k: x for k, x in (ev.get("sessions") or {}).items() if x}
+                if sess:
+                    node["sessions"] = sess
+                else:
+                    node.pop("sessions", None)
+                if self._view.get("filter") in (2, 6):
+                    self._rebuild_tree()
+            return
         if action in ("addnode", "removenode", "changenode", "nodeconnect", "meshchange", "createmesh",
-                      "deletemesh"):
+                      "deletemesh", "nodemeshchange"):
             # Coalesce bursts of events into a single refresh so the tree does not
             # rebuild (and jump) on every event.
             if self._refresh_timer:

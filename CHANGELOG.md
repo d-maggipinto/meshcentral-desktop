@@ -8,6 +8,24 @@ before that and are available as archived builds on the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
 ## [2.24.0] - 2026-09-30
+### Added
+- **Devices list like the web UI's "My Devices"**:
+  - status filter (All, Online, Offline, Sessions, Starred, Intel® AMT, Help, Tagged, Untagged),
+    sort (Group, Power, Device, Tags, Group-Tags, Last Seen, Last Boot Up Time) and *Show OS name*,
+    remembered between sessions;
+  - the filter box understands the web UI's search syntax (`user:`, `ip:`, `group:`, `tag:`, `os:`,
+    `desc:`, `connectivity:` and more, `!` to negate, `and` / `or`);
+  - stars (right-click a device, kept in the app's settings), expand / collapse all, empty device
+    groups are listed, section headers show the device counts;
+  - checkboxes, **Select All / None** and **Group Action**: export device information (CSV / JSON,
+    with or without device details), move to device group, device notification (toast, message box,
+    alert box), edit tags (add / set / remove), run commands with the **output of every device**,
+    upload files, wake-up, sleep, reset, power off, uninstall agent, delete devices. Devices without
+    the needed right are skipped and counted;
+  - right-click a device group for **Add Agent** (Windows, Linux / BSD, binary installer, macOS,
+    mobile, MeshCentral Assistant and the uninstall variants, with downloads through the app and
+    copyable install commands) and **Invite** (invitation link, or email when the server can send
+    it); the list menu offers **Add Device Group** and **MeshCmd**.
 ### Changed
 - Navigation rail: *My Files* is now **Files** and *My Server* is now **Server** (window title and
   page headings too); **Account** moved to the bottom of the rail, apart from the other sections.

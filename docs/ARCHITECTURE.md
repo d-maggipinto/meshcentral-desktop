@@ -36,6 +36,7 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `account_panel.py` | My Account: 2FA (authenticator + QR, backup codes, security keys), previous logins, notification / localization settings, password, login tokens, delete account, device groups, account image |
 | `server_panel.py` | *Server*: server actions, live statistics (cairo gauges), history charts, server console |
 | `server_files_panel.py` | *Files*: server-side storage (*My Files* in the web interface) |
+| `device_list.py` | Devices list: status filter, search syntax, sorts, stars (`buckets`, `search_matches`, `passes_status`), `GroupActions` (+ `GroupRunDialog`), `AddAgentDialog`, `InviteDialog`, Add Device Group, MeshCmd |
 | `group_panel.py` | Groups: `UserGroupsPanel` (list, Select All, Group Action, New / Duplicate Group) and `GroupPage` (group page) |
 | `user_panel.py` | Users → one user's page (`UserPage`: General + Events, edit dialogs, `RightsDialog` for device-group / device permissions, `show_previous_logins` and `choose_account_image` shared with My Account) |
 | `ui.py` | Small shared helpers (online/OS detection, formatting, dialogs, JSON tree view) |

@@ -129,6 +129,7 @@ The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
 | Broadcast | send from the app to a user group; receive web-style broadcasts (auto-close and sticky) |
 | Run command | `whoami` output |
 | My Account | authenticator (TOTP verified), backup codes, login tokens, image upload and read back, new device group, language, connection cards, password change, delete account; always on throwaway accounts |
+| Devices list | status filters, search syntax, every sort, stars, checked devices and Select All, Group Action edit tags / move / delete / export, Add Agent links and commands, invite link, Add Device Group (agentless test devices) |
 | Users | list with live session counts, filter, Select All, Group Action; New Account (plain and email-as-user-name server, password policy); import and export; user page: every edit dialog, memberships, notes, password change, previous logins, account image, events, delete |
 | Groups | list counts, Select All, Group Action delete, New Group, Duplicate Group; group page: rename, description, consent, members with suggestions, device group and device permissions, delete |
 | Layout / Server | rail entries per account, only the visible device page is built, fullscreen hides the rail; live statistics, history, server console, backup download |

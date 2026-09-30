@@ -83,7 +83,8 @@ class GeneralPanel(Gtk.Box):
         agent = node.get("agent") or {}
         rows = [
             ("Name", node.get("name", "")),
-            ("Status", "Online" if ui.is_online(node) else "Offline"),
+            ("Status", "Local device" if ((getattr(self.app, "meshes", None) or {}).get(node.get("meshid")) or {}).get("mtype") == 3
+             else "Online" if ui.is_online(node) else "Offline"),
             ("Operating system", ui.node_os(node)),
             ("Group", _group_name(self.app, node)),
             ("IP address", node.get("ip", "")),

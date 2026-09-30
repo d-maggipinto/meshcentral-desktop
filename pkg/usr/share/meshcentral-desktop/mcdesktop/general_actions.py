@@ -182,7 +182,8 @@ class DeviceActions:
         self.name_label.set_text(node.get("name", ""))
 
     # ---- context menu ------------------------------------------------------
-    def context_menu(self, event, node):
+    def context_menu(self, event, node, extra=None):
+        """extra: [(label, callback)] added at the end (e.g. Star / Unstar from the device list)."""
         online = ui.is_online(node)
         c = self.caps(node)
         menu = Gtk.Menu()
@@ -198,6 +199,8 @@ class DeviceActions:
                  ("Notes…", self.notes, True),
                  ("Rename…", self.rename_device, c.manage),
                  ("Open in web UI", self.open_web, True)]
+        if extra:
+            items += [(None, None, None)] + [(label, cb, True) for label, cb in extra]
         for label, cb, enabled in items:
             if label is None:
                 menu.append(Gtk.SeparatorMenuItem())

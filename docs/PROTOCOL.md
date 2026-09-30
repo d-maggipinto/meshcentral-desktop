@@ -41,6 +41,39 @@ Agent identification: `node.agent.ver` is `0` on modern agents; the web UI shows
 from its `agentsStr` table (`node.agent.id`, e.g. 6 = "Linux 64bit") and `node.agent.core`
 (the running core's build, e.g. `Feb 15 2026, 1740302142`). `agent.root === false` → restricted agent.
 
+## Devices list and Group Action
+
+Filters, search and sorts are client-side over `nodes` (as in the web UI). Live session and help
+state: `{action:'event', event:{action:'devicesessions', nodeid, sessions}}` (keys kvm, terminal,
+files, registry, tcp, udp, help, msg, app). "Last Seen": `{action:'lastconnects'}` →
+`{action:'lastconnects', lastconnects:{<nodeid>: ms}}` (no responseid). Stars are browser state in
+the web UI (`userWebState`, which REPLACES the whole saved web state and cannot be read over the
+control channel), so the app keeps its own stars in `config.json`.
+
+| Request | Reply / notes |
+|---|---|
+| `{action:'wakedevices', nodeids}` | reply without responseid; several nodes: one `{result:'ok'}` per node |
+| `{action:'poweraction', nodeids, actiontype}` | 2 off, 3 reset, 4 sleep; one reply per node, sent even when denied |
+| `{action:'removedevices', nodeids}` | replies only with a responseid (one per node); confirmation = `event removenode` |
+| `{action:'changeDeviceMesh', nodeids, meshid}` | needs Manage Computers `4` on the target and Edit Group `1` on source and target, same group type, else silently skipped; confirmation = `event nodemeshchange` |
+| `{action:'changedevice', nodeid, tags:'a,b'}` | tags as a comma string, `''` clears; confirmation = `event changenode` |
+| `{action:'toast', nodeids, title, msg}` / `{action:'msg', type:'messagebox'\|'alertbox', nodeid, title, msg, timeout?}` | toast needs Chat & Notify `16384`; messagebox/alertbox never reply |
+| `{action:'runcommands', nodeids, type, runAsUser, cmds, reply:true, responseid}` | the ack/error replies carry only the responseid (no nodeid), so the app sends one request per device; output = `{action:'msg', type:'runcommands', result, responseid, nodeid}` |
+| `{action:'uninstallagent', nodeids}` | no reply at all; the device record stays |
+| `{action:'getDeviceDetails', nodeids, tz, tf, l, type:'csv'\|'json'}` | `{action:'getDeviceDetails', data, type}`, no responseid; hardware/network only with Device Details `0x100000` |
+| `POST /uploadfilebatch.ashx` (multipart) | fields `nodeIds` (comma-joined), `files`, `winpath` and/or `linuxpath`, `createFolder=on`, `overwriteFiles=on`, and `auth` = the `authcookie` cookie (the web form's `authCookie` field is ignored); empty 200, no progress |
+| `{action:'createInviteLink', meshid, expire, flags, agents}` | always answered: `{meshid, url, cookie, expire}`; link = `https://<server>/agentinvite?c=<cookie>` |
+| `{action:'inviteAgent', meshid, email, name, os, flags, msg, expire}` | email invitation, needs `features & 0x40`; replies only with a responseid |
+| `{action:'createmesh', meshname, meshtype, desc}` | always answered `{result:'ok', meshid}`; event `createmesh` |
+
+Add Agent has no server message: downloads are `meshagents?id=<3|4|43>&meshid=<short>&installflags=<0|1|2>`
+(Windows), `meshosxagent?id=<16|29|10005>&meshid=`, `meshagents?id=<short meshid>&installflags=&meshinstall=<system>`
+(binary installer), `meshagents?id=10006&meshid=&ac=` (Assistant), `meshagents?meshcmd=<id>` (MeshCmd); the Linux
+command downloads `meshagents?script=1` and runs `meshinstall.sh <server> '<short meshid>'`. The server name is
+`serverinfo.name` when it contains a dot (else the address the client connected to); `features & 0x2000` adds
+`--no-proxy`, `features & 0x80000000` adds `--no-check-certificate`. Downloads are anonymous unless the server
+sets `lockagentdownload`, so the app downloads them with its web session.
+
 ## Agent messages (`{action:'msg', type, nodeid, …}`)
 
 Routed only if the account has remote-control (8) or view-only (256) rights on the device.
