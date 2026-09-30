@@ -293,9 +293,10 @@ class DeviceActions:
 
 
 class NotesDialog(Gtk.Dialog):
-    """Quick view/edit of a single device's notes (getNotes / setNotes)."""
+    """Quick view/edit of the notes of a device, or of a user (Users page), getNotes / setNotes
+    with the object's id; `node` only needs "_id" and "name"."""
 
-    def __init__(self, parent, ctrl, node, editable=True):
+    def __init__(self, parent, ctrl, node, editable=True, what="device"):
         super().__init__(title=f"Notes - {node.get('name', '')}", transient_for=parent, modal=True)
         self.ctrl = ctrl
         self.node = node
@@ -307,7 +308,7 @@ class NotesDialog(Gtk.Dialog):
         box = self.get_content_area()
         box.set_spacing(6)
         box.set_border_width(10)
-        hint = Gtk.Label(label="Notes for this device (shared with other administrators):",
+        hint = Gtk.Label(label=f"Notes for this {what} (shared with other administrators):",
                          xalign=0)
         hint.get_style_context().add_class("dim-label")
         box.pack_start(hint, False, False, 0)
@@ -329,7 +330,7 @@ class NotesDialog(Gtk.Dialog):
         if not editable:
             self.view.set_editable(False)
             self.save_btn.set_sensitive(False)
-            hint.set_text("Notes for this device (read-only, your account may not edit notes here):")
+            hint.set_text(f"Notes for this {what} (read-only, your account may not edit notes here):")
         self.connect("response", self._on_response)
         self.connect("destroy", lambda *_: self._unlisten())
         self._handler = self._on_reply

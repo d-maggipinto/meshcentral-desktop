@@ -686,7 +686,15 @@ class UsersPanel(_TablePanel):
     def __init__(self, app, node=None):
         super().__init__(app, node)
         self._users = []
+        self.usergroups = None           # {ugrp id: group} for the user page (None = not allowed/loaded)
+        self.page = None                 # the open user_panel.UserPage
+        self._soon = None
         manage = rights.has_site(app.ctrl, rights.SITE_MANAGEUSERS)
+        # web UI: click a user → "General - <user>" page
+        self.tree.connect("row-activated", lambda tv, path, _c: self.open_user(tv.get_model()[path][1]))
+        self.tree.set_tooltip_text(None)
+        app.ctrl.on("event", self._on_event)
+        app.ctrl.on("usergroups", self._on_usergroups)
         bar = self.get_children()[0]
         b = Gtk.Button(label="Broadcast to all users",
                        image=Gtk.Image.new_from_icon_name("mail-send-symbolic", Gtk.IconSize.BUTTON),
@@ -738,6 +746,71 @@ class UsersPanel(_TablePanel):
     def new_account(self):
         return NewAccountDialog(self.get_toplevel(), self.app.ctrl, on_done=self.refresh)
 
+    # ---- user page ------------------------------------------------------------------------------
+    def open_user(self, userid):
+        from .user_panel import UserPage
+        user = next((u for u in self._users if u.get("_id") == userid), None)
+        if user is None:
+            return
+        if self.page is not None:
+            self.page.destroy()
+        for w in self.get_children():
+            w.hide()
+        self.page = UserPage(self, user)
+        self.pack_start(self.page, True, True, 0)
+        self.page.show()
+        self.app.ctrl.send({"action": "usergroups"})     # memberships section (needs site right 256 to change)
+        return self.page
+
+    def close_user(self):
+        if self.page is not None:
+            self.page.destroy()
+            self.page = None
+        for w in self.get_children():
+            w.show()
+
+    def _on_usergroups(self, msg):
+        ug = msg.get("ugroups")
+        if isinstance(ug, dict):
+            self.usergroups = ug
+            if self.page is not None:
+                self.page.render()
+
+    def refresh_soon(self, ms=700):
+        """Re-read the user list shortly (after our own change; events also trigger this)."""
+        if self._soon:
+            GLib.source_remove(self._soon)
+        self._soon = GLib.timeout_add(ms, self._refresh_now)
+
+    def _refresh_now(self):
+        self._soon = None
+        self.refresh()
+        return False
+
+    def _on_event(self, msg):
+        ev = msg.get("event") or {}
+        act = ev.get("action")
+        if act in ("accountcreate", "accountchange", "accountremove", "usergroupchange", "meshchange",
+                   "changenode", "removenode"):
+            acc = ev.get("account") or {}
+            if self.page is not None and act == "accountchange" and acc.get("_id") == self.page.user.get("_id"):
+                self.page.on_account_event(ev)
+            if act == "usergroupchange" and self.page is not None:
+                self.app.ctrl.send({"action": "usergroups"})
+            if self._started:
+                self.refresh_soon(1000)
+
+    def teardown(self):
+        super().teardown()
+        self.app.ctrl.off("event", self._on_event)
+        self.app.ctrl.off("usergroups", self._on_usergroups)
+        if self._soon:
+            GLib.source_remove(self._soon)
+            self._soon = None
+        if self.page is not None:
+            self.page.destroy()
+            self.page = None
+
     def import_users(self):
         return UserImportDialog(self.get_toplevel(), self.app.ctrl,
                                 [u.get("name") or "" for u in self._users], on_done=self.refresh)
@@ -767,7 +840,13 @@ class UsersPanel(_TablePanel):
         for u in sorted(userslist, key=lambda x: (x.get("name") or "").lower()):
             self.store.append([u.get("name", ""), u.get("_id", ""),
                                _rights_summary(u), "Yes" if _has_2fa(u) else "No"])
-        self.status.set_text("%d user(s)" % len(userslist))
+        self.status.set_text("%d user(s), double-click a user to open it" % len(userslist))
+        if self.page is not None:                        # keep the open user page current
+            fresh = next((u for u in userslist if u.get("_id") == self.page.user.get("_id")), None)
+            if fresh is None:
+                self.close_user()                        # deleted (here or elsewhere)
+            else:
+                self.page.set_user(fresh)
 
 
 class UserGroupsPanel(_TablePanel):
@@ -902,6 +981,11 @@ class ServerEventsPanel(_TablePanel):
 
     def request(self):
         self.app.ctrl.send({"action": "events", "limit": 300})
+
+    def _on_reply(self, msg):
+        if msg.get("nodeid") or msg.get("userid"):
+            return          # a device's or a user's events (other panels), not the server-wide list
+        super()._on_reply(msg)
 
     def _fill(self, msg):
         self.store.clear()

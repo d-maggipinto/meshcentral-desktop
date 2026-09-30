@@ -285,7 +285,9 @@ class EventsPanel(Gtk.Box):
         self.pack_start(ui.scrolled(tv), True, True, 0)
 
     def _on_reply(self, message):
-        if "events" not in message:
+        # 'events' replies are broadcast-style: keep only the ones for THIS device (the server
+        # echoes nodeid; server-wide and per-user replies carry none / a userid)
+        if "events" not in message or message.get("nodeid") != self.node["_id"]:
             return
         self.store.clear()
         for e in message.get("events") or []:

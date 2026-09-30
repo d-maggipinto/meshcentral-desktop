@@ -463,34 +463,8 @@ class AccountPanel(Gtk.Box):
 
     # ---- account actions ----------------------------------------------------------------
     def previous_logins(self):
-        def show(msg):
-            d, area = self._dialog("Previous logins", 720)
-            d.set_default_size(720, 460)
-            store = Gtk.ListStore(str, str, str)
-            for e in sorted(msg.get("events") or [], key=lambda e: str(e.get("t")), reverse=True):
-                a = [str(x) for x in (e.get("a") or [])]
-                if e.get("m") == 107 and len(a) >= 3:
-                    what, detail = "Login", f"{a[0]} · {a[1]} · {a[2]}"
-                elif e.get("m") == 107:
-                    what, detail = "Login", ", ".join(a)
-                else:
-                    what, detail = f"Event {e.get('m')}", ", ".join(a)
-                if e.get("tn"):
-                    detail += f"  (token: {e['tn']})"
-                store.append([ui.fmt_time(e.get("t")), what, detail])
-            tv = Gtk.TreeView(model=store)
-            for i, (t, ex) in enumerate((("Time", False), ("Event", False), ("From", True))):
-                tv.append_column(ui.text_column(t, i, ex))
-            ui.row_tooltip(tv, 2)
-            area.pack_start(ui.scrolled(tv), True, True, 0)
-            note = f"{len(store)} entries" if len(store) else \
-                "No logins recorded yet. The server records web sign-ins (not app sign-ins) for this list."
-            area.pack_start(Gtk.Label(label=note, xalign=0, wrap=True), False, False, 0)
-            d.add_button("Close", Gtk.ResponseType.CLOSE)
-            d.connect("response", lambda *_: d.destroy())
-            d.show_all()
-        self._once("previousLogins", show)
-        self.ctrl.send({"action": "previousLogins"})
+        from .user_panel import show_previous_logins
+        show_previous_logins(self._top(), self.ctrl, None, "Previous logins")
 
     def notification_settings(self):
         cfg = self.app.config.setdefault("notify", {})

@@ -273,8 +273,11 @@ class MainWindow(Gtk.ApplicationWindow):
         self.ctrl.send({"action": "nodes"})
 
     def _on_meshes(self, msg):
-        for m in msg.get("meshes", []):
-            self.meshes[m["_id"]] = m
+        # the reply is the full list: replace IN PLACE (app.meshes and the panels share this dict),
+        # so deleted groups disappear too
+        fresh = {m["_id"]: m for m in msg.get("meshes", []) if m.get("_id")}
+        self.meshes.clear()
+        self.meshes.update(fresh)
 
     def _on_nodes(self, msg):
         self.nodes.clear()
@@ -658,7 +661,8 @@ class MainWindow(Gtk.ApplicationWindow):
             return
         if action == "nodeconnect":
             self._notify_connection(msg.get("event") or {})
-        if action in ("addnode", "removenode", "changenode", "nodeconnect", "meshchange"):
+        if action in ("addnode", "removenode", "changenode", "nodeconnect", "meshchange", "createmesh",
+                      "deletemesh"):
             # Coalesce bursts of events into a single refresh so the tree does not
             # rebuild (and jump) on every event.
             if self._refresh_timer:
