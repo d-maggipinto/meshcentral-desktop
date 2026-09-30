@@ -11,12 +11,13 @@ Everything goes through the documented control-channel actions the web UI uses:
 Successful changes arrive as {action:'event', event:{action:'accountchange', account}}, the
 Users panel refreshes its list on those events and re-renders this page from the new data.
 """
+import base64
 import os
 import re
 import tempfile
 import time
 
-from gi.repository import Gtk, GLib, GdkPixbuf, Pango
+from gi.repository import Gtk, Gdk, GLib, GdkPixbuf, Pango
 
 from . import ui, rights
 from .client import WebSession
@@ -259,6 +260,38 @@ class RightsDialog:
         return v
 
 
+def choose_account_image(parent):
+    """Pick an image file → (PNG data URL, 256x256 pixbuf) or None. Centre square scaled to 256x256
+    like the web UI's canvas; the server accepts data:image/png|jpeg URLs < 600000 chars."""
+    ch = Gtk.FileChooserNative.new("Choose an image", parent, Gtk.FileChooserAction.OPEN, "_Open", "_Cancel")
+    flt = Gtk.FileFilter()
+    flt.set_name("Images")
+    for mt in ("image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"):
+        flt.add_mime_type(mt)
+    ch.add_filter(flt)
+    if ch.run() != Gtk.ResponseType.ACCEPT:
+        ch.destroy()
+        return None
+    path = ch.get_filename()
+    ch.destroy()
+    return account_image_from_file(parent, path)
+
+
+def account_image_from_file(parent, path):
+    try:
+        pb = GdkPixbuf.Pixbuf.new_from_file(path)
+    except GLib.Error as ex:
+        ui.message(parent, "Cannot open image", str(ex), Gtk.MessageType.ERROR)
+        return None
+    side = min(pb.get_width(), pb.get_height())
+    sq = pb.new_subpixbuf((pb.get_width() - side) // 2, (pb.get_height() - side) // 2, side, side)
+    small = sq.scale_simple(256, 256, GdkPixbuf.InterpType.BILINEAR)
+    ok, data = small.save_to_bufferv("png", [], [])
+    if not ok:
+        return None
+    return "data:image/png;base64," + base64.b64encode(data).decode(), small
+
+
 def show_previous_logins(parent, ctrl, userid=None, title="Previous logins"):
     """previousLogins [{userid}] → {events:[{t, m, a, tn?}]} (m 107 = login from ip, browser, os).
     Shared by My Account (own logins) and the Users page (another user's)."""
@@ -402,8 +435,13 @@ class UserPage(Gtk.Box):
         top = Gtk.Box(spacing=12)
         grid = Gtk.Grid(row_spacing=6, column_spacing=16)
         top.pack_start(grid, True, True, 0)
-        self.avatar = Gtk.Image(valign=Gtk.Align.START)
-        top.pack_end(self.avatar, False, False, 0)
+        self.avatar = Gtk.Image()
+        ev = Gtk.EventBox(valign=Gtk.Align.START, tooltip_text="Manage account image")
+        ev.add(self.avatar)
+        ev.connect("button-release-event", lambda *_: self.manage_image())
+        ev.connect("realize", lambda w: w.get_window().set_cursor(
+            Gdk.Cursor.new_from_name(w.get_display(), "pointer")))
+        top.pack_end(ev, False, False, 0)
         self.general.pack_start(top, False, False, 0)
         self._row_n = 0
 
@@ -630,6 +668,59 @@ class UserPage(Gtk.Box):
                         path, None, done)
 
     # ---- edits --------------------------------------------------------------------------------
+    def manage_image(self):
+        """web UI account_manageImage(1): updateUserImage {userid, image: dataURL | 0 (delete)}"""
+        if not self._my_sa() & 2:
+            return
+        u = self.user
+        has = bool((u.get("flags") or 0) & 1)
+        d = Gtk.Dialog(title="Manage Account Image", transient_for=self._top(), modal=True)
+        area = d.get_content_area()
+        area.set_spacing(8)
+        area.set_border_width(12)
+        pick = Gtk.Button(label="Choose file…", halign=Gtk.Align.START)
+        area.pack_start(pick, False, False, 0)
+        preview = Gtk.Image()
+        cur = getattr(self, "_avatar_pb", None) if has else None
+        if cur is not None:
+            preview.set_from_pixbuf(cur.scale_simple(256, 256, GdkPixbuf.InterpType.BILINEAR))
+        else:
+            preview.set_from_icon_name("avatar-default-symbolic", Gtk.IconSize.DIALOG)
+            preview.set_pixel_size(256)
+        area.pack_start(preview, False, False, 0)
+        delete = d.add_button("Delete", Gtk.ResponseType.REJECT)
+        delete.set_sensitive(has)
+        d.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        ok = d.add_button("OK", Gtk.ResponseType.OK)
+        ok.get_style_context().add_class("suggested-action")
+        ok.set_sensitive(False)
+        chosen = {}
+
+        def on_pick(*_):
+            r = self._choose_image(d)
+            if r:
+                chosen["url"], chosen["pb"] = r
+                preview.set_from_pixbuf(r[1])
+                ok.set_sensitive(True)
+        pick.connect("clicked", on_pick)
+        d.show_all()                              # 3 answers (OK / Delete / Cancel) → not _run()
+        r = d.run()
+        d.destroy()
+        if r == Gtk.ResponseType.OK and chosen:
+            self.ctrl.send({"action": "updateUserImage", "userid": u["_id"], "image": chosen["url"]})
+            self._avatar_pb = chosen["pb"].scale_simple(96, 96, GdkPixbuf.InterpType.BILINEAR)
+            self.avatar.set_from_pixbuf(self._avatar_pb)
+            self._avatar_for = (u["_id"], (u.get("flags") or 0) | 1)
+            self.panel.refresh_soon()
+        elif r == Gtk.ResponseType.REJECT and ui.confirm(self._top(), "Delete the account image?", "",
+                                                           "Delete", True):
+            self.ctrl.send({"action": "updateUserImage", "userid": u["_id"], "image": 0})
+            self._avatar_pb, self._avatar_for = None, None
+            self.panel.refresh_soon()
+
+    def _choose_image(self, parent):
+        return choose_account_image(parent)          # separate for tests
+
     def edit_email(self):
         si = self.ctrl.serverinfo or {}
         d, area, ok = _dialog(self._top(), f"Change Email for {self.user.get('name')}")

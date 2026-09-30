@@ -14,7 +14,6 @@ Protocol (meshuser.js / webserver.js):
 Two-factor state in userinfo: otpsecret (1 = app set up), otpkeys (backup codes left), otphkeys (keys).
 Settings-locked accounts (site right 1024, not full admin) cannot change security settings.
 """
-import base64
 import os
 import tempfile
 import threading
@@ -761,31 +760,12 @@ class AccountPanel(Gtk.Box):
             GLib.timeout_add(800, lambda: (self.ctrl.send({"action": "meshes"}), False)[1])
 
     def change_image(self):
-        ch = Gtk.FileChooserNative.new("Choose an image", self._top(), Gtk.FileChooserAction.OPEN, "_Open", "_Cancel")
-        flt = Gtk.FileFilter()
-        flt.set_name("Images")
-        for mt in ("image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp"):
-            flt.add_mime_type(mt)
-        ch.add_filter(flt)
-        if ch.run() != Gtk.ResponseType.ACCEPT:
-            ch.destroy()
-            return
-        path = ch.get_filename()
-        ch.destroy()
-        try:
-            pb = GdkPixbuf.Pixbuf.new_from_file(path)
-        except GLib.Error as ex:
-            ui.message(self._top(), "Cannot open image", str(ex), Gtk.MessageType.ERROR)
-            return
-        side = min(pb.get_width(), pb.get_height())                 # centre square, 256x256 like the web UI
-        sq = pb.new_subpixbuf((pb.get_width() - side) // 2, (pb.get_height() - side) // 2, side, side)
-        small = sq.scale_simple(256, 256, GdkPixbuf.InterpType.BILINEAR)
-        ok, data = small.save_to_bufferv("png", [], [])
-        if not ok:
-            return
-        url = "data:image/png;base64," + base64.b64encode(data).decode()
-        self.ctrl.send({"action": "updateUserImage", "image": url})
-        self.avatar.set_from_pixbuf(small.scale_simple(200, 200, GdkPixbuf.InterpType.BILINEAR))
+        from .user_panel import choose_account_image
+        picked = choose_account_image(self._top())
+        if picked:
+            url, pb = picked
+            self.ctrl.send({"action": "updateUserImage", "image": url})
+            self.avatar.set_from_pixbuf(pb.scale_simple(200, 200, GdkPixbuf.InterpType.BILINEAR))
 
     def remove_image(self):
         if ui.confirm(self._top(), "Remove your account image?", "", "Remove", destructive=True):
