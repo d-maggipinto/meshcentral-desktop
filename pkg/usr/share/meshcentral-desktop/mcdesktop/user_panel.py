@@ -441,7 +441,14 @@ class UserPage(Gtk.Box):
         ev.connect("button-release-event", lambda *_: self.manage_image())
         ev.connect("realize", lambda w: w.get_window().set_cursor(
             Gdk.Cursor.new_from_name(w.get_display(), "pointer")))
-        top.pack_end(ev, False, False, 0)
+        side = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, valign=Gtk.Align.START)
+        side.pack_start(ev, False, False, 0)
+        n = (getattr(self.panel, "sessions", None) or {}).get(u.get("_id"))
+        if n:
+            sl = Gtk.Label(label="1 active session" if n == 1 else f"{n} active sessions")
+            sl.get_style_context().add_class("dim-label")
+            side.pack_start(sl, False, False, 0)
+        top.pack_end(side, False, False, 0)
         self.general.pack_start(top, False, False, 0)
         self._row_n = 0
 

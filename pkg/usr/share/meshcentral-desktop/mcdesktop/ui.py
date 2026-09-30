@@ -32,6 +32,17 @@ def set_time_format(fmt):
         _TIME_FMT = fmt
 
 
+def fmt_date(secs):
+    """Date only (the date part of the app's date/time format), e.g. the Users list's Last Access."""
+    if not secs:
+        return ""
+    fmt = _TIME_FMT.split(" ")[0] if "%H" in _TIME_FMT else _TIME_FMT
+    try:
+        return time.strftime(fmt, time.localtime(secs / 1000 if secs > 1e11 else secs))
+    except Exception:
+        return ""
+
+
 def fmt_time(ms):
     if not ms:
         return ""

@@ -110,6 +110,26 @@ def _rights_summary(u):
     return ", ".join(names) if names else "Admin (%s)" % sa
 
 
+def permissions_label(u):
+    """Users list "Permissions" column exactly like the web UI's addUserHtml."""
+    sa = u.get("siteadmin")
+    pre = "Locked, " if isinstance(sa, int) and sa & 32 and sa != 0xFFFFFFFF else ""
+    ur = sa & (0xFFFFFFFF - 1248) if isinstance(sa, int) else 0
+    if not isinstance(sa, int) or ur == 0:
+        label = "User"
+    elif ur == 8:
+        label = "User + Files"
+    elif sa == 0xFFFFFFFF:
+        label = "Administrator"
+    elif ur & 2:
+        label = "Manager"
+    else:
+        label = "Partial"
+    if isinstance(sa, int) and sa != 0xFFFFFFFF and sa & (64 + 128 + 1024):
+        label += "*"
+    return pre + label
+
+
 # ---- user list export / batch import (web UI "My Users" download + upload icons) ----------
 
 EXPORT_CSV_COLUMNS = ["id", "name", "email", "creation", "lastlogin", "groups", "authfactors",
@@ -680,22 +700,35 @@ class _TablePanel(Gtk.Box):
 
 
 class UsersPanel(_TablePanel):
-    COLUMNS = [("Name", True), ("User ID", False), ("Rights", True), ("2FA", False)]
+    """Web UI "My Users": online / offline sections, checkboxes (Select All / None, Group Action),
+    Device Groups, Last Access (live session count from wssessioncount), Permissions, filter."""
+    COLUMNS = [("Name", True)]          # replaced by the tree built in _build_tree
     ACTION = "users"
+    # TreeStore columns
+    C_CHECK, C_NAME, C_GROUPS, C_ACCESS, C_PERMS, C_2FA, C_ID, C_TIP, C_ISUSER, C_CHECKABLE, C_WEIGHT = range(11)
 
     def __init__(self, app, node=None):
         super().__init__(app, node)
         self._users = []
+        self.sessions = {}               # userid -> number of open web/app sessions (wssessioncount)
+        self._checked = set()
         self.usergroups = None           # {ugrp id: group} for the user page (None = not allowed/loaded)
         self.page = None                 # the open user_panel.UserPage
         self._soon = None
         manage = rights.has_site(app.ctrl, rights.SITE_MANAGEUSERS)
-        # web UI: click a user → "General - <user>" page
-        self.tree.connect("row-activated", lambda tv, path, _c: self.open_user(tv.get_model()[path][1]))
-        self.tree.set_tooltip_text(None)
+        self._build_tree()
         app.ctrl.on("event", self._on_event)
         app.ctrl.on("usergroups", self._on_usergroups)
+        app.ctrl.on("wssessioncount", self._on_sessions)
         bar = self.get_children()[0]
+        # web UI: Select All / Select None, Group Action, New Account…, Filter
+        self.select_btn = Gtk.Button(label="Select All")
+        self.select_btn.connect("clicked", lambda *_: self.toggle_select_all())
+        bar.pack_start(self.select_btn, False, False, 0)
+        self.group_btn = Gtk.Button(label="Group Action…", sensitive=False,
+                                    tooltip_text="Perform an operation on all selected users")
+        self.group_btn.connect("clicked", lambda *_: self.group_action())
+        bar.pack_start(self.group_btn, False, False, 0)
         b = Gtk.Button(label="Broadcast to all users",
                        image=Gtk.Image.new_from_icon_name("mail-send-symbolic", Gtk.IconSize.BUTTON),
                        always_show_image=True)
@@ -711,6 +744,10 @@ class UsersPanel(_TablePanel):
         self.new_btn.set_sensitive(manage)
         self.new_btn.set_no_show_all(bool(feats & FEAT_NOUSERS) or bool((app.ctrl.serverinfo or {}).get("domainauth")))
         bar.pack_start(self.new_btn, False, False, 0)
+        self.filter = Gtk.SearchEntry(placeholder_text="Filter", width_chars=18,
+                                      tooltip_text="Filter by name or email; prefix with name: or email: to search only one")
+        self.filter.connect("search-changed", lambda *_: self._render())
+        bar.pack_start(self.filter, False, False, 0)
         # web UI: "Batch create many user accounts" (upload icon), hidden with LDAP/SSPI sign-in
         self.import_btn = Gtk.Button(label="Import…", tooltip_text="Batch create many user accounts from a JSON or CSV file",
                                      image=Gtk.Image.new_from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON),
@@ -735,6 +772,166 @@ class UsersPanel(_TablePanel):
         self.export_btn.set_sensitive(False)          # until the list has loaded
         bar.pack_end(self.export_btn, False, False, 0)
         bar.show_all()
+
+    # ---- table ------------------------------------------------------------------------------
+    def _build_tree(self):
+        scr = self.get_children()[-1]
+        self.remove(scr)
+        self.store = Gtk.TreeStore(bool, str, str, str, str, str, str, str, bool, bool, int)
+        tv = Gtk.TreeView(model=self.store, enable_search=False)
+        chk = Gtk.CellRendererToggle()
+        chk.connect("toggled", self._on_toggled)
+        tv.append_column(Gtk.TreeViewColumn("", chk, active=self.C_CHECK, visible=self.C_ISUSER,
+                                            activatable=self.C_CHECKABLE, sensitive=self.C_CHECKABLE))
+        r = Gtk.CellRendererText(ellipsize=Pango.EllipsizeMode.END)
+        name = Gtk.TreeViewColumn("Name", r, text=self.C_NAME, weight=self.C_WEIGHT)
+        name.set_expand(True)
+        name.set_resizable(True)
+        tv.append_column(name)
+        for title, col in (("Device Groups", self.C_GROUPS), ("Last Access", self.C_ACCESS),
+                           ("Permissions", self.C_PERMS), ("2FA", self.C_2FA)):
+            c = ui.text_column(title, col)
+            c.set_sort_column_id(-1)                 # sections + sorting do not mix
+            tv.append_column(c)
+        ui.row_tooltip(tv, self.C_TIP)
+        # web UI: click a user → "General - <user>" page
+        tv.connect("row-activated", lambda t, path, _c: self._activated(path))
+        self.tree = tv
+        self.pack_start(ui.scrolled(tv), True, True, 0)
+
+    def _activated(self, path):
+        row = self.store[path]
+        if row[self.C_ISUSER]:
+            self.open_user(row[self.C_ID])
+
+    def _on_toggled(self, _r, path):
+        row = self.store[path]
+        if not row[self.C_ISUSER] or not row[self.C_CHECKABLE]:
+            return
+        row[self.C_CHECK] = not row[self.C_CHECK]
+        (self._checked.add if row[self.C_CHECK] else self._checked.discard)(row[self.C_ID])
+        self._update_selection_buttons()
+
+    def _visible_ids(self):
+        ids = []
+        for sec in self.store:
+            for row in sec.iterchildren():
+                if row[self.C_CHECKABLE]:
+                    ids.append(row[self.C_ID])
+        return ids
+
+    def _update_selection_buttons(self):
+        self._checked &= {u.get("_id") for u in self._users}
+        n = len(self._checked)
+        self.select_btn.set_label("Select None" if n else "Select All")
+        self.group_btn.set_sensitive(n > 0)
+
+    def toggle_select_all(self):
+        """web UI: Select All (every listed user except yourself) / Select None"""
+        self._checked = set() if self._checked else set(self._visible_ids())
+        self._render()
+
+    def _matches(self, u, q):
+        if not q:
+            return True
+        name, email = (u.get("name") or "").lower(), (u.get("email") or "").lower()
+        for pre, only in (("email:", "e"), ("e:", "e"), ("name:", "n"), ("n:", "n")):
+            if q.startswith(pre):
+                q = q[len(pre):]
+                return (q in email) if only == "e" else (q in name)
+        return q in name or q in email
+
+    def _render(self):
+        self.store.clear()
+        me = (self.app.ctrl.userinfo or {}).get("_id")
+        q = self.filter.get_text().strip().lower()
+        users = sorted((u for u in self._users if self._matches(u, q)), key=lambda x: (x.get("name") or "").lower())
+        online = [u for u in users if self.sessions.get(u.get("_id"))]
+        offline = [u for u in users if not self.sessions.get(u.get("_id"))]
+        for title, group in (("Online Users", online), ("Offline Users", offline)):
+            if not group:
+                continue
+            sec = self.store.append(None, [False, f"{title} ({len(group)})", "", "", "", "", "", "", False, False,
+                                           Pango.Weight.BOLD])
+            for u in group:
+                uid = u.get("_id", "")
+                n = sum(1 for k in (u.get("links") or {}) if k.startswith("mesh/"))
+                s = self.sessions.get(uid)
+                if s:
+                    access = "1 session" if s == 1 else f"{s} sessions"
+                else:
+                    access = ui.fmt_date(u.get("access") or u.get("login"))
+                tip = f"{u.get('name', '')} - {uid}\nServer rights: {_rights_summary(u)}"
+                self.store.append(sec, [uid in self._checked, u.get("name", ""), str(n), access,
+                                        permissions_label(u), "Yes" if _has_2fa(u) else "No", uid, tip, True,
+                                        uid != me, Pango.Weight.NORMAL])
+        self.tree.expand_all()
+        shown, total = len(users), len(self._users)
+        self.status.set_text(("%d user(s)" % total if shown == total else "%d of %d user(s)" % (shown, total))
+                             + ", double-click a user to open it")
+        self._update_selection_buttons()
+
+    def _on_sessions(self, msg):
+        ws = msg.get("wssessions")
+        if isinstance(ws, dict):
+            self.sessions = {k: v for k, v in ws.items() if isinstance(v, int) and v > 0}
+            self._render()
+            if self.page is not None:
+                self.page.render()
+
+    def group_action(self):
+        """web UI p3usersGroupActionFunction: lock / unlock / (in)validate email / delete the checked users."""
+        ids = [u for u in self._checked]
+        if not ids:
+            return
+        users = {u.get("_id"): u for u in self._users}
+        emailcheck = bool((self.app.ctrl.serverinfo or {}).get("emailcheck"))
+        ops = [("Lock account", "lock"), ("Unlock account", "unlock")]
+        if emailcheck:
+            ops += [("Validate Email", "verify"), ("Invalidate Email", "unverify")]
+        ops.append(("Delete account", "delete"))
+        d = Gtk.Dialog(title="Group Action", transient_for=self.get_toplevel(), modal=True)
+        area = d.get_content_area()
+        area.set_spacing(8)
+        area.set_border_width(12)
+        area.pack_start(Gtk.Label(label=f"Select an operation to perform on the {len(ids)} selected user(s).",
+                                  xalign=0), False, False, 0)
+        row = Gtk.Box(spacing=12)
+        row.pack_start(Gtk.Label(label="Operation"), False, False, 0)
+        combo = Gtk.ComboBoxText(hexpand=True)
+        for label, key in ops:
+            combo.append(key, label)
+        combo.set_active(0)
+        row.pack_start(combo, True, True, 0)
+        area.pack_start(row, False, False, 0)
+        d.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        d.add_button("OK", Gtk.ResponseType.OK).get_style_context().add_class("suggested-action")
+        d.show_all()
+        ok = d.run() == Gtk.ResponseType.OK
+        op = combo.get_active_id()
+        d.destroy()
+        if not ok:
+            return
+        ctrl = self.app.ctrl
+        if op == "delete":
+            if not ui.confirm(self.get_toplevel(), "Delete Accounts",
+                              f"Confirm deletion of {len(ids)} selected account(s)?", "Delete", True):
+                return
+            for uid in ids:
+                ctrl.send({"action": "deleteuser", "userid": uid, "username": users.get(uid, {}).get("name")})
+            self._checked.clear()
+        for uid in ids if op != "delete" else []:
+            u = users.get(uid) or {}
+            sa = u.get("siteadmin") if isinstance(u.get("siteadmin"), int) else 0
+            if op == "lock" and not sa & 32:
+                ctrl.send({"action": "edituser", "id": uid, "siteadmin": sa + 32})
+            elif op == "unlock" and sa & 32 and sa != 0xFFFFFFFF:
+                ctrl.send({"action": "edituser", "id": uid, "siteadmin": sa - 32})
+            elif op == "verify" and u.get("emailVerified") is not True:
+                ctrl.send({"action": "edituser", "id": uid, "emailVerified": True})
+            elif op == "unverify" and u.get("emailVerified") is True:
+                ctrl.send({"action": "edituser", "id": uid, "emailVerified": False})
+        self.refresh_soon(1200)
 
     def export_users(self, fmt):
         users = sorted(self._users, key=lambda x: (x.get("name") or "").lower())
@@ -790,6 +987,17 @@ class UsersPanel(_TablePanel):
     def _on_event(self, msg):
         ev = msg.get("event") or {}
         act = ev.get("action")
+        if act == "wssessioncount" and ev.get("userid"):         # a user opened / closed a session
+            c = ev.get("count") or 0
+            if c > 0:
+                self.sessions[ev["userid"]] = c
+            else:
+                self.sessions.pop(ev["userid"], None)
+            if self._started:
+                self._render()
+                if self.page is not None and self.page.user.get("_id") == ev["userid"]:
+                    self.page.render()
+            return
         if act in ("accountcreate", "accountchange", "accountremove", "usergroupchange", "meshchange",
                    "changenode", "removenode"):
             acc = ev.get("account") or {}
@@ -804,6 +1012,7 @@ class UsersPanel(_TablePanel):
         super().teardown()
         self.app.ctrl.off("event", self._on_event)
         self.app.ctrl.off("usergroups", self._on_usergroups)
+        self.app.ctrl.off("wssessioncount", self._on_sessions)
         if self._soon:
             GLib.source_remove(self._soon)
             self._soon = None
@@ -817,6 +1026,7 @@ class UsersPanel(_TablePanel):
 
     def request(self):
         self.app.ctrl.send({"action": "users"})
+        self.app.ctrl.send({"action": "wssessioncount"})
 
     def _check_timeout(self):
         if not self._replied:
@@ -830,17 +1040,13 @@ class UsersPanel(_TablePanel):
         return False
 
     def _fill(self, msg):
-        self.store.clear()
         userslist = msg.get("users") or []
         if isinstance(userslist, dict):
             userslist = list(userslist.values())
         self._users = userslist
         self.export_btn.set_sensitive(bool(userslist))
         self.import_btn.set_sensitive(rights.has_site(self.app.ctrl, rights.SITE_MANAGEUSERS))
-        for u in sorted(userslist, key=lambda x: (x.get("name") or "").lower()):
-            self.store.append([u.get("name", ""), u.get("_id", ""),
-                               _rights_summary(u), "Yes" if _has_2fa(u) else "No"])
-        self.status.set_text("%d user(s), double-click a user to open it" % len(userslist))
+        self._render()
         if self.page is not None:                        # keep the open user page current
             fresh = next((u for u in userslist if u.get("_id") == self.page.user.get("_id")), None)
             if fresh is None:
