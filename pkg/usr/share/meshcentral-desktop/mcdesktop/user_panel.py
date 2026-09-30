@@ -260,6 +260,152 @@ class RightsDialog:
         return v
 
 
+def list_section(box, title, add_label, add_cb, rows, empty):
+    """Web-UI style membership table: bold title (+ "Add …" link) and a framed list.
+    rows: (name, detail, edit_cb|None, remove_cb|None, remove_tooltip[, open_cb])"""
+    hdr = Gtk.Box(spacing=8)
+    hdr.pack_start(_section_title(title), False, False, 0)
+    if add_cb:
+        b = Gtk.Button(label=add_label, image=Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.MENU),
+                       always_show_image=True, relief=Gtk.ReliefStyle.NONE, valign=Gtk.Align.END)
+        b.connect("clicked", lambda *_: add_cb())
+        hdr.pack_start(b, False, False, 0)
+    box.pack_start(hdr, False, False, 0)
+    lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
+    lb.get_style_context().add_class("frame")
+    if not rows:
+        l = Gtk.Label(xalign=0, margin=8)
+        l.set_markup(f"<i>{GLib.markup_escape_text(empty)}</i>")
+        lb.add(l)
+    for row in rows:
+        name, detail, edit_cb, remove_cb, tip = row[:5]
+        open_cb = row[5] if len(row) > 5 else None
+        r = Gtk.Box(spacing=8, margin=4)
+        if open_cb:
+            n = Gtk.LinkButton(label=name, uri="", halign=Gtk.Align.START, tooltip_text=f"Open {name}")
+            n.connect("activate-link", lambda _b, f=open_cb: (f(), True)[1])
+            n.set_size_request(220, -1)
+            n.get_child().set_xalign(0)
+        else:
+            n = Gtk.Label(label=name, xalign=0, width_chars=28, ellipsize=Pango.EllipsizeMode.END)
+        r.pack_start(n, False, False, 4)
+        dl = Gtk.Label(label=detail, xalign=0, ellipsize=Pango.EllipsizeMode.END, tooltip_text=detail or None)
+        dl.get_style_context().add_class("dim-label")
+        r.pack_start(dl, True, True, 0)
+        if edit_cb:
+            b = Gtk.Button(image=Gtk.Image.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.MENU),
+                           relief=Gtk.ReliefStyle.NONE, tooltip_text="Edit permissions")
+            b.connect("clicked", lambda _b, f=edit_cb: f())
+            r.pack_start(b, False, False, 0)
+        if remove_cb:
+            b = Gtk.Button(image=Gtk.Image.new_from_icon_name("user-trash-symbolic", Gtk.IconSize.MENU),
+                           relief=Gtk.ReliefStyle.NONE, tooltip_text=tip)
+            b.connect("clicked", lambda _b, f=remove_cb: f())
+            r.pack_start(b, False, False, 0)
+        lb.add(r)
+    box.pack_start(lb, False, False, 0)
+
+
+def consent_dialog(parent, title, current, server_consent):
+    """web UI p20editmeshconsent: returns the new consent bits or None. Bits forced by the server
+    configuration are shown ticked and cannot be changed."""
+    d, area, _ok = _dialog(parent, title)
+    c = {}
+    for sect, items in (("Desktop", ((0x1, "Notify user"), (0x8, "Prompt for user consent"),
+                                     (0x40, "Show connection toolbar"))),
+                        ("Terminal", ((0x2, "Notify user"), (0x10, "Prompt for user consent"))),
+                        ("Files", ((0x4, "Notify user"), (0x20, "Prompt for user consent"))),
+                        ("Registry", ((0x80, "Notify user"), (0x100, "Prompt for user consent")))):
+        area.pack_start(_section_title(sect), False, False, 0)
+        for bit, label in items:
+            w = _check(label, (current | server_consent) & bit)
+            w.set_sensitive(not server_consent & bit)
+            c[bit] = w
+            area.pack_start(w, False, False, 0)
+    value = sum(b for b, w in c.items() if w.get_active()) if _run(d) else None
+    d.destroy()
+    return value
+
+
+def mesh_rights_dialog(parent, ctrl, meshes, links, domain, meshid=None):
+    """Add / edit device-group permissions of a user or user group (web UI types 1 and 3).
+    links = the target's links (preselects the current rights). → (meshid, rights, title) or None"""
+    guest = (ctrl.serverinfo or {}).get("guestdevicesharing") is not False
+    title = "Edit Device Group Permissions" if meshid else "Add Device Group Permissions"
+    d, area, ok = _dialog(parent, title, width=460)
+    combo = Gtk.ComboBoxText()
+    ids = [meshid] if meshid else sorted((m for m in meshes if m.split("/")[1] == domain and m not in links),
+                                         key=lambda m: (meshes[m].get("name") or "").lower())
+    for m in ids:
+        combo.append(m, meshes.get(m, {}).get("name") or m)
+    combo.set_active(0)
+    combo.set_sensitive(meshid is None)
+    row = Gtk.Box(spacing=12)
+    row.pack_start(Gtk.Label(label="Device Group"), False, False, 0)
+    row.pack_start(combo, True, True, 0)
+    area.pack_start(row, False, False, 0)
+    cur = (links.get(meshid) or {}).get("rights", 0) if meshid else 0
+    rd = RightsDialog(area, True, guest, cur)
+    ok.set_sensitive(bool(ids))
+    res = None
+    if _run(d) and combo.get_active_id():
+        res = (combo.get_active_id(), rd.value(), title)
+    d.destroy()
+    return res
+
+
+def device_rights_dialog(parent, ctrl, meshes, nodes, links, nodeid=None):
+    """Add / edit device permissions of a user or user group (web UI types 4 and 7): pick a device
+    group you can manage, then a device. → (nodeid, rights, title) or None"""
+    guest = (ctrl.serverinfo or {}).get("guestdevicesharing") is not False
+    title = "Edit Device Permissions" if nodeid else "Add Device Permissions"
+    d, area, ok = _dialog(parent, title, width=460)
+    grid = Gtk.Grid(row_spacing=8, column_spacing=12)
+    area.pack_start(grid, False, False, 0)
+    mcombo, ncombo = Gtk.ComboBoxText(hexpand=True), Gtk.ComboBoxText(hexpand=True)
+    grid.attach(Gtk.Label(label="Device Group", xalign=1), 0, 0, 1, 1)
+    grid.attach(mcombo, 1, 0, 1, 1)
+    grid.attach(Gtk.Label(label="Device", xalign=1), 0, 1, 1, 1)
+    grid.attach(ncombo, 1, 1, 1, 1)
+    sel_mesh = nodes[nodeid].get("meshid") if nodeid and nodeid in nodes else None
+    for m in sorted(meshes, key=lambda m: (meshes[m].get("name") or "").lower()):
+        if rights.mesh_rights(ctrl, meshes[m]) & 7 or m == sel_mesh:
+            mcombo.append(m, meshes[m].get("name") or m)
+    rd = RightsDialog(area, False, guest, 0)
+
+    def fill_nodes(*_):
+        ncombo.remove_all()
+        mid = mcombo.get_active_id()
+        for n in sorted((n for n, v in nodes.items() if v.get("meshid") == mid),
+                        key=lambda n: (nodes[n].get("name") or "").lower()):
+            ncombo.append(n, nodes[n].get("name") or n)
+        if nodeid:
+            ncombo.set_active_id(nodeid)
+        else:
+            ncombo.set_active(0)
+
+    def node_changed(*_):
+        nid = ncombo.get_active_id()
+        rd.set_value((links.get(nid) or {}).get("rights", 0) if nid else 0)
+        rd.set_enabled(bool(nid))
+        ok.set_sensitive(bool(nid))
+    mcombo.connect("changed", fill_nodes)
+    ncombo.connect("changed", node_changed)
+    if sel_mesh:
+        mcombo.set_active_id(sel_mesh)
+    else:
+        mcombo.set_active(0)
+    fill_nodes()
+    node_changed()
+    mcombo.set_sensitive(nodeid is None)
+    ncombo.set_sensitive(nodeid is None)
+    res = None
+    if _run(d) and ncombo.get_active_id():
+        res = (ncombo.get_active_id(), rd.value(), title)
+    d.destroy()
+    return res
+
+
 def choose_account_image(parent):
     """Pick an image file → (PNG data URL, 256x256 pixbuf) or None. Centre square scaled to 256x256
     like the web UI's canvas; the server accepts data:image/png|jpeg URLs < 600000 chars."""
@@ -547,40 +693,7 @@ class UserPage(Gtk.Box):
         self._load_avatar()
 
     def _list_section(self, title, add_label, add_cb, rows, empty):
-        """rows: list of (name, detail, edit_cb|None, remove_cb|None, tooltip)"""
-        hdr = Gtk.Box(spacing=8)
-        hdr.pack_start(_section_title(title), False, False, 0)
-        if add_cb:
-            b = Gtk.Button(label=add_label, image=Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.MENU),
-                           always_show_image=True, relief=Gtk.ReliefStyle.NONE, valign=Gtk.Align.END)
-            b.connect("clicked", lambda *_: add_cb())
-            hdr.pack_start(b, False, False, 0)
-        self.general.pack_start(hdr, False, False, 0)
-        lb = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
-        lb.get_style_context().add_class("frame")
-        if not rows:
-            l = Gtk.Label(xalign=0, margin=8)
-            l.set_markup(f"<i>{GLib.markup_escape_text(empty)}</i>")
-            lb.add(l)
-        for name, detail, edit_cb, remove_cb, tip in rows:
-            r = Gtk.Box(spacing=8, margin=4)
-            n = Gtk.Label(label=name, xalign=0, width_chars=28, ellipsize=Pango.EllipsizeMode.END)
-            r.pack_start(n, False, False, 4)
-            dl = Gtk.Label(label=detail, xalign=0, ellipsize=Pango.EllipsizeMode.END, tooltip_text=detail)
-            dl.get_style_context().add_class("dim-label")
-            r.pack_start(dl, True, True, 0)
-            if edit_cb:
-                b = Gtk.Button(image=Gtk.Image.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.MENU),
-                               relief=Gtk.ReliefStyle.NONE, tooltip_text="Edit permissions")
-                b.connect("clicked", lambda _b, f=edit_cb: f())
-                r.pack_start(b, False, False, 0)
-            if remove_cb:
-                b = Gtk.Button(image=Gtk.Image.new_from_icon_name("user-trash-symbolic", Gtk.IconSize.MENU),
-                               relief=Gtk.ReliefStyle.NONE, tooltip_text=tip)
-                b.connect("clicked", lambda _b, f=remove_cb: f())
-                r.pack_start(b, False, False, 0)
-            lb.add(r)
-        self.general.pack_start(lb, False, False, 0)
+        list_section(self.general, title, add_label, add_cb, rows, empty)
 
     def _meshes(self):
         return getattr(self.app, "meshes", None) or {}
@@ -847,25 +960,10 @@ class UserPage(Gtk.Box):
         d.destroy()
 
     def edit_consent(self):
-        si_c = (self.ctrl.serverinfo or {}).get("consent") or 0
-        cur = self.user.get("consent") or 0
-        d, area, _ok = _dialog(self._top(), "Edit User Consent")
-        c = {}
-        for title, items in (("Desktop", ((0x1, "Notify user"), (0x8, "Prompt for user consent"),
-                                          (0x40, "Show connection toolbar"))),
-                             ("Terminal", ((0x2, "Notify user"), (0x10, "Prompt for user consent"))),
-                             ("Files", ((0x4, "Notify user"), (0x20, "Prompt for user consent"))),
-                             ("Registry", ((0x80, "Notify user"), (0x100, "Prompt for user consent")))):
-            area.pack_start(_section_title(title), False, False, 0)
-            for bit, label in items:
-                w = _check(label, (cur | si_c) & bit)
-                w.set_sensitive(not si_c & bit)          # forced by the server configuration
-                c[bit] = w
-                area.pack_start(w, False, False, 0)
-        if _run(d):
-            self._edituser("Changing the user consent",
-                           consent=sum(b for b, w in c.items() if w.get_active()))
-        d.destroy()
+        v = consent_dialog(self._top(), "Edit User Consent", self.user.get("consent") or 0,
+                           (self.ctrl.serverinfo or {}).get("consent") or 0)
+        if v is not None:
+            self._edituser("Changing the user consent", consent=v)
 
     def edit_server_rights(self):
         u, me = self.user, self._my_sa()
@@ -941,31 +1039,13 @@ class UserPage(Gtk.Box):
 
     # ---- memberships --------------------------------------------------------------------------
     def group_rights(self, meshid=None):
-        meshes, u = self._meshes(), self.user
-        links = u.get("links") or {}
-        dom = u["_id"].split("/")[1]
-        guest = (self.ctrl.serverinfo or {}).get("guestdevicesharing") is not False
-        title = "Edit Device Group Permissions" if meshid else "Add Device Group Permissions"
-        d, area, ok = _dialog(self._top(), title, width=460)
-        combo = Gtk.ComboBoxText()
-        ids = [meshid] if meshid else sorted((m for m in meshes if m.split("/")[1] == dom and m not in links),
-                                             key=lambda m: (meshes[m].get("name") or "").lower())
-        for m in ids:
-            combo.append(m, meshes[m].get("name") or m)
-        combo.set_active(0)
-        combo.set_sensitive(meshid is None)
-        row = Gtk.Box(spacing=12)
-        row.pack_start(Gtk.Label(label="Device Group"), False, False, 0)
-        row.pack_start(combo, True, True, 0)
-        area.pack_start(row, False, False, 0)
-        cur = (links.get(meshid) or {}).get("rights", 0) if meshid else 0
-        rd = RightsDialog(area, True, guest, cur)
-        ok.set_sensitive(bool(ids))
-        if _run(d) and combo.get_active_id():
-            mid = combo.get_active_id()
-            self.ctrl.send({"action": "addmeshuser", "meshid": mid, "meshname": meshes[mid].get("name"),
-                            "userids": [u["_id"]], "meshadmin": rd.value()}, self._reply(title))
-        d.destroy()
+        u = self.user
+        r = mesh_rights_dialog(self._top(), self.ctrl, self._meshes(), u.get("links") or {},
+                               u["_id"].split("/")[1], meshid)
+        if r:
+            mid, value, title = r
+            self.ctrl.send({"action": "addmeshuser", "meshid": mid, "meshname": self._meshes()[mid].get("name"),
+                            "userids": [u["_id"]], "meshadmin": value}, self._reply(title))
 
     def remove_group(self, meshid):
         name = self._meshes().get(meshid, {}).get("name", meshid)
@@ -975,55 +1055,12 @@ class UserPage(Gtk.Box):
                            self._reply("Removing the device group permissions"))
 
     def device_rights(self, nodeid=None):
-        meshes, nodes, u = self._meshes(), self._nodes(), self.user
-        links = u.get("links") or {}
-        guest = (self.ctrl.serverinfo or {}).get("guestdevicesharing") is not False
-        title = "Edit Device Permissions" if nodeid else "Add Device Permissions"
-        d, area, ok = _dialog(self._top(), title, width=460)
-        grid = Gtk.Grid(row_spacing=8, column_spacing=12)
-        area.pack_start(grid, False, False, 0)
-        mcombo, ncombo = Gtk.ComboBoxText(hexpand=True), Gtk.ComboBoxText(hexpand=True)
-        grid.attach(Gtk.Label(label="Device Group", xalign=1), 0, 0, 1, 1)
-        grid.attach(mcombo, 1, 0, 1, 1)
-        grid.attach(Gtk.Label(label="Device", xalign=1), 0, 1, 1, 1)
-        grid.attach(ncombo, 1, 1, 1, 1)
-        sel_mesh = nodes[nodeid].get("meshid") if nodeid and nodeid in nodes else None
-        for m in sorted(meshes, key=lambda m: (meshes[m].get("name") or "").lower()):
-            if rights.mesh_rights(self.ctrl, meshes[m]) & 7 or m == sel_mesh:
-                mcombo.append(m, meshes[m].get("name") or m)
-        rd = RightsDialog(area, False, guest, 0)
-
-        def fill_nodes(*_):
-            ncombo.remove_all()
-            mid = mcombo.get_active_id()
-            for n in sorted((n for n, v in nodes.items() if v.get("meshid") == mid),
-                            key=lambda n: (nodes[n].get("name") or "").lower()):
-                ncombo.append(n, nodes[n].get("name") or n)
-            if nodeid:
-                ncombo.set_active_id(nodeid)
-            else:
-                ncombo.set_active(0)
-
-        def node_changed(*_):
-            nid = ncombo.get_active_id()
-            rd.set_value((links.get(nid) or {}).get("rights", 0) if nid else 0)
-            rd.set_enabled(bool(nid))
-            ok.set_sensitive(bool(nid))
-        mcombo.connect("changed", fill_nodes)
-        ncombo.connect("changed", node_changed)
-        if sel_mesh:
-            mcombo.set_active_id(sel_mesh)
-        else:
-            mcombo.set_active(0)
-        fill_nodes()
-        node_changed()
-        mcombo.set_sensitive(nodeid is None)
-        ncombo.set_sensitive(nodeid is None)
-        if _run(d) and ncombo.get_active_id():
-            nid = ncombo.get_active_id()
-            self.ctrl.send({"action": "adddeviceuser", "nodeid": nid, "nodename": nodes[nid].get("name"),
-                            "userids": [u["_id"]], "rights": rd.value()}, self._reply(title))
-        d.destroy()
+        u = self.user
+        r = device_rights_dialog(self._top(), self.ctrl, self._meshes(), self._nodes(), u.get("links") or {}, nodeid)
+        if r:
+            nid, value, title = r
+            self.ctrl.send({"action": "adddeviceuser", "nodeid": nid, "nodename": self._nodes()[nid].get("name"),
+                            "userids": [u["_id"]], "rights": value}, self._reply(title))
 
     def remove_device(self, nodeid):
         node = self._nodes().get(nodeid, {})

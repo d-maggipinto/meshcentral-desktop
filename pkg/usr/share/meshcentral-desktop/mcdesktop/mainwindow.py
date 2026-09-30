@@ -11,7 +11,8 @@ from .terminal_panel import TerminalPanel
 from .files_panel import FilesPanel
 from .desktop_panel import DesktopPanel
 from .tools_panel import ProcessesPanel, ServicesPanel, ConsolePanel
-from .admin_panel import UsersPanel, UserGroupsPanel, ServerEventsPanel
+from .admin_panel import UsersPanel, ServerEventsPanel
+from .group_panel import UserGroupsPanel
 from .account_panel import AccountPanel
 from .server_files_panel import ServerFilesPanel
 from .server_panel import MyServerPanel
