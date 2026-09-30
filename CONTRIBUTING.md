@@ -19,8 +19,9 @@ opening a public issue.
 
 ## Suggesting a feature
 
-Most features mirror a page or dialog of the MeshCentral web interface. If you ask for one, a
-screenshot of the web interface page you mean helps a lot.
+Check [ROADMAP.md](ROADMAP.md) first: the feature may already be planned. Most features mirror a
+page or dialog of the MeshCentral web interface. If you ask for one, a screenshot of the web
+interface page you mean helps a lot.
 
 ## Pull requests
 

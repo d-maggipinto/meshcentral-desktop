@@ -31,6 +31,7 @@ Current version: **2.23.0**, see the [changelog](CHANGELOG.md).
 - [Security notes](#security-notes)
 - [Known limitations](#known-limitations)
 - [Building from source](#building-from-source)
+- [Roadmap](#roadmap)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
 - [Credits](#credits)
@@ -228,6 +229,13 @@ python3 -m unittest discover -s tests/unit -v
 Build steps, the local test server, the rig tests and the release checklist are in
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
+## Roadmap
+
+Planned next: the full remote desktop toolbar (guest sharing, refresh, session recording,
+screenshots, wallpaper toggle, open a web address, notifications and chat on the remote computer),
+Windows and macOS apps, testing with Windows and macOS remote computers, a refreshed interface and
+security improvements such as signed releases. See [ROADMAP.md](ROADMAP.md).
+
 ## Documentation
 
 | Document | Content |
@@ -238,6 +246,7 @@ Build steps, the local test server, the rig tests and the release checklist are 
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | how MeshCentral rights map to app features |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | build, tests and release |
 | [tests/rig/README.md](tests/rig/README.md) | rig tests against a local MeshCentral server |
+| [ROADMAP.md](ROADMAP.md) | planned features |
 | [CHANGELOG.md](CHANGELOG.md) | release history |
 
 ## Contributing
