@@ -121,13 +121,17 @@ The package declares all dependencies, so `apt` installs them automatically.
 
 ## Install
 
-Download the latest `.deb` from the [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases),
-then:
+Download the latest `.deb` and `SHA256SUMS` from the
+[releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases), then:
 
 ```bash
+sha256sum -c --ignore-missing SHA256SUMS      # verify the download
 sudo apt install ./meshcentral-desktop_2.23.0_all.deb
 meshcentral-desktop
 ```
+
+Every release also offers its source code as `.tar.gz` and `.zip`. Versions before 2.23.0 were
+made before the project was published; they are available as archived builds for reference.
 
 ### Upgrade
 

@@ -138,6 +138,9 @@ The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
 1. Version set in both places, `scripts/build-deb.sh` succeeds.
 2. Unit tests pass; rig tests pass for the areas that changed.
 3. `CHANGELOG.md` updated; `README.md` and `docs/` updated for behaviour changes.
-4. Tag the release (`vX.Y.Z`) and attach the `.deb` from `dist/` to the GitHub release.
+4. Push a tag `vX.Y.Z` (`git tag -a vX.Y.Z -m "MeshCentral Desktop X.Y.Z"`, then
+   `git push origin vX.Y.Z`). GitHub Actions builds the package and publishes the release with the
+   `.deb`, the source as `.tar.gz` and `.zip`, a `SHA256SUMS` file and the release notes taken from
+   the matching `CHANGELOG.md` section.
 5. Upgrade note for users: quit the running app (`pkill -f meshcentral-desktop`) before installing
    the new package, because the app is single instance.
