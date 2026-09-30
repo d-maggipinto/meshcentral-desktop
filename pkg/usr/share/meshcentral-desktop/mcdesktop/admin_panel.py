@@ -189,10 +189,12 @@ def parse_user_import(text, name=""):
     return out
 
 
-def validate_import_entry(e):
+def validate_import_entry(e, email_is_name=False):
     """Mirror the checks of the web UI and of meshuser.js serverCommandAddUserBatch, so a bad row
     is shown here, the server rejects the WHOLE batch and does not say which row failed.
-    Password strength rules are only known to the server (not sent on the control channel)."""
+    Password strength rules are only known to the server (not sent on the control channel).
+    email_is_name (domain.usernameisemail): the server copies email→user, or user→email when there
+    is no email, so the resulting name must be a valid email address."""
     u, p, em = e.get("user"), e.get("pass"), e.get("email")
     if not isinstance(u, str) or not 1 <= len(u) <= 64:
         return "user name must be 1-64 characters"
@@ -202,6 +204,8 @@ def validate_import_entry(e):
         return "password must be 1-256 characters"
     if em is not None and (not isinstance(em, str) or not 1 <= len(em) <= 128 or not _EMAIL_RE.match(em)):
         return "invalid email address"
+    if email_is_name and em is None and not _EMAIL_RE.match(u):
+        return "this server uses email addresses as user names, add an email or use one as user"
     if "resetNextLogin" in e and not isinstance(e["resetNextLogin"], bool):
         return "resetNextLogin must be true or false"
     return None
@@ -218,6 +222,8 @@ class UserImportDialog(Gtk.Dialog):
         super().__init__(title="User Account Import", transient_for=parent, modal=True)
         self.ctrl, self.on_done = ctrl, on_done
         self.existing = {n.lower() for n in existing_names}
+        # domain.usernameisemail: the server replaces each row's user with its email (if any)
+        self.email_is_name = bool(_features(ctrl) & FEAT_USERNAME_IS_EMAIL)
         self.entries, self.to_send, self.created = [], [], set()
         self._listening = False
         self._timer = None
@@ -260,6 +266,11 @@ class UserImportDialog(Gtk.Dialog):
         self.connect("destroy", lambda *_: self._stop())
         self.show_all()
 
+    def _account_name(self, e):
+        if self.email_is_name and isinstance(e.get("email"), str) and e["email"]:
+            return e["email"]
+        return e.get("user") if isinstance(e.get("user"), str) else ""
+
     def _set_result(self, text, error=False):
         if error:
             self.result.set_markup(f"<span foreground='#e01b24'>{GLib.markup_escape_text(text)}</span>")
@@ -284,8 +295,8 @@ class UserImportDialog(Gtk.Dialog):
         bad = skipped = 0
         seen = set()
         for e in self.entries:
-            err = validate_import_entry(e)
-            name = e.get("user") if isinstance(e.get("user"), str) else ""
+            err = validate_import_entry(e, self.email_is_name)
+            name = self._account_name(e)
             if err:
                 status, bad = "Invalid: " + err, bad + 1
             elif name.lower() in seen:
@@ -317,7 +328,7 @@ class UserImportDialog(Gtk.Dialog):
         self.ok_btn.set_sensitive(False)
         self.chooser.set_sensitive(False)
         self.created = set()
-        self._pending = {e["user"].lower() for e in self.to_send}
+        self._pending = {self._account_name(e).lower() for e in self.to_send}
         self._set_result(f"Creating {len(self._pending)} account(s)…")
         self.ctrl.on("event", self._on_event)
         self.ctrl.on("msg", self._on_msg)
@@ -378,6 +389,192 @@ class UserImportDialog(Gtk.Dialog):
         self.get_widget_for_response(Gtk.ResponseType.CANCEL).set_label("Close")
         if self.on_done:
             self.on_done()
+
+
+# serverinfo.features bits (same value the web UI gets from its page template, webserver.js)
+FEAT_NOUSERS = 0x4                  # single-user server: no account creation
+FEAT_LDAP_SSPI = 0x80000            # LDAP/SSPI sign-in: no batch import
+FEAT_USERNAME_IS_EMAIL = 0x200000   # domain.usernameisemail: the email IS the user name
+
+
+def _features(ctrl):
+    f = (ctrl.serverinfo or {}).get("features")
+    return f if isinstance(f, int) else 0
+
+
+class NewAccountDialog(Gtk.Dialog):
+    """Web UI "New Account…" (showCreateNewAccountDialog): {action:'adduser', username, email, pass,
+    resetNextLogin, randomPassword, removeEvents[, emailVerified, emailInvitation][, domain]}.
+    With a responseid the server answers {action:'adduser', result:'ok' | error text}."""
+    ERRORS = {"maxUsersExceed": "The server's account limit was reached.",
+              "passwordHashError": "The server could not store the password.",
+              "Invalid password": "Invalid password, it does not meet the server's password requirements."}
+
+    def __init__(self, parent, ctrl, on_done=None):
+        super().__init__(title="Create Account", transient_for=parent, modal=True)
+        self.ctrl, self.on_done = ctrl, on_done
+        info = ctrl.serverinfo or {}
+        self.email_is_name = bool(_features(ctrl) & FEAT_USERNAME_IS_EMAIL)
+        self.emailcheck = bool(info.get("emailcheck"))
+        self.domains = info.get("crossDomain") if isinstance(info.get("crossDomain"), list) else None
+        self._timer = None
+        self.set_resizable(False)
+        box = self.get_content_area()
+        box.set_spacing(6)
+        box.set_border_width(12)
+        grid = Gtk.Grid(row_spacing=8, column_spacing=12)
+        box.pack_start(grid, False, False, 0)
+        self.labels = {}
+        row = 0
+
+        def add(key, title, widget):
+            nonlocal row
+            lbl = Gtk.Label(label=title, xalign=0)
+            self.labels[key] = lbl
+            grid.attach(lbl, 0, row, 1, 1)
+            grid.attach(widget, 1, row, 1, 1)
+            row += 1
+            return widget
+
+        def entry(password=False):
+            e = Gtk.Entry(hexpand=True, width_chars=32, max_length=256, activates_default=True)
+            if password:
+                e.set_visibility(False)
+                e.set_input_purpose(Gtk.InputPurpose.PASSWORD)
+            e.connect("changed", lambda *_: self._validate())
+            return e
+
+        self.domain = None
+        if self.domains:
+            self.domain = Gtk.ComboBoxText()
+            for d in self.domains:
+                self.domain.append_text(d or "Default")
+            self.domain.set_active(0)
+            add("domain", "Domain", self.domain)
+        self.name = None
+        if not self.email_is_name:
+            self.name = add("name", "Username", entry())
+            self.name.set_max_length(64)
+        self.email = add("email", "Email", entry())
+        self.email.set_input_purpose(Gtk.InputPurpose.EMAIL)
+        self.pass1 = add("pass1", "Password", entry(True))
+        self.pass2 = add("pass2", "Password", entry(True))
+
+        def check(label):
+            c = Gtk.CheckButton(label=label)
+            c.connect("toggled", lambda *_: self._validate())
+            box.pack_start(c, False, False, 0)
+            return c
+        self.random = check("Randomize the password.")
+        self.remove_events = check("Remove all previous events for this userid.")
+        self.reset = check("Force password reset on next login.")
+        self.verified = self.invite = None
+        if self.emailcheck:
+            self.verified = check("Email is verified.")
+            self.invite = check("Send invitation email.")
+            self.invite.set_tooltip_text("Email verified and forced password reset required.")
+        self.hint = Gtk.Label(xalign=0, wrap=True, max_width_chars=52)
+        self.hint.get_style_context().add_class("dim-label")
+        box.pack_start(self.hint, False, False, 0)
+        self.result = Gtk.Label(xalign=0, wrap=True, max_width_chars=52)
+        box.pack_start(self.result, False, False, 0)
+        self.add_button("Cancel", Gtk.ResponseType.CANCEL)
+        self.ok_btn = self.add_button("OK", Gtk.ResponseType.OK)
+        self.ok_btn.get_style_context().add_class("suggested-action")
+        self.set_default_response(Gtk.ResponseType.OK)
+        self.connect("response", self._on_response)
+        self.connect("destroy", lambda *_: self._stop_timer())
+        self._validate()
+        self.show_all()
+        (self.name or self.email).grab_focus()
+
+    def _mark(self, key, ok):
+        lbl = self.labels.get(key)
+        if lbl is not None:
+            text = GLib.markup_escape_text(lbl.get_text())
+            lbl.set_markup(text if ok else f"<span foreground='#e01b24'>{text}</span>")
+
+    def _validate(self):
+        email = self.email.get_text()
+        email_ok = bool(_EMAIL_RE.match(email))          # the web UI requires a valid email too
+        name_ok = True
+        if self.name is not None:
+            n = self.name.get_text()
+            name_ok = 0 < len(n) and not any(c in n for c in ' ",') and not n.startswith("~") and "/" not in n
+            self._mark("name", name_ok)
+        self._mark("email", email_ok)
+        rnd = self.random.get_active()
+        self.pass1.set_sensitive(not rnd)
+        self.pass2.set_sensitive(not rnd)
+        p1, p2 = self.pass1.get_text(), self.pass2.get_text()
+        pass_ok = rnd or (0 < len(p1) and p1 == p2)
+        self._mark("pass1", pass_ok)
+        self._mark("pass2", pass_ok)
+        if self.emailcheck:
+            self.verified.set_sensitive(email_ok)
+            if not email_ok:
+                self.verified.set_active(False)
+            can_invite = email_ok and self.reset.get_active() and self.verified.get_active()
+            self.invite.set_sensitive(can_invite)
+            if not can_invite:
+                self.invite.set_active(False)
+        hints = []
+        if self.email_is_name:
+            hints.append("This server uses the email address as the user name.")
+        if rnd:
+            hints.append("The server generates a password that is not shown to anyone, "
+                         "send an invitation email or set a new password later.")
+        elif p1 and p2 and p1 != p2:
+            hints.append("The passwords do not match.")
+        self.hint.set_text(" ".join(hints))
+        self.hint.set_visible(bool(hints))
+        self.ok_btn.set_sensitive(name_ok and email_ok and pass_ok)
+
+    def _stop_timer(self):
+        if self._timer:
+            GLib.source_remove(self._timer)
+            self._timer = None
+
+    def request(self):
+        email = self.email.get_text().strip()
+        msg = {"action": "adduser", "username": email if self.email_is_name else self.name.get_text(),
+               "email": email, "pass": "" if self.random.get_active() else self.pass1.get_text(),
+               "resetNextLogin": self.reset.get_active(), "randomPassword": self.random.get_active(),
+               "removeEvents": self.remove_events.get_active()}
+        if self.emailcheck:
+            msg["emailVerified"] = self.verified.get_active()
+            msg["emailInvitation"] = self.invite.get_active()
+        if self.domains:
+            msg["domain"] = self.domains[self.domain.get_active()]
+        return msg
+
+    def _on_response(self, _d, resp):
+        if resp != Gtk.ResponseType.OK:
+            self.destroy()
+            return
+        self.ok_btn.set_sensitive(False)
+        self.result.set_text("Creating the account…")
+        self._timer = GLib.timeout_add_seconds(15, self._timeout)
+        self.ctrl.send(self.request(), self._on_reply)
+
+    def _timeout(self):
+        self._timer = None
+        self._fail("No response from the server.")
+        return False
+
+    def _fail(self, text):
+        self.result.set_markup(f"<span foreground='#e01b24'>{GLib.markup_escape_text(text)}</span>")
+        self._validate()
+
+    def _on_reply(self, msg):
+        self._stop_timer()
+        res = msg.get("result")
+        if res == "ok":
+            if self.on_done:
+                self.on_done()
+            self.destroy()
+            return
+        self._fail(self.ERRORS.get(res, str(res)))
 
 
 def _save_text(parent, title, filename, text):
@@ -498,12 +695,22 @@ class UsersPanel(_TablePanel):
         b.connect("clicked", lambda *_: BroadcastDialog(self.get_toplevel(), self.app.ctrl))
         b.set_sensitive(manage)
         bar.pack_end(b, False, False, 0)
-        # web UI: "Batch create many user accounts" (upload icon)
+        feats = _features(app.ctrl)
+        # web UI "New Account…": hidden on single-user (--nousers) and SSPI servers
+        self.new_btn = Gtk.Button(label="New Account…", tooltip_text="Create a new user account",
+                                  image=Gtk.Image.new_from_icon_name("list-add-symbolic", Gtk.IconSize.BUTTON),
+                                  always_show_image=True)
+        self.new_btn.connect("clicked", lambda *_: self.new_account())
+        self.new_btn.set_sensitive(manage)
+        self.new_btn.set_no_show_all(bool(feats & FEAT_NOUSERS) or bool((app.ctrl.serverinfo or {}).get("domainauth")))
+        bar.pack_start(self.new_btn, False, False, 0)
+        # web UI: "Batch create many user accounts" (upload icon), hidden with LDAP/SSPI sign-in
         self.import_btn = Gtk.Button(label="Import…", tooltip_text="Batch create many user accounts from a JSON or CSV file",
                                      image=Gtk.Image.new_from_icon_name("document-open-symbolic", Gtk.IconSize.BUTTON),
                                      always_show_image=True)
         self.import_btn.connect("clicked", lambda *_: self.import_users())
         self.import_btn.set_sensitive(False)          # until the list has loaded (existing-name check)
+        self.import_btn.set_no_show_all(bool(feats & FEAT_LDAP_SSPI))
         bar.pack_end(self.import_btn, False, False, 0)
         # web UI: "Download user information" (download icon) → userlist.csv / userlist.json
         menu = Gtk.Menu()
@@ -528,6 +735,9 @@ class UsersPanel(_TablePanel):
             _save_text(self.get_toplevel(), "Export users", "userlist.csv", users_to_csv(users))
         else:
             _save_text(self.get_toplevel(), "Export users", "userlist.json", users_to_json(users))
+
+    def new_account(self):
+        return NewAccountDialog(self.get_toplevel(), self.app.ctrl, on_done=self.refresh)
 
     def import_users(self):
         return UserImportDialog(self.get_toplevel(), self.app.ctrl,
