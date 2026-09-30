@@ -34,6 +34,7 @@ Current version: **2.23.0**, see the [changelog](CHANGELOG.md).
 - [Roadmap](#roadmap)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
+- [Relationship with MeshCentral](#relationship-with-meshcentral)
 - [Credits](#credits)
 - [License](#license)
 
@@ -254,15 +255,30 @@ security improvements such as signed releases. See [ROADMAP.md](ROADMAP.md).
 Bug reports, ideas and pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md)
 first.
 
+## Relationship with MeshCentral
+
+MeshCentral Desktop is an independent client application for MeshCentral. It is not a fork or a
+distribution of the MeshCentral server.
+
+The application communicates with standard MeshCentral servers using their existing protocols and
+interfaces. It does not require any modification to the MeshCentral server. The remote desktop
+view displays the viewer that your own MeshCentral server provides, and a few parts of this client
+follow the MeshCentral source code; these are listed in [NOTICE](NOTICE).
+
+MeshCentral is developed by Ylian Saint-Hilaire and contributors and is licensed under the Apache
+License, Version 2.0: https://github.com/Ylianst/MeshCentral
+
+MeshCentral Desktop is developed independently by CYVELION LTD.
+
 ## Credits
 
 - **Author**: Denis Maggipinto ([@d-maggipinto](https://github.com/d-maggipinto)), [CYVELION LTD](mailto:d.maggipinto@cyvelion.co.uk).
 - **Developed with** [Claude Code](https://claude.com/claude-code) by Anthropic.
 - **MeshCentral** by [Ylian Saint-Hilaire](https://github.com/Ylianst) and the MeshCentral
   contributors ([meshcentral.com](https://meshcentral.com),
-  [GitHub](https://github.com/Ylianst/MeshCentral), Apache License 2.0). This client would not exist
-  without their work: the remote desktop embeds the viewer served by your MeshCentral server, and
-  the permission rules follow the MeshCentral source code. See [NOTICE](NOTICE).
+  [GitHub](https://github.com/Ylianst/MeshCentral), Apache License 2.0), the server software this
+  client works with. See [Relationship with MeshCentral](#relationship-with-meshcentral) and
+  [NOTICE](NOTICE).
 
 ## License
 
