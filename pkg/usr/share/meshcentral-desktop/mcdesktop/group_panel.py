@@ -297,34 +297,65 @@ class GroupPage(Gtk.Box):
             self._edit(consent=v)
 
     def add_users(self):
-        """web UI p51showAddUserDialog: comma separated user names (with completion)."""
+        """web UI p51showAddUserDialog: comma separated user names, with the web UI's suggestion list."""
         d, area, ok = _dialog(self._top(), "Add Users to User Group", width=460)
         area.pack_start(Gtk.Label(label="Enter one or more user names, separated by commas.", xalign=0, wrap=True),
                         False, False, 0)
         e = Gtk.Entry(placeholder_text="user1, user2, user3", activates_default=True, hexpand=True)
         dom = self._gid().split("/")[1]
         present = set((self.group.get("links") or {}).keys())
-        cands = [u for u in self.panel.users.values() if u.get("_id", "").split("/")[1] == dom
-                 and u.get("_id") not in present]
-        store = Gtk.ListStore(str, str)
-        for u in sorted(cands, key=lambda u: (u.get("name") or "").lower()):
-            store.append([u.get("name") or "", u["_id"].split("/")[2]])
-        comp = Gtk.EntryCompletion(model=store, text_column=0, inline_selection=True)
-
-        def match(_c, key, it):
-            last = e.get_text().split(",")[-1].strip().lower()
-            return bool(last) and (last in store[it][0].lower() or last in store[it][1])
-
-        def selected(_c, model, it):
-            parts = [p.strip() for p in e.get_text().split(",")]
-            parts[-1] = model[it][1]
-            e.set_text(", ".join(parts))
-            e.set_position(-1)
-            return True
-        comp.set_match_func(match)
-        comp.connect("match-selected", selected)
-        e.set_completion(comp)
+        cands = sorted((u for u in self.panel.users.values() if u.get("_id", "").split("/")[1] == dom
+                        and u.get("_id") not in present), key=lambda u: (u.get("name") or "").lower())
         area.pack_start(e, False, False, 0)
+        # Inline suggestions under the field, like the web UI's suggestion box (a GtkEntryCompletion
+        # popup does not open reliably inside a modal dialog).
+        sugg = Gtk.ListBox(selection_mode=Gtk.SelectionMode.BROWSE, activate_on_single_click=True)
+        sugg.get_style_context().add_class("frame")
+        sugg.set_no_show_all(True)
+        area.pack_start(sugg, False, False, 0)
+
+        def last_token():
+            return e.get_text().split(",")[-1].strip()
+
+        def refill(*_):
+            for r in sugg.get_children():
+                sugg.remove(r)
+            key = last_token().lower()
+            shown = 0
+            if key and not any(u["_id"].split("/")[2] == key for u in cands):     # exact id typed → done
+                for u in cands:
+                    name, short = u.get("name") or "", u["_id"].split("/")[2]
+                    if key in name.lower() or key in short:
+                        text = name if short == name.lower() else f"{name}  ({short})"
+                        row = Gtk.ListBoxRow()
+                        row.add(Gtk.Label(label=text, xalign=0, margin=4, margin_start=8))
+                        row.short = short
+                        sugg.add(row)
+                        row.show_all()          # (show_all on the no-show-all list box itself is a no-op)
+                        shown += 1
+                        if shown >= 8:
+                            break
+            sugg.set_visible(shown > 0)
+
+        def choose(_lb, row):
+            parts = [p.strip() for p in e.get_text().split(",")]
+            parts[-1] = row.short
+            e.set_text(", ".join(parts))
+            e.grab_focus()
+            e.set_position(-1)
+
+        def entry_key(_w, ev):
+            from gi.repository import Gdk
+            if ev.keyval == Gdk.KEY_Down and sugg.get_visible():
+                first = sugg.get_row_at_index(0)
+                if first:
+                    sugg.select_row(first)
+                    first.grab_focus()
+                return True
+            return False
+        e.connect("changed", refill)
+        e.connect("key-press-event", entry_key)
+        sugg.connect("row-activated", choose)
         hint = Gtk.Label(xalign=0, wrap=True)
         hint.get_style_context().add_class("dim-label")
         if (self.ctrl.serverinfo or {}).get("features", 0) & 0x80000:
