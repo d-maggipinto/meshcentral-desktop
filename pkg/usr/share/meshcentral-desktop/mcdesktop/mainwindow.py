@@ -180,7 +180,13 @@ class MainWindow(Gtk.ApplicationWindow):
         col.pack_start(txt, True)
         col.add_attribute(icon, "icon-name", 0)
         col.set_cell_data_func(txt, self._name_cell)
+        # group header button: Add Agent / Invite (the web UI's links next to the group name)
+        self._hdr_add = Gtk.CellRendererPixbuf(icon_name="list-add-symbolic", xpad=6)
+        col.pack_end(self._hdr_add, False)
+        col.set_cell_data_func(self._hdr_add, self._hdr_add_cell)
         self.tree.append_column(col)
+        self.tree.set_has_tooltip(True)
+        self.tree.connect("query-tooltip", self._on_tree_tooltip)
         box.pack_start(ui.scrolled(self.tree), True, True, 0)
         # selection bar (web UI Group Action), shown while devices are checked
         self.sel_bar = Gtk.Box(spacing=6, margin=6)
@@ -399,6 +405,34 @@ class MainWindow(Gtk.ApplicationWindow):
             cell.set_property("markup", f"{star}{GLib.markup_escape_text(name)}\n<small>{sub}</small>")
         else:
             cell.set_property("markup", f"<b>{GLib.markup_escape_text(name)}</b>  <small>{sub}</small>")
+
+    def _hdr_add_cell(self, _c, cell, model, it, _d):
+        cell.set_property("visible", self._hdr_has_actions(model[it]))
+
+    def _hdr_has_actions(self, row):
+        if row[4] or not row[6] or self._view.get("sort", 0) != 0:
+            return False
+        return any(dl.mesh_actions(self.ctrl, self.meshes.get(row[6])))
+
+    def _on_hdr_add_hit(self, path, column, cell_x):
+        """True when a click at cell_x on a group header row lands on its Add Agent / Invite button."""
+        row = self.store[path]
+        if not self._hdr_has_actions(row):
+            return False
+        column.cell_set_cell_data(self.store, self.store.get_iter(path), False, False)
+        pos = column.cell_get_position(self._hdr_add)      # (x_offset, width), or None if not packed
+        return bool(pos) and pos[0] <= cell_x < pos[0] + pos[1]
+
+    def _on_tree_tooltip(self, tree, x, y, keyboard, tip):
+        if keyboard:
+            return False
+        bx, by = tree.convert_widget_to_bin_window_coords(x, y)
+        hit = tree.get_path_at_pos(bx, by)
+        if not hit or not self._on_hdr_add_hit(hit[0], hit[1], hit[2]):
+            return False
+        add, invite = dl.mesh_actions(self.ctrl, self.meshes.get(self.store[hit[0]][6]))
+        tip.set_text(" / ".join(t for t, ok in (("Add Agent", add), ("Invite", invite)) if ok))
+        return True
 
     def filter_devices(self):
         self._tree_sig = None
@@ -779,6 +813,10 @@ class MainWindow(Gtk.ApplicationWindow):
 
     # ---- context menu ------------------------------------------------------
     def _on_tree_click(self, tree, event):
+        if event.button == 1 and event.type == Gdk.EventType.BUTTON_PRESS:
+            hit = tree.get_path_at_pos(int(event.x), int(event.y))
+            if hit and self._on_hdr_add_hit(hit[0], hit[1], hit[2]):
+                return self._group_menu(event, self.store[hit[0]][6])
         if event.button == 3:
             path = tree.get_path_at_pos(int(event.x), int(event.y))
             if path:

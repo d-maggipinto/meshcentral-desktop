@@ -30,7 +30,7 @@ Server-wide ("site") rights come from `userinfo.siteadmin`; `0xFFFFFFFF` is a fu
 | Agent Console | `8` + agent console `16` |
 | Group Action: wake / sleep, reset, power off / run commands / notification / tags / upload files / delete / uninstall | Wake `64` / reset-off `262144` / remote commands `131072` / chat & notify `16384` / manage computers `4` / remote control `8` / uninstall `32768` (uninstall: agent online) |
 | Group Action: move to device group | Edit group `1` on the device and the target, manage computers `4` on the target, same group type |
-| Add Agent / Invite (device group menu) | Manage computers `4` on an agent group and not "no new devices" (site `4096`); Invite also needs a server that is not LAN-only |
+| Add Agent / Invite (+ button on the device group header, or right-click it) | Manage computers `4` on an agent group and not "no new devices" (site `4096`); Invite also needs a server that is not LAN-only |
 | Add Device Group / MeshCmd | Not "no new groups" (site `64`) / not "no MeshCmd" (site `128`) |
 | Run command; fast `systemctl` services listing | Remote command `131072` |
 | Wake up | Wake device `64` |

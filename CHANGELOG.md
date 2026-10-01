@@ -7,6 +7,12 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [2.24.1] - 2026-10-01
+### Fixed
+- Devices list: **Add Agent** and **Invite** were only reachable by right-clicking a device group
+  header. Each agent group header now shows a **+** button (left-click) that opens them, like the
+  web UI's links next to the group name.
+
 ## [2.24.0] - 2026-09-30
 ### Added
 - **Devices list like the web UI's "My Devices"**:

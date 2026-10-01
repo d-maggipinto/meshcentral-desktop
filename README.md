@@ -47,7 +47,7 @@ Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
 - **Group Action** on checked devices: export (CSV or JSON), move to another group, notification,
   tags, run commands (with the output of each device), upload files, wake, sleep, reset, power off,
   uninstall agent, delete.
-- Per device group: **Add Agent** (downloads and install commands for Windows, Linux, macOS, mobile
+- Per device group (the **+** on its header): **Add Agent** (downloads and install commands for Windows, Linux, macOS, mobile
   and MeshCentral Assistant) and **Invite** (link or email); **Add Device Group** and **MeshCmd**.
 - Device pages in three groups: **Overview** (General, Hardware, Network, Events, Notes),
   **Remote** (Desktop, Terminal, Files) and **Tools** (Processes, Services, Agent Console).
