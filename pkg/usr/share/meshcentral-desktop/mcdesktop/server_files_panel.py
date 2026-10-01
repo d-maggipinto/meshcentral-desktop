@@ -352,7 +352,10 @@ class ServerFilesPanel(Gtk.Box):
             return
         target = ch.get_filename()
         ch.destroy()
-        jobs = [(k, s, target if len(files) == 1 else os.path.join(target, k)) for k, s in files]
+        # Several files: the local names come from the server's listing keys, so they are reduced to a
+        # plain file name (no "../" or absolute paths) and never overwrite an existing file.
+        jobs = [(k, s, target if len(files) == 1 else ui.unique_path(target, ui.safe_filename(k)))
+                for k, s in files]
         self._download_next(jobs, list(self.path))
 
     def _download_next(self, jobs, path):
@@ -382,8 +385,10 @@ class ServerFilesPanel(Gtk.Box):
                     and "data" in msg:
                 self.app.ctrl.off("fileoperation", on_reply)
                 try:
-                    with open(dest, "wb") as f:
+                    tmp = dest + ".part"
+                    with open(tmp, "xb") as f:                 # "x": never follow / reuse an existing file
                         f.write(base64.b64decode(msg["data"]))
+                    os.replace(tmp, dest)
                     cont(True)
                 except OSError as ex:
                     ui.message(self.get_toplevel(), "Cannot save file", str(ex), Gtk.MessageType.ERROR)

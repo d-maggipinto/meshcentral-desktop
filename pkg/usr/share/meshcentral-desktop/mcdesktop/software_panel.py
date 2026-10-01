@@ -16,6 +16,7 @@ Ground truth (meshuser.js / agents/meshcore.js 1.2.5, verified on the rig):
 """
 import base64
 import json
+import re
 
 from gi.repository import Gtk, GLib
 
@@ -241,6 +242,14 @@ class SoftwarePanel(Gtk.Box):
             cmd = row[5]
             if not ui.confirm(top, "Uninstall this software?", f"{row[0]}\n\n{cmd}\n\nA silent uninstall will be "
                               "performed.", "Uninstall", destructive=True):
+                return
+            # The command line comes from the device (a user there may have written it) and the agent
+            # runs it with cmd.exe as SYSTEM: chained commands get a second, explicit warning.
+            if re.search(r"[&|<>^]", cmd) and not ui.confirm(
+                    top, "This uninstall command runs more than one program",
+                    f"{cmd}\n\nShell operators (& | < > ^) in an uninstall command are unusual and could run "
+                    "extra commands as SYSTEM on the device. Run it only if you trust it.", "Run anyway",
+                    destructive=True):
                 return
             value = base64.b64encode(cmd.encode("utf-8")).decode()
             self.ctrl.send({"action": "software", "nodeid": self.node["_id"], "type": "uninstallapp", "value": value})

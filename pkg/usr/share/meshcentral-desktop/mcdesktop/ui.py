@@ -1,6 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Small GTK helpers shared by the windows."""
+import os
 import time
 
 from gi.repository import Gtk
@@ -74,9 +75,16 @@ def fmt_size(n):
         n /= 1024
 
 
+def one_line(text, limit=200):
+    """Untrusted text (device / user names...) for a one-line title: line breaks and runs of spaces
+    collapsed, so a name cannot add lines that change what a dialog says."""
+    t = " ".join(str(text or "").split())
+    return t if len(t) <= limit else t[:limit - 1] + "…"
+
+
 def message(parent, title, text="", kind=Gtk.MessageType.INFO):
     d = Gtk.MessageDialog(transient_for=parent, modal=True, message_type=kind,
-                          buttons=Gtk.ButtonsType.OK, text=title)
+                          buttons=Gtk.ButtonsType.OK, text=one_line(title))
     if text:
         d.format_secondary_text(text)
     d.run()
@@ -85,7 +93,7 @@ def message(parent, title, text="", kind=Gtk.MessageType.INFO):
 
 def confirm(parent, title, text="", ok_label="OK", destructive=False):
     d = Gtk.MessageDialog(transient_for=parent, modal=True, message_type=Gtk.MessageType.QUESTION,
-                          buttons=Gtk.ButtonsType.NONE, text=title)
+                          buttons=Gtk.ButtonsType.NONE, text=one_line(title))
     if text:
         d.format_secondary_text(text)
     d.add_button("Cancel", Gtk.ResponseType.CANCEL)
@@ -211,3 +219,26 @@ def json_tree(data):
         tv.append_column(c)
     tv.expand_all()
     return tv
+
+
+def safe_filename(name, default="download", allow_dot=False):
+    """A file name from the server or a device, made safe to use in a local folder: no path parts
+    (`/`, `\\`, `..`), no control characters, no leading dot (hidden files such as .bashrc) unless
+    allow_dot, at most 200 characters."""
+    n = str(name or "").replace("\\", "/").split("/")[-1]
+    n = "".join(c for c in n if c >= " " and c != "\x7f").strip()
+    if not allow_dot:
+        n = n.lstrip(".")
+    if n in ("", ".", ".."):
+        n = default
+    return n[:200]
+
+
+def unique_path(folder, name):
+    """folder/name, or folder/name (1).ext … when that already exists (never overwrite)."""
+    base, ext = os.path.splitext(name)
+    cand, i = os.path.join(folder, name), 1
+    while os.path.lexists(cand):
+        cand = os.path.join(folder, f"{base} ({i}){ext}")
+        i += 1
+    return cand

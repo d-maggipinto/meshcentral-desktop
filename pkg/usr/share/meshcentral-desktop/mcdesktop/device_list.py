@@ -20,6 +20,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import time
 import urllib.parse
 
@@ -49,7 +50,10 @@ FEAT_NOPROXY, FEAT_MQTT, FEAT_UNTRUSTED_CERT = 0x2000, 0x400000, 0x80000000
 
 def _nat_key(s):
     """Natural, case-insensitive order (the web UI uses Intl.Collator numeric)."""
-    return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", (s or "").lower())]
+    # the capture group puts the digit runs at the odd positions: convert by position, not with
+    # isdigit() (true for "²", which int() rejects: one such device name crashed the whole list)
+    parts = re.split(r"(\d+)", str(s or "").lower())
+    return [int(t) if i % 2 else t for i, t in enumerate(parts)]
 
 
 def node_name(node, os_name=False):
@@ -324,6 +328,10 @@ def download_from_server(win, path, what):
 
 
 # ---- server addresses for agent links ------------------------------------------------------
+_HOST_RE = re.compile(r"^[A-Za-z0-9.-]{1,253}$")
+_DOMAIN_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
+
+
 def server_base(ctrl):
     """https://S P D like the web UI (addAgentToMesh): the server's public name when it has a
     dot (else the address we connected to), its port unless 443, and the domain path."""
@@ -331,11 +339,15 @@ def server_base(ctrl):
     feats = si.get("features") or 0
     name = si.get("name") or ""
     host = ctrl.server.host.split(":")[0]
-    if "." not in name or feats & FEAT_LANONLY:
+    # These values end up in shell commands the user pastes (often with sudo): accept only a plain
+    # host name, a numeric port and a simple domain path; anything else falls back to our own address.
+    if "." not in name or feats & FEAT_LANONLY or not _HOST_RE.match(name):
         name = host
-    port = si.get("port") or 443
+    port = si.get("port")
+    port = port if isinstance(port, int) and 0 < port < 65536 else 443
     p = "" if port == 443 else f":{port}"
-    d = "/" + (si.get("domainsuffix") + "/" if si.get("domainsuffix") else "")
+    suffix = si.get("domainsuffix")
+    d = "/" + (suffix + "/" if isinstance(suffix, str) and _DOMAIN_RE.match(suffix) else "")
     return f"https://{name}{p}", d
 
 
@@ -343,9 +355,9 @@ def linux_install_command(ctrl, meshid, uninstall=False):
     feats = (ctrl.serverinfo or {}).get("features") or 0
     base, d = server_base(ctrl)
     nc = " --no-check-certificate" if feats & FEAT_UNTRUSTED_CERT else ""
-    m = meshid.split("/")[2]
+    m = shlex.quote(meshid.split("/")[2])               # quoted for the shell whatever it contains
     arg = "uninstall " if uninstall else ""
-    run = f"sudo -E ./meshinstall.sh {arg}{base}{d.rstrip('/')} '{m}' || ./meshinstall.sh {arg}{base}{d.rstrip('/')} '{m}'"
+    run = f"sudo -E ./meshinstall.sh {arg}{base}{d.rstrip('/')} {m} || ./meshinstall.sh {arg}{base}{d.rstrip('/')} {m}"
     if feats & FEAT_NOPROXY:
         return f'wget "{base}{d}meshagents?script=1" --no-proxy{nc} -O ./meshinstall.sh && chmod 755 ./meshinstall.sh && {run}'
     return (f'(wget "{base}{d}meshagents?script=1"{nc} -O ./meshinstall.sh || wget "{base}{d}meshagents?script=1" '
@@ -825,7 +837,9 @@ class GroupActions:
         if not ok:
             self._skipped(skip)
             return
-        if op != "sleep" and not ui.confirm(self.win, f"{verb} {len(ok)} device(s)?", "", verb, destructive=True):
+        # every multi-device power action is confirmed (sleep too: it can interrupt work on many machines)
+        if (op != "sleep" or len(ok) > 1) and not ui.confirm(self.win, f"{verb} {len(ok)} device(s)?", "", verb,
+                                                             destructive=True):
             return
         self.ctrl.send({"action": "poweraction", "nodeids": [n["_id"] for n in ok], "actiontype": actiontype})
         self.win.app.notify(verb, f"Sent to {len(ok)} device(s).")
@@ -1112,25 +1126,38 @@ class GroupActions:
             self.win.app.notify("Export", os.path.basename(dest))
 
 
+def csv_text(v):
+    """A device value for the web UI's CSV format: commas removed, line breaks flattened, and a
+    leading = + - @ (a formula in spreadsheets) neutralised with a quote."""
+    t = "" if v is None else str(v).replace(",", "").replace("\r", " ").replace("\n", " ")
+    return "'" + t if t[:1] in ("=", "+", "-", "@", "\t") else t
+
+
+def csv_cell(v):
+    """Quoted CSV field (embedded quotes doubled, so device data cannot end the field)."""
+    return '"' + csv_text(v).replace('"', '""') + '"'
+
+
 def export_csv(nodes, meshes):
     """devicelist.csv like the web UI (quoted values, commas removed, CRLF)."""
-    clean = lambda v: "" if v is None else str(v).replace(",", "")
+    clean = csv_text
     out = io.StringIO()
     out.write("id,name,rname,host,icon,ip,osdesc,state,groupname,conn,pwr,av,update,firewall,avdetails,tags,lastbootuptime\r\n")
     for n in nodes:
         cells = [n.get("_id"), n.get("name"), n.get("rname"), n.get("host"), n.get("icon"), n.get("ip"),
                  n.get("osdesc"), n.get("state"), (meshes.get(n.get("meshid")) or {}).get("name"),
                  n.get("conn") or "", n.get("pwr") or ""]
-        row = ",".join(f'"{clean(c)}"' for c in cells)
+        row = ",".join(csv_cell(c) for c in cells)
         w = n.get("wsc") or n.get("lsc")
         if w:
-            row += "," + ",".join(f'"{clean(w.get(k))}"' if k in w else "" for k in ("antiVirus", "autoUpdate", "firewall"))
+            row += "," + ",".join(csv_cell(w.get(k)) if k in w else "" for k in ("antiVirus", "autoUpdate", "firewall"))
         else:
             row += ",,,"
         av = n.get("av")
         avd = "|".join(f"{clean(a.get('product'))}/{'enabled' if a.get('enabled') else 'disabled'}/"
-                       f"{'updated' if a.get('updated') else 'notupdated'}" for a in av) if isinstance(av, list) else ""
-        row += f',"{avd}","{"|".join(clean(t) for t in (n.get("tags") or []))}"'
+                       f"{'updated' if a.get('updated') else 'notupdated'}" for a in av if isinstance(a, dict)) \
+            if isinstance(av, list) else ""
+        row += "," + csv_cell(avd) + "," + csv_cell("|".join(clean(t) for t in (n.get("tags") or [])))
         if isinstance(n.get("lastbootuptime"), (int, float)):
             row += f',"{n["lastbootuptime"]}"'
         out.write(row + "\r\n")

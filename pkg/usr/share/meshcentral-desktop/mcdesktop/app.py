@@ -18,6 +18,15 @@ DATA_DIR = os.path.join(GLib.get_user_data_dir(), "meshcentral-desktop")
 CONFIG_FILE = os.path.join(CONFIG_DIR, "config.json")
 
 
+def _private_dir(path):
+    """Create (or tighten) a folder only this user can open."""
+    os.makedirs(path, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(path, 0o700)
+    except OSError:
+        pass
+
+
 class App(Gtk.Application):
     def __init__(self):
         super().__init__(application_id=APP_ID, flags=Gio.ApplicationFlags.FLAGS_NONE)
@@ -37,10 +46,14 @@ class App(Gtk.Application):
             self.config = {}
 
     def save_config(self):
-        os.makedirs(CONFIG_DIR, exist_ok=True)
+        """Private (0600 in a 0700 folder) and atomic: a crash mid-write keeps the old file."""
         try:
-            with open(CONFIG_FILE, "w") as f:
+            _private_dir(CONFIG_DIR)
+            tmp = CONFIG_FILE + ".tmp"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w") as f:
                 json.dump(self.config, f, indent=2)
+            os.replace(tmp, CONFIG_FILE)
         except Exception:
             pass
 
@@ -48,7 +61,7 @@ class App(Gtk.Application):
     def do_startup(self):
         Gtk.Application.do_startup(self)
         self.load_config()
-        os.makedirs(DATA_DIR, exist_ok=True)
+        _private_dir(DATA_DIR)             # WebKit cookies, server stats: not readable by other users
         from . import ui
         ui.set_time_format(self.config.get("date_format"))
         settings = Gtk.Settings.get_default()
@@ -86,8 +99,20 @@ class App(Gtk.Application):
         if self.main_win:
             self.main_win.destroy()
             self.main_win = None
+        # The next account must not inherit this one's web sessions: forget the HTTP session used for
+        # downloads / Web-RDP and the viewer's cookies.
+        self._dl_session = None
+        self._clear_web_cookies()
         self._web_context = None
         self._show_login()
+
+    def _clear_web_cookies(self):
+        try:
+            dm = self.web_context().get_website_data_manager()
+            dm.clear(WebKit2.WebsiteDataTypes.COOKIES | WebKit2.WebsiteDataTypes.SESSION_STORAGE
+                     | WebKit2.WebsiteDataTypes.LOCAL_STORAGE, 0, None, None, None)
+        except Exception:
+            pass
 
     # ---- shared web context for desktop viewer -----------------------------
     def web_context(self):
@@ -99,6 +124,8 @@ class App(Gtk.Application):
             cm = self._web_context.get_cookie_manager()
             cm.set_persistent_storage(os.path.join(DATA_DIR, "webkit", "cookies.sqlite"),
                                       WebKit2.CookiePersistentStorage.SQLITE)
+            # No page may save files on its own (the app's downloads go through WebSession).
+            self._web_context.connect("download-started", lambda _c, d: d.cancel())
         return self._web_context
 
 

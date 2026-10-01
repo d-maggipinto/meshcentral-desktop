@@ -16,6 +16,7 @@ call the viewer's own JS API (desktop.m.sendcad, SendCompressionLevel, the clipb
 functions, connectDesktop) via run_javascript.
 """
 import json
+import urllib.parse
 import time
 
 from . import rights
@@ -41,6 +42,28 @@ _COVER_CSS = b"""
             padding: 8px 16px; font-weight: bold; }
 """
 _cover_css_installed = False
+
+
+def server_origin(url):
+    """'https://host:port' of a server URL (what location.origin reports)."""
+    p = urllib.parse.urlsplit(url)
+    return f"{p.scheme}://{p.netloc}"
+
+
+def same_origin_policy(_view, decision, kind, server_url):
+    """WebKit decide-policy handler for views that must stay on the MeshCentral server: refuse
+    navigation to other origins and every new-window request. Returns True when handled."""
+    if kind == WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION:
+        decision.ignore()
+        return True
+    if kind == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
+        uri = decision.get_navigation_action().get_request().get_uri() or ""
+        if uri.startswith(("about:", "data:", "blob:")):
+            return False
+        if server_origin(uri) != server_origin(server_url):
+            decision.ignore()
+            return True
+    return False
 
 
 class DesktopPanel(Gtk.Box):
@@ -178,13 +201,18 @@ class DesktopPanel(Gtk.Box):
         self.view = WebKit2.WebView.new_with_context(app.web_context())
         s = self.view.get_settings()
         s.set_enable_webgl(True)
-        s.set_javascript_can_access_clipboard(True)
-        s.set_javascript_can_open_windows_automatically(True)
+        # The app does all clipboard work itself (getclip/setclip): the page gets NO clipboard
+        # access (in WebKitGTK this setting also allows a script to paste = read the local clipboard)
+        # and cannot open windows.
+        s.set_javascript_can_access_clipboard(False)
+        s.set_javascript_can_open_windows_automatically(False)
         s.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.ALWAYS)
         self.view.connect("load-changed", self._on_load)
         # The page's dialogs would be invisible behind our cover and block forever -
         # notably MeshCentral's "leave page?" beforeunload confirm on reconnect.
         self.view.connect("script-dialog", self._on_script_dialog)
+        # The view only ever shows the configured server: navigation elsewhere is refused
+        self.view.connect("decide-policy", lambda v, d, t: same_origin_policy(v, d, t, app.ctrl.server.url))
         self.view.connect("size-allocate", self._on_view_resize)
         self._resize_timer = None
 
@@ -321,8 +349,8 @@ class DesktopPanel(Gtk.Box):
             dialog.confirm_set_confirmed(False)
         elif t == WebKit2.ScriptDialogType.ALERT:
             msg = (dialog.get_message() or "").strip()
-            if msg:
-                self._note(msg)
+            if msg:                                  # page text: label it, never pass it off as the app's
+                self._note("Message from the server page: " + msg[:300])
         return True                                  # handled: never show a hidden dialog
 
     def teardown(self):
@@ -813,6 +841,8 @@ class DesktopPanel(Gtk.Box):
         cb.request_text(lambda _c, text: setattr(self, "_sync_last_local", text))
         if not self._sync_owner_sig:
             self._sync_owner_sig = cb.connect("owner-change", lambda *_: self._sync_check_local())
+        if not getattr(self, "_sync_map_sig", None):     # back on the Desktop page: check again
+            self._sync_map_sig = self.connect("map", lambda *_: self._sync_check_local())
         top = self.get_toplevel()
         if isinstance(top, Gtk.Window) and not self._sync_focus_sig:
             # Wayland only tells a client about clipboard changes while it has focus, so
@@ -828,6 +858,9 @@ class DesktopPanel(Gtk.Box):
         if self._sync_owner_sig:
             Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).disconnect(self._sync_owner_sig)
             self._sync_owner_sig = None
+        if getattr(self, "_sync_map_sig", None):
+            self.disconnect(self._sync_map_sig)
+            self._sync_map_sig = None
         if self._sync_focus_sig:
             top, sig = self._sync_focus_sig
             try:
@@ -847,9 +880,20 @@ class DesktopPanel(Gtk.Box):
         self.app.ctrl.send_node_msg(self.node["_id"], "getclip", tag=3)
         return True
 
+    _SYNC_MAX = 256 * 1024                            # chars; bigger clipboards are not synced
+
+    def _sync_active(self):
+        """Sync only while the user is looking at this remote screen: Desktop page shown and the
+        app window active. A device cannot rewrite the local clipboard, and local copies are not
+        sent, while the session sits in the background."""
+        top = self.get_toplevel()
+        return self.get_mapped() and isinstance(top, Gtk.Window) and top.is_active()
+
     def _sync_on_remote(self, data):
-        if not isinstance(data, str) or not self._sync_timer:
+        if not isinstance(data, str) or not self._sync_timer or len(data) > self._SYNC_MAX:
             return
+        if not self._sync_baseline and not self._sync_active():
+            return                                    # not remembered: applied when the user is back
         if self._sync_baseline:
             self._sync_baseline = False
             self._sync_last_remote = data
@@ -867,8 +911,10 @@ class DesktopPanel(Gtk.Box):
             return
 
         def got(_c, text):
-            if not text or not self._sync_timer or text == self._sync_last_local:
+            if not text or not self._sync_timer or text == self._sync_last_local or len(text) > self._SYNC_MAX:
                 return
+            if not self._sync_active():
+                return                                # re-checked on focus-in / when the page is shown
             self._sync_last_local = text
             if text != self._sync_last_remote and self.caps.desktop_input:
                 self._sync_last_remote = text         # so the next poll doesn't echo it back
@@ -903,7 +949,7 @@ class DesktopPanel(Gtk.Box):
 
     # The web page must NOT touch the clipboard: if the server enables auto-clipboard,
     # the viewer polls readText() every second and would push stale text to the remote.
-    _CLIP_SHIM = ("(function(){try{Object.defineProperty(navigator,'clipboard',{configurable:true,value:{"
+    _CLIP_SHIM = ("(function(){try{Object.defineProperty(navigator,'clipboard',{configurable:false,writable:false,value:{"
                   "writeText:function(){return Promise.resolve();},"
                   "readText:function(){return Promise.reject(new Error('disabled'));}}});"
                   "return 'ok';}catch(e){return 'err';}})()")
@@ -1076,8 +1122,10 @@ class DesktopPanel(Gtk.Box):
             self._set_status("Signing in…")
             u = json.dumps(self.app.ctrl.username)
             p = json.dumps(self.app.ctrl.password or "")
+            origin = json.dumps(server_origin(self.app.ctrl.server.url))
             self._js(
-                "(function(){"
+                # fill the password only into the configured server's own page (https origin)
+                "(function(){if(location.origin!==" + origin + ")return 'foreign';"
                 f"var u=document.getElementById('username');var p=document.getElementById('password');"
                 f"if(!u||!p)return 'noform';u.value={u};p.value={p};"
                 "var b=document.getElementById('loginButton');"

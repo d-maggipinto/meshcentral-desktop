@@ -95,20 +95,30 @@ class LoginWindow(Gtk.ApplicationWindow):
         self.button.grab_default()
 
         # Prefill remembered password
+        self._autofilled = False
         if cfg.get("server") and cfg.get("username") and cfg.get("remember"):
             pw = load_password(cfg["server"], cfg["username"])
             if pw:
                 self.password.set_text(pw)
+                self._autofilled = True
+        self.password.connect("changed", lambda *_: setattr(self, "_autofilled", self._filling))
+        self._filling = False
 
         self.username.connect("changed", self._prefill_pw)
         self.server.connect("changed", self._prefill_pw)
         self.show_all()
 
     def _prefill_pw(self, *_):
+        """Show the saved password of THIS server + user, and never keep another server's saved
+        password in the (hidden) field after the address or user name was edited."""
+        pw = None
         if self.remember.get_active():
             pw = load_password(self.server.get_text().strip(), self.username.get_text().strip())
-            if pw:
-                self.password.set_text(pw)
+        if pw or self._autofilled:
+            self._filling = True
+            self.password.set_text(pw or "")
+            self._filling = False
+            self._autofilled = bool(pw)
 
     def _set_busy(self, busy, text=""):
         self.button.set_sensitive(not busy)
@@ -124,6 +134,9 @@ class LoginWindow(Gtk.ApplicationWindow):
         token = self.token.get_text().strip() or None
         if not (server and username and password):
             self._set_busy(False, "Enter server, username and password.")
+            return
+        if "://" in server and not server.lower().startswith("https://"):
+            self._set_busy(False, "Use an https:// address: the password is never sent unencrypted.")
             return
         self._set_busy(True, "Connecting…")
         self.conn = ControlConnection(server, username, password, token)

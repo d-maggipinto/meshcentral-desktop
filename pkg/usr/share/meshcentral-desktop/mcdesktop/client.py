@@ -50,7 +50,10 @@ class ServerAddress:
         if "://" not in url:
             url = "https://" + url
         p = urlparse(url)
-        self.https = p.scheme == "https"
+        if p.scheme != "https":
+            # the password (x-meshauth, /login form) must never travel unencrypted
+            raise ValueError("only https:// servers are supported")
+        self.https = True
         self.host = p.netloc
         self.path = p.path.rstrip("/")          # login domain path, usually ""
         self.url = f"{p.scheme}://{p.netloc}{self.path}"
@@ -339,6 +342,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def _mp_name(path):
+    """File name for a multipart header: no quotes / CR / LF that could break or inject headers."""
+    return "".join(c for c in os.path.basename(path) if c >= " ").replace('"', "%22")
+
+
 class WebSession:
     CHUNK = 256 * 1024
 
@@ -395,11 +403,15 @@ class WebSession:
     def fetch(self, path, dest, on_progress=None, on_done=None, timeout=60):
         """GET <server><path> with the web session and stream it to dest (e.g. /backup.zip)."""
         def run():
+            tmp = None
             try:
                 self._login()
                 url = self.ctrl.server.url + path
                 req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
-                with self._opener().open(req, timeout=timeout) as r, open(dest, "wb") as f:
+                # Write a private temp file next to dest and rename it on success: a failed or
+                # cancelled download never truncates or deletes a file that was already there.
+                fd, tmp = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(dest)), prefix=".mcd-")
+                with self._opener().open(req, timeout=timeout) as r, os.fdopen(fd, "wb") as f:
                     total = int(r.headers.get("Content-Length") or 0)
                     got = 0
                     while True:
@@ -409,13 +421,16 @@ class WebSession:
                         f.write(b)
                         got += len(b)
                         _ui(on_progress, got, total)
+                os.replace(tmp, dest)
+                tmp = None
                 _ui(on_done, None)
             except Exception as ex:
                 self._logged_in = False
-                try:
-                    os.remove(dest)
-                except OSError:
-                    pass
+                if tmp:
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
                 _ui(on_done, str(ex))
         threading.Thread(target=run, daemon=True).start()
 
@@ -431,7 +446,9 @@ class WebSession:
                     cd = r.headers.get("Content-Disposition") or ""
                     m = re.search(r'filename\*?=(?:UTF-8\'\')?"?([^";]+)"?', cd)
                     name = urllib.parse.unquote(m.group(1)) if m else path.split("?")[0].rsplit("/", 1)[-1]
-                    name = os.path.basename(name.replace("\\", "/")) or "download"
+                    name = os.path.basename(name.replace("\\", "/"))
+                    # no hidden files (".bash_aliases" in a home folder would run at the next shell)
+                    name = "".join(c for c in name if c >= " ").lstrip(".")[:200] or "download"
                     fd, tmp = tempfile.mkstemp(dir=folder, prefix=".mcd-")
                     with os.fdopen(fd, "wb") as f:
                         while True:
@@ -440,9 +457,19 @@ class WebSession:
                                 break
                             f.write(b)
                 dest, root, ext, i = os.path.join(folder, name), *os.path.splitext(os.path.join(folder, name)), 1
-                while os.path.exists(dest):                  # never overwrite: "name (1).exe"
-                    dest, i = f"{root} ({i}){ext}", i + 1
-                os.replace(tmp, dest)
+                while True:                                  # never overwrite: "name (1).exe"
+                    try:
+                        os.link(tmp, dest)                   # atomic, fails if dest exists (no check/use race)
+                        os.remove(tmp)
+                        break
+                    except FileExistsError:
+                        dest, i = f"{root} ({i}){ext}", i + 1
+                    except OSError:                          # no hard links (FAT / exFAT USB drives)
+                        while os.path.lexists(dest):
+                            dest, i = f"{root} ({i}){ext}", i + 1
+                        os.replace(tmp, dest)
+                        break
+                tmp = None
                 _ui(on_done, None, dest)
             except Exception as ex:
                 self._logged_in = False
@@ -479,7 +506,7 @@ class WebSession:
                     return (f"--{boundary}\r\nContent-Disposition: form-data; name=\"{k}\"\r\n\r\n{v}\r\n").encode()
                 head = b"".join(field(k, v) for k, v in fields.items()) + field("auth", cookie or "")
                 parts = [(f"--{boundary}\r\nContent-Disposition: form-data; name=\"{file_field}\"; "
-                          f"filename=\"{os.path.basename(p)}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
+                          f"filename=\"{_mp_name(p)}\"\r\nContent-Type: application/octet-stream\r\n\r\n").encode()
                          for p in paths]
                 tail = f"--{boundary}--\r\n".encode()
                 size = sum(os.path.getsize(p) for p in paths)

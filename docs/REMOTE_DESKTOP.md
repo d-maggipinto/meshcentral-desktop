@@ -90,6 +90,21 @@ does not provide reliably. The app therefore uses MeshCentral's clipboard messag
 own control connection (`getclip` / `setclip`) and the GTK clipboard; the page's
 `navigator.clipboard` is replaced by a stub so the viewer cannot push stale data.
 
+Security limits (2.25.1):
+- The page itself has **no clipboard access** (`javascript-can-access-clipboard` off; in WebKitGTK it
+  would also let a page script read the local clipboard) and the stub cannot be redefined.
+- **Clipboard sync** only works while you look at the remote screen: the Desktop page is shown and
+  the app window is active. While the session sits in the background a device cannot change the local
+  clipboard and local copies are not sent; pending changes are applied when you come back.
+- Texts larger than 256 KB are not synced.
+
+## Web view limits (2.25.1)
+
+The viewer and the app's other server windows (chat, Web-VNC, Web-RDP, Web-SSH) only navigate within
+the configured server's https origin, cannot open new windows, and page-initiated downloads are
+cancelled. The automatic sign-in fills the password only when the page's origin is the server's.
+Page alerts are shown as "Message from the server page: …".
+
 ### Why Linux agents need help
 On Linux, when the agent runs as a root service, MeshCentral's clipboard module:
 - looks up the logged-in user's X display, on some systems (seen on Kali with XFCE/LightDM) this

@@ -50,11 +50,11 @@ MeshCentral Desktop runs on Linux today and is tested on Debian and Debian based
 
 | Feature | Status | Notes |
 |---|---|---|
-| **Signed releases** | Planned | Sign the release files and the checksums (for example with GPG or Sigstore), so users can check that a download comes from this project. |
+| **Signed releases** | Partly done | 2.25.1: Sigstore build provenance for the `.deb` and source archives (`gh attestation verify`), actions pinned to commit SHAs, least-privilege CI. Still planned: a signed `SHA256SUMS`. |
 | **APT repository** | Planned | A signed APT repository, so Debian based systems receive updates with `apt upgrade`. |
 | **Certificate pinning and custom CA** | Planned | Optionally pin the server certificate, or trust a private certificate authority, for servers that do not use a public certificate. |
-| **Hardened embedded web profile** | Planned | Review the private WebKit profile used for the remote desktop viewer: clear its session on sign-out, restrict it to the MeshCentral server. |
-| **Automated code scanning** | Planned | Static analysis (for example CodeQL) and dependency checks in the CI pipeline. |
+| **Hardened embedded web profile** | Done (2.25.1) | Web views stay on the server's https origin, no pop-ups, downloads or page clipboard access; cookies cleared on sign-out; password auto-fill checks the origin. |
+| **Automated code scanning** | Done | CodeQL runs on every push; Dependabot keeps the SHA-pinned GitHub Actions up to date. |
 | **Clipboard patch consent** | Planned | Ask once before sending the in-memory clipboard patch to a Linux agent, instead of only allowing it to be switched off (see [docs/REMOTE_DESKTOP.md](docs/REMOTE_DESKTOP.md)). |
 
 ## Done

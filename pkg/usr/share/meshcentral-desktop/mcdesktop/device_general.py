@@ -497,7 +497,8 @@ class GeneralPanel(Gtk.Box):
     def delete_device(self):
         node = self.node
         d, area, ok = dl._dialog(self._parent(), "Delete Node", "OK")
-        area.pack_start(Gtk.Label(label=f"Are you sure you want to delete node {node.get('name', '')}?", xalign=0),
+        area.pack_start(Gtk.Label(label=f"Are you sure you want to delete node {ui.one_line(node.get('name', ''))}?",
+                                  xalign=0),
                         False, False, 0)
         chk = Gtk.CheckButton(label="Confirm")
         area.pack_start(chk, False, False, 0)
@@ -880,6 +881,9 @@ class ChatWindow(Gtk.Window):
             self.set_transient_for(app.main_win)
         ctx = app.web_context()
         view = WebKit2.WebView.new_with_context(ctx)
+        view.get_settings().set_javascript_can_open_windows_automatically(False)
+        from .desktop_panel import same_origin_policy      # stay on the server, no pop-ups
+        view.connect("decide-policy", lambda v, d, t: same_origin_policy(v, d, t, app.ctrl.server.url))
         self.add(view)
         self.show_all()
         if not cookies:
@@ -899,8 +903,9 @@ class ChatWindow(Gtk.Window):
             if left[0] == 0:
                 view.load_uri(url)
         for name, value, path, secure in cookies:
-            c = Soup.Cookie.new(name, value, host, path, -1)
-            c.set_secure(secure)
+            c = Soup.Cookie.new(name, value, host, path, -1)    # host-only, not stored (-1)
+            # never sent over plain http, even when the server marks it non-secure (TLS offload)
+            c.set_secure(secure or urllib.parse.urlsplit(url).scheme == "https")
             c.set_http_only(True)
             mgr.add_cookie(c, None, added)
 

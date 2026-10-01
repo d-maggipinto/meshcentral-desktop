@@ -16,6 +16,19 @@ answer as soon as possible, and credit in the release notes if you wish.
 Problems in MeshCentral itself (the server, the agent or the web viewer) should be reported to the
 [MeshCentral project](https://github.com/Ylianst/MeshCentral/security).
 
+## Verifying a download
+
+Every release since 2.25.1 is built by GitHub Actions with a signed build provenance attestation
+(Sigstore). Check that a package was built from this repository:
+
+```bash
+gh attestation verify meshcentral-desktop_<version>_all.deb --repo d-maggipinto/meshcentral-desktop
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+The workflow pins every action to a commit SHA, gives the build a read-only token and only the
+release job write access.
+
 ## Scope notes
 
 - The app stores passwords only in the system keyring, and only when *Remember password* is ticked.

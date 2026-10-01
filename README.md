@@ -186,7 +186,16 @@ system shortcuts. Choose **Allow**.
 - **Credentials**: the password is stored only if you tick *Remember password*, and then only in the
   system keyring (libsecret, GNOME Keyring). Settings are in `~/.config/meshcentral-desktop/config.json`
   and contain no secrets.
-- **TLS**: connections to the server are verified against the system certificate store.
+- **TLS**: connections to the server are verified against the system certificate store, and only
+  `https://` servers are accepted, so the password is never sent unencrypted.
+- **Local files**: settings and the app's data folder (WebKit cookies, server stats) are private to
+  your account (0700 folders, 0600 settings). Signing out clears the web sessions, so the next account
+  does not inherit them.
+- **Downloads** never write outside the folder you pick: file names from the server or a device are
+  reduced to a plain name, existing files are not overwritten without asking, and a failed download
+  never damages an existing file. CSV exports neutralise spreadsheet formulas.
+- **Embedded web views** stay on your server's https address, cannot open windows or start downloads,
+  and have no clipboard access; the password is only filled into the server's own sign-in page.
 - **Embedded viewer sign-in**: the remote desktop uses MeshCentral's web viewer, so the app signs in
   to the web interface inside its own private WebKit profile (`~/.local/share/meshcentral-desktop/`).
 - **Transfers in Files and server backups** use a separate web session that is kept in memory only.
@@ -199,7 +208,8 @@ system shortcuts. Choose **Allow**.
   patch lives only in the agent's memory and is gone after the agent restarts. It only changes how
   the agent finds the user's display and keeps the clipboard owner alive, and the command appears
   in the server event log like any console command. Turn **Clipboard sync** off in the desktop
-  toolbar to avoid it. Details: [docs/REMOTE_DESKTOP.md](docs/REMOTE_DESKTOP.md).
+  toolbar to avoid it. Clipboard sync only runs while you look at the remote screen (Desktop page
+  shown, app window active). Details: [docs/REMOTE_DESKTOP.md](docs/REMOTE_DESKTOP.md).
 - The server enforces all MeshCentral permissions; the app never tries to work around them.
 
 Please report security problems privately, see [SECURITY.md](SECURITY.md).

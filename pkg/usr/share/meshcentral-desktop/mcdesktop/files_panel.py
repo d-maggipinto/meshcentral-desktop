@@ -11,6 +11,7 @@ import json
 import os
 import random
 import struct
+import tempfile
 
 from gi.repository import Gtk, GLib
 
@@ -239,7 +240,8 @@ class FilesPanel(Gtk.Box):
         name = sel[0][0]
         chooser = Gtk.FileChooserNative.new("Save file", self._parent_window(),
                                             Gtk.FileChooserAction.SAVE, "_Save", "_Cancel")
-        chooser.set_current_name(name)
+        chooser.set_current_name(ui.safe_filename(name, allow_dot=True))   # the name comes from the device
+        chooser.set_do_overwrite_confirmation(True)
         dl = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_DOWNLOAD)
         if dl:
             chooser.set_current_folder(dl)
@@ -249,13 +251,15 @@ class FilesPanel(Gtk.Box):
         dest = chooser.get_filename()
         chooser.destroy()
         try:
-            fh = open(dest, "wb")
+            # write to a private temp file next to dest, renamed when the download completes
+            fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dest), prefix=".mcd-")
+            fh = os.fdopen(fd, "wb")
         except OSError as ex:
             ui.message(self._parent_window(), "Cannot save file", str(ex), Gtk.MessageType.ERROR)
             return
         did = random.random()
         remote = (self.cur_path + "/" + name).strip("/")
-        self.download = {"id": did, "fh": fh, "name": name, "path": remote, "got": 0}
+        self.download = {"id": did, "fh": fh, "tmp": tmp, "dest": dest, "name": name, "path": remote, "got": 0}
         self._progress("Downloading %s" % name, 0)
         self.tunnel.send_json({"action": "download", "sub": "start", "id": did, "path": remote})
 
@@ -304,11 +308,17 @@ class FilesPanel(Gtk.Box):
             pass
         self._progress_done()
         if ok:
-            self._notify("Download complete", d["name"])
-        else:
             try:
-                os.remove(d["fh"].name)
-            except Exception:
+                os.replace(d["tmp"], d["dest"])
+            except OSError as ex:
+                ui.message(self._parent_window(), "Cannot save file", str(ex), Gtk.MessageType.ERROR)
+                ok = False
+            else:
+                self._notify("Download complete", d["name"])
+        if not ok:
+            try:
+                os.remove(d["tmp"])              # only our temp file, never the existing destination
+            except OSError:
                 pass
 
     # ---- upload ------------------------------------------------------------

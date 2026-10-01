@@ -146,6 +146,13 @@ def _export_time(secs):
     return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(secs)) if secs else ""
 
 
+def _no_formula(v):
+    """Spreadsheets run a cell starting with = + - @ as a formula: user names and emails are chosen
+    by other users, so such a value gets a leading quote."""
+    v = "" if v is None else str(v)
+    return "'" + v if v[:1] in ("=", "+", "-", "@", "\t", "\r") else v
+
+
 def users_to_csv(users):
     """userlist.csv with the web UI's columns (p4downloadUserInfoCSV). Dates are local time
     instead of JavaScript's Date string; fields are properly quoted/escaped; a full admin is never
@@ -163,9 +170,9 @@ def users_to_csv(users):
                 factors.append("SecurityKey")
             if u.get("otpkeys"):
                 factors.append("BackupCodes")
-        w.writerow([u.get("_id", ""), u.get("name", ""), u.get("email") or "",
+        w.writerow([_no_formula(u.get("_id", "")), _no_formula(u.get("name", "")), _no_formula(u.get("email") or ""),
                     _export_time(u.get("creation")), _export_time(u.get("login")),
-                    ",".join(u.get("groups") or []), ",".join(factors),
+                    _no_formula(",".join(u.get("groups") or [])), ",".join(factors),
                     # the web UI tests `& 32` on 0xFFFFFFFF too and marks every full admin "locked"
                     1 if sa == 0xFFFFFFFF else 0, 1 if sa & 2 else 0,
                     1 if sa != 0xFFFFFFFF and sa & 32 else 0])

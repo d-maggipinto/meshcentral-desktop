@@ -859,14 +859,21 @@ class MainWindow(Gtk.ApplicationWindow):
     def _on_ctrl_msg(self, msg):
         if msg.get("type") == "notify":
             self.show_notification(msg.get("title"), msg.get("value"), msg.get("maxtime"), msg.get("tag"),
-                                   msg.get("msgid"))
+                                   msg.get("msgid"), from_user=bool(msg.get("userid") or msg.get("username")))
 
-    def show_notification(self, title, text, maxtime=None, tag=None, msgid=None):
+    def show_notification(self, title, text, maxtime=None, tag=None, msgid=None, from_user=False):
         text = text if isinstance(text, str) and text else self._MSGIDS.get(msgid, "")
         if not text:
             return
         broadcast = tag == "broadcast"
-        head = f"Broadcast from {title}" if broadcast and title else (title or "MeshCentral")
+        title = " ".join(str(title).split())[:80] if title else ""
+        # A user chooses the title: always say who sent it, so nobody can pose as a server notice.
+        if broadcast and title:
+            head = f"Broadcast from {title}"
+        elif from_user:
+            head = f"Message from {title or 'a user'}"
+        else:
+            head = title or "MeshCentral"
         card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, width_request=360)
         card.get_style_context().add_class("mcd-notify")
         if broadcast:

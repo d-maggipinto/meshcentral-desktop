@@ -7,6 +7,38 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [2.25.1] - 2026-10-01
+### Security
+Fixes from a full security review of the code (five parallel reviews plus bandit and semgrep):
+- **My Files**: downloading several files could write outside the chosen folder when a malicious
+  server sent file names such as `../.bashrc`. Names are now reduced to a plain file name and never
+  overwrite an existing file. A failed download no longer deletes or truncates an existing file.
+- **Device Files**: the save dialog now asks before replacing a file, the device's file name is
+  sanitised, and the download is written to a temporary file that only replaces the target when complete.
+- **Agent installers / MeshCmd downloads**: no hidden (dot) file names, atomic no-overwrite save.
+- **Sign-in**: only `https://` servers are accepted (the password is never sent unencrypted); a
+  remembered password is no longer kept in the field after the server or user name is changed.
+- **Embedded web views**: they stay on the server's https origin, cannot open windows or start
+  downloads, and have no clipboard access; the automatic sign-in fills the password only into the
+  server's own page; page alerts are labelled as coming from the server page; session cookies copied
+  into the Web-RDP window are always marked secure.
+- **Clipboard sync** runs only while you look at the remote screen (Desktop page shown, window active),
+  so a device cannot change the local clipboard and local copies are not sent while a session is in the
+  background; texts over 256 KB are not synced.
+- **Sign-out** clears the web sessions (WebKit cookies and the download session) so the next account
+  does not inherit them. Settings and data folders are private to the user (0700 / 0600).
+- **CSV exports** (devices, users) neutralise spreadsheet formulas and escape quotes and line breaks.
+- **Add Agent**: the Linux install command only uses validated server values and quotes the group id.
+- **Software uninstall**: commands that chain other programs (`& | < > ^`) need a second confirmation.
+- **Notifications** from users always say who sent them (cannot pose as server notices); device names
+  can no longer add lines to confirmation dialogs; group Sleep on several devices is confirmed.
+- **Server stats file**: samples with future times are ignored and the file size is capped.
+- **Release pipeline**: GitHub Actions pinned to commit SHAs, read-only token for the build, write
+  access only in the release job, Sigstore build provenance for the release files.
+### Fixed
+- One device, group or tag name with a superscript digit (for example `PC 1²`) stopped the device list
+  from updating.
+
 ## [2.25.0] - 2026-10-01
 ### Added
 - Device **General** page like the web UI's: OS name, hostname, description, Linux / Windows security,

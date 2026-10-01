@@ -490,6 +490,7 @@ class StatsRecorder:
     is open; the app records them for as long as it runs and remembers them across restarts, so
     its CPU chart shows the same points as the web UI (and more over time)."""
     KEEP_S = 30 * 86400
+    MAX_SAMPLES = 9000            # 30 days of 5-minute samples is 8640
 
     def __init__(self, ctrl, data_dir):
         host = "".join(c if c.isalnum() or c in "-." else "_" for c in ctrl.server.host)
@@ -507,8 +508,9 @@ class StatsRecorder:
             self.samples = []
 
     def _save(self):
-        cutoff = time.time() - self.KEEP_S
-        self.samples = [s for s in self.samples if (_epoch(s["time"]) or 0) >= cutoff]
+        cutoff, future = time.time() - self.KEEP_S, time.time() + 3600
+        self.samples = [s for s in self.samples if cutoff <= (_epoch(s["time"]) or 0) <= future]
+        self.samples = self.samples[-self.MAX_SAMPLES:]
         try:
             os.makedirs(os.path.dirname(self.path), exist_ok=True)
             tmp = self.path + ".tmp"
@@ -523,7 +525,17 @@ class StatsRecorder:
         d = ev.get("data")
         if ev.get("action") != "servertimelinestats" or not isinstance(d, dict) or _cpu1(d.get("cpu")) is None:
             return
-        rec = {"time": d.get("time"), "cpu": d.get("cpu"), "first": bool(d.get("first"))}
+        t = _epoch(d.get("time"))
+        if t is None or t > time.time() + 3600:          # a sample from the future would never expire
+            return
+        try:                                             # keep only the 3 load numbers
+            raw = d.get("cpu")                           # a list, or an object keyed "0".."2"
+            if isinstance(raw, dict):
+                raw = [raw.get(str(i), raw.get(i)) for i in range(3) if raw.get(str(i), raw.get(i)) is not None]
+            cpu = [float(x) for x in list(raw)[:3]]
+        except (TypeError, ValueError):
+            return
+        rec = {"time": d.get("time"), "cpu": cpu, "first": bool(d.get("first"))}
         if d.get("s") is not None:
             rec["s"] = d["s"]
         key = round(_epoch(rec["time"]) or 0)
