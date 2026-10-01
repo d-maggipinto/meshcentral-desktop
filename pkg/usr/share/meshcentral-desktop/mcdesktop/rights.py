@@ -31,6 +31,7 @@ NODESKTOP = 0x10000
 REMOTECOMMAND = 0x20000        # "Run commands" (and our systemctl Services listing)
 RESETOFF = 0x40000             # power off / reset / sleep
 DEVICEDETAILS = 0x100000
+NOSOFTWARE = 0x800000           # hides the Software tab
 
 # Site rights (userinfo.siteadmin, SITERIGHT_*)
 SITE_BACKUP = 0x1              # My Server: download server backup (+ stats)
@@ -47,7 +48,7 @@ def _remove_user_rights(rights, userinfo):
     if not rr:
         return rights
     add = sub = 0
-    for bit in (NODESKTOP, REMOTEVIEWONLY, NOTERMINAL, NOFILES, 0x400000, 0x800000):
+    for bit in (NODESKTOP, REMOTEVIEWONLY, NOTERMINAL, NOFILES, 0x400000, NOSOFTWARE):
         if rr & bit:
             add |= bit
     for bit in (REMOTECONTROL, AGENTCONSOLE, UNINSTALL, REMOTECOMMAND, WAKEDEVICE, RESETOFF):
@@ -121,6 +122,7 @@ class NodeCaps:
         self.terminal = full or (bool(r & REMOTECONTROL) and not (r & NOTERMINAL) and not (r & REMOTEVIEWONLY))
         self.files = full or (bool(r & REMOTECONTROL) and not (r & NOFILES) and not (r & REMOTEVIEWONLY))
         self.tools = full or bool(r & REMOTECONTROL)                 # processes, services, kill, start/stop
+        self.software = full or (bool(r & REMOTECONTROL) and not (r & NOSOFTWARE))   # installed software
         self.console = full or (r & (REMOTECONTROL | AGENTCONSOLE)) == (REMOTECONTROL | AGENTCONSOLE)
         self.run_commands = full or bool(r & REMOTECOMMAND)
         self.wake = full or bool(r & WAKEDEVICE)

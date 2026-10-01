@@ -7,6 +7,41 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [2.25.0] - 2026-10-01
+### Added
+- Device **General** page like the web UI's: OS name, hostname, description, Linux / Windows security,
+  Windows Defender, pending reboot, antivirus, active users, idle time, user consent, notifications,
+  connectivity and tags. Hostname, description, user consent, notifications and tags are edited in place
+  (pencil button). Buttons **Actions** (wake, run commands, sleep, reset, power off, uninstall agent),
+  **Notes**, **Log Event**, **Run**, **Message** (with display time), **Chat** (the server's chat window)
+  and **Share** (guest link for desktop, terminal or files: starting now, time range or recurring), shown
+  only with the rights the web UI asks for.
+- **Software** page (Tools → Software, like the web UI of MeshCentral 1.2): the device's installed
+  applications with version, publisher, install date and location, search, Microsoft Store apps on
+  Windows and uninstall (full device rights, Windows agents). Loads when opened; a Linux agent can
+  take about half a minute for a few thousand packages.
+- General page, lower half like the web UI: **7 Day Power State** chart (green bars, hover for details), links
+  **Interfaces**, **MeshCmd** (action file routed to this device), **Web-VNC**, **Web-RDP** (and Web-SSH
+  when the server enables it) opened in an app window, **Change Group**, **Delete Device** (red button), and **User
+  Authorizations** with **Add User** / **Add User Group**, edit and remove. Adding an unknown user name
+  now says so (the server silently ignores it).
+- Remote desktop: after an encoding change the status shows the format the agent really sends
+  ("Encoding: WEBP", or "Requested WEBP, the agent sends JPEG").
+### Changed
+- Device page: **Overview | Remote | Tools** and **Run command | Power** share one line.
+- Remote desktop encoding defaults to **WebP** (like the web UI) instead of JPEG.
+- Opening the **Remote** group no longer connects anything. Desktop, Terminal and Files each wait
+  for their **Connect** button (Files has a new Connect / Disconnect button), so no session is
+  started on a device until you ask for one.
+### Fixed
+- Terminal **User Shell** did not work (only the admin / root shell did): the app asked the agent for
+  protocol 7, which is its plugin channel, instead of 8 (user PowerShell: 9 instead of 8). The shell
+  choices now match the web UI: Root Shell, User Shell and Login Shell on Linux / macOS, Admin Shell,
+  Admin PowerShell, User Shell and User PowerShell on Windows; a server that forces a Linux shell type
+  (`linuxShell`) is respected.
+- Remote desktop: with Scale on *Auto*, encoding, quality and speed changes made before the remote
+  screen size was known were not sent to the agent.
+
 ## [2.24.1] - 2026-10-01
 ### Fixed
 - Devices list: **Add Agent** and **Invite** were only reachable by right-clicking a device group

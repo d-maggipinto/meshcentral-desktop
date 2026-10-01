@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
-"""Device information panels: General, Hardware, Network, Events, Notes.
+"""Device information panels: Hardware, Network, Events, Notes (General is in device_general.py).
 
 Each is an embeddable Gtk.Box following the panel contract (see PANEL_CONTRACT.md):
 __init__(self, app, node), on_shown(self) for lazy loading, teardown(self) for cleanup.
 """
 import json
 
-from gi.repository import Gtk, GLib, Pango
+from gi.repository import Gtk, GLib
 
 from . import ui
 
@@ -48,70 +48,6 @@ def _group_name(app, node):
         if isinstance(src, dict) and meshid in src:
             return src[meshid].get("name") or meshid
     return meshid or ""
-
-
-class GeneralPanel(Gtk.Box):
-    """Static key/value summary of a device. No network access needed."""
-
-    def __init__(self, app, node):
-        super().__init__(orientation=Gtk.Orientation.VERTICAL)
-        self.app = app
-        self.node = node
-        self._started = False
-
-        self.grid = Gtk.Grid(row_spacing=8, column_spacing=16, margin=16)
-        self.add(ui.scrolled(self.grid))
-        self.refresh(node)
-
-    def _row(self, row, key, value):
-        klabel = Gtk.Label(label=key, xalign=0, yalign=0)
-        klabel.get_style_context().add_class("dim-label")
-        vlabel = Gtk.Label(label=str(value), xalign=0, yalign=0, selectable=True,
-                           wrap=True, wrap_mode=Pango.WrapMode.WORD_CHAR)
-        vlabel.set_hexpand(True)
-        self.grid.attach(klabel, 0, row, 1, 1)
-        self.grid.attach(vlabel, 1, row, 1, 1)
-
-    def refresh(self, node):
-        self.node = node
-        for child in self.grid.get_children():
-            self.grid.remove(child)
-
-        tags = node.get("tags")
-        if isinstance(tags, list):
-            tags = ", ".join(tags)
-        agent = node.get("agent") or {}
-        rows = [
-            ("Name", node.get("name", "")),
-            ("Status", "Local device" if ((getattr(self.app, "meshes", None) or {}).get(node.get("meshid")) or {}).get("mtype") == 3
-             else "Online" if ui.is_online(node) else "Offline"),
-            ("Operating system", ui.node_os(node)),
-            ("Group", _group_name(self.app, node)),
-            ("IP address", node.get("ip", "")),
-            ("Host", node.get("host", "")),
-            ("Tags", tags or ""),
-            ("Description", node.get("desc", "")),
-            ("Mesh agent", agent_description(node)),
-            # The meaningful version on modern agents: the running core's build string.
-            ("Agent core", agent.get("core", "")),
-            ("Node ID", node.get("_id", "")),
-        ]
-        r = 0
-        for key, value in rows:
-            if value in (None, ""):
-                continue
-            self._row(r, key, value)
-            r += 1
-        self.grid.show_all()
-
-    def on_shown(self):
-        if self._started:
-            return
-        self._started = True
-        self.refresh(self.node)
-
-    def teardown(self):
-        pass
 
 
 class _JsonInfoPanel(Gtk.Box):

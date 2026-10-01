@@ -11,6 +11,21 @@ from . import ui
 STATE_TEXT = {0: "Disconnected", 1: "Connecting…", 2: "Waiting for agent…", 3: "Connected"}
 
 
+def shell_options(node, linuxshell=None):
+    """The web UI's terminal choices: [(label, relay protocol, require login)].
+    Windows: Admin Shell 1, Admin PowerShell 6, User Shell 8, User PowerShell 9.
+    Linux / macOS: Root Shell 1, User Shell 8 (as the logged-in desktop user), Login Shell 1 + requireLogin.
+    serverinfo.linuxshell ('root' | 'user' | 'login') forces one type on non-Windows agents."""
+    if ui.is_windows(node):
+        return [("Admin Shell", PROTO_TERMINAL, False), ("Admin PowerShell", PROTO_POWERSHELL, False),
+                ("User Shell", PROTO_USER_SHELL, False), ("User PowerShell", PROTO_USER_POWERSHELL, False)]
+    opts = {"root": ("Root Shell", PROTO_TERMINAL, False), "user": ("User Shell", PROTO_USER_SHELL, False),
+            "login": ("Login Shell", PROTO_TERMINAL, True)}
+    if linuxshell in opts:
+        return [opts[linuxshell]]
+    return [opts["root"], opts["user"], opts["login"]]
+
+
 class TerminalPanel(Gtk.Box):
     def __init__(self, app, node):
         super().__init__(orientation=Gtk.Orientation.VERTICAL)
@@ -27,14 +42,10 @@ class TerminalPanel(Gtk.Box):
         bar.set_border_width(4)
 
         self.shell = Gtk.ComboBoxText()
-        self.shell_protos = []
-        opts = [("Admin shell", PROTO_TERMINAL), ("User shell", PROTO_USER_SHELL)]
-        if ui.is_windows(node):
-            opts = [("Admin cmd", PROTO_TERMINAL), ("Admin PowerShell", PROTO_POWERSHELL),
-                    ("User cmd", PROTO_USER_SHELL), ("User PowerShell", PROTO_USER_POWERSHELL)]
-        for label, p in opts:
+        self.shell_protos = []                     # (protocol, require login)
+        for label, p, login in shell_options(node, (app.ctrl.serverinfo or {}).get("linuxshell")):
             self.shell.append_text(label)
-            self.shell_protos.append(p)
+            self.shell_protos.append((p, login))
         self.shell.set_active(0)
         bar.pack_start(self.shell, False, False, 0)
 
@@ -83,8 +94,8 @@ class TerminalPanel(Gtk.Box):
     def on_shown(self):
         if self._started:
             return
-        self._started = True
-        self.connect_tunnel()
+        self._started = True             # no auto-connect: pick the shell, then press Connect
+        self.term.feed(b"Choose a shell and press Connect.\r\n")
 
     def teardown(self):
         self.disconnect_tunnel()
@@ -111,11 +122,13 @@ class TerminalPanel(Gtk.Box):
 
     def connect_tunnel(self):
         self.disconnect_tunnel()
-        self.protocol = self.shell_protos[self.shell.get_active()]
+        self.protocol, login = self.shell_protos[self.shell.get_active()]
         self.term.reset(True, True)
         cols, rows = self.term.get_column_count(), self.term.get_row_count()
-        self.tunnel = Tunnel(self.app.ctrl, self.node["_id"], self.protocol,
-                             options={"cols": cols, "rows": rows, "xterm": True})
+        opts = {"cols": cols, "rows": rows, "xterm": True}
+        if login:
+            opts["requireLogin"] = True            # the agent runs `login` instead of bash
+        self.tunnel = Tunnel(self.app.ctrl, self.node["_id"], self.protocol, options=opts)
         self.tunnel.on_state = self._on_state
         self.tunnel.on_text = lambda s: self.term.feed(s.encode("utf-8"))
         self.tunnel.on_binary = lambda b: self.term.feed(bytes(b))

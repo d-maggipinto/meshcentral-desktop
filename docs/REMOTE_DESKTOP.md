@@ -11,6 +11,9 @@ supports, while the native toolbar, overlay and shortcuts make it feel like part
 
 ## Connecting
 
+Opening the Desktop tab does not connect: the cover shows "Not connected" and a **Connect**
+button. Pressing it (or the toolbar's Connect) starts the flow below.
+
 1. Load `<server>/` in a private WebKit profile. If the login form is shown, fill in the account's
    username and password and submit (2FA forms cannot be completed automatically).
 2. Navigate to `<server>/?gotonode=<short id>&viewmode=11&hide=15`: the short id is the part of
@@ -54,8 +57,13 @@ automatically…" and a full reconnect starts as soon as the agent is back onlin
   fullscreen on its current monitor; the canvas is refitted several times while the window manager
   settles.
 - **Quality / Speed / Encoding / Scale** call `desktop.m.SendCompressionLevel(type, quality, scaling,
-  frame timer)`. JPEG is the default (WebP tiles can show artifacts in WebKit). *Auto* scale records the
-  remote's native size at 100 % and asks the agent for the size actually displayed (25-100 %).
+  frame timer)`. WebP is the default, like the web UI. Settings are sent even before the remote's native
+  size is known (the scale stays as it is until then). *Auto* scale records the remote's native size at
+  100 % and asks the agent for the size actually displayed (25-100 %).
+- After every change the app asks for a full frame (`SendRefresh`) and reads the first bytes of the next
+  tile (JPEG `FF D8`, PNG `89 50`, WebP `RIFF`): the status shows "Encoding: WEBP", or "Requested WEBP,
+  the agent sends JPEG" when the agent does not honour the choice. The viewer labels every tile
+  `image/jpeg` and relies on the decoder sniffing the real format.
 - **Display picker** appears only when the agent reports more than one display, and only offers the
   displays it lists, asking an agent for a display it did not list crashed the agent in testing.
 

@@ -49,8 +49,13 @@ Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
   uninstall agent, delete.
 - Per device group (the **+** on its header): **Add Agent** (downloads and install commands for Windows, Linux, macOS, mobile
   and MeshCentral Assistant) and **Invite** (link or email); **Add Device Group** and **MeshCmd**.
+- Device **General** page like the web UI: hostname, description, user consent, notifications and tags
+  edited in place; Linux / Windows security, antivirus and active users; **Actions**, **Notes**, **Log Event**,
+  **Run**, **Message**, **Chat** and **Share** (guest link for desktop, terminal or files); 7 day power state,
+  Web-VNC / Web-RDP, MeshCmd, Change Group, Delete Device and per-device user permissions.
 - Device pages in three groups: **Overview** (General, Hardware, Network, Events, Notes),
-  **Remote** (Desktop, Terminal, Files) and **Tools** (Processes, Services, Agent Console).
+  **Remote** (Desktop, Terminal, Files) and **Tools** (Processes, Services, Software, Agent Console). The remote
+  pages connect only when you press **Connect**.
 - Actions: run commands and see their output, wake, sleep, restart, power off, message box, toast
   notification, rename, tags, notes, open in the web interface.
 - Agents that restart or update are detected: the panels say so and the remote desktop reconnects
@@ -68,7 +73,7 @@ Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
   clipboard as keystrokes".
 
 ### Terminal, files and tools
-- Terminal (VTE): administrator or user shell, PowerShell on Windows.
+- Terminal (VTE): root, user or login shell on Linux; admin / user shell and PowerShell on Windows.
 - File manager for the device: browse, upload, download, rename, delete, new folder.
 - Processes (end process), Services (start, stop, restart; fast `systemctl` listing on Linux),
   MeshAgent console.

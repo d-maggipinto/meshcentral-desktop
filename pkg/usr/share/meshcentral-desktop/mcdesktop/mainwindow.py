@@ -8,11 +8,13 @@ from gi.repository import Gtk, Gdk, GLib, Pango
 from . import ui
 from .client import PROTO_TERMINAL
 from .general_actions import DeviceActions
-from .info_panel import GeneralPanel, HardwarePanel, NetworkPanel, EventsPanel, NotesPanel
+from .device_general import GeneralPanel
+from .info_panel import HardwarePanel, NetworkPanel, EventsPanel, NotesPanel
 from .terminal_panel import TerminalPanel
 from .files_panel import FilesPanel
 from .desktop_panel import DesktopPanel
 from .tools_panel import ProcessesPanel, ServicesPanel, ConsolePanel
+from .software_panel import SoftwarePanel
 from .admin_panel import UsersPanel, ServerEventsPanel
 from .group_panel import UserGroupsPanel
 from . import device_list as dl
@@ -40,6 +42,7 @@ DEVICE_GROUPS = [
     ("tools", "Tools", [
         ("Processes", ProcessesPanel, True, "tools"),
         ("Services", ServicesPanel, True, "tools"),
+        ("Software", SoftwarePanel, True, "software"),
         ("Console", ConsolePanel, True, "console"),
     ]),
 ]
@@ -71,7 +74,7 @@ _NAV_TITLES = {"devices": "Devices", "files": "Files", "server": "Server", "user
                "usergroups": "User Groups", "events": "Server Events", "account": "My Account"}
 _TAB_DENIED = {
     "desktop": "remote desktop", "terminal": "the terminal", "files": "file access",
-    "tools": "device tools (processes and services)", "console": "the agent console",
+    "tools": "device tools (processes and services)", "software": "the software list", "console": "the agent console",
 }
 
 
@@ -452,8 +455,8 @@ class MainWindow(Gtk.ApplicationWindow):
         empty.pack_start(l, False, False, 0)
         self.content.add_named(empty, "empty")
 
-        # Device view: action bar, group switcher (Overview / Remote / Tools), and one
-        # notebook of sub-pages per group.
+        # Device view: one bar (group switcher Overview / Remote / Tools + device actions), and
+        # one notebook of sub-pages per group.
         dev = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
         self.action_bar = self.actions.build_bar()
         dev.pack_start(self.action_bar, False, False, 0)
@@ -464,10 +467,14 @@ class MainWindow(Gtk.ApplicationWindow):
             self._group_nbs[gid] = nb
             self.group_stack.add_titled(nb, gid, title)
         self.group_stack.connect("notify::visible-child", lambda *_: self._on_group_changed())
-        self.group_bar = Gtk.Box(margin_start=8, margin_end=8, margin_bottom=4)
-        switcher = Gtk.StackSwitcher(stack=self.group_stack, halign=Gtk.Align.START)
+        # One line: Overview | Remote | Tools, then the action bar's Run command / Power (2.25.0)
+        self.group_bar = Gtk.Box(spacing=6)
+        switcher = Gtk.StackSwitcher(stack=self.group_stack, halign=Gtk.Align.START, valign=Gtk.Align.CENTER)
         self.group_bar.pack_start(switcher, False, False, 0)
-        dev.pack_start(self.group_bar, False, False, 0)
+        self.group_bar.pack_start(Gtk.Separator(orientation=Gtk.Orientation.VERTICAL, margin_start=4,
+                                                margin_end=4), False, False, 0)
+        self.action_bar.pack_start(self.group_bar, False, False, 0)
+        self.action_bar.reorder_child(self.group_bar, 0)
         dev.pack_start(self.group_stack, True, True, 0)
         self.content.add_named(dev, "device")
         return self.content
@@ -810,6 +817,16 @@ class MainWindow(Gtk.ApplicationWindow):
                 except Exception:
                     pass
         self._device_tabs = []
+
+    def close_device(self, nodeid):
+        """The open device was deleted (General → Delete Device): close its pages."""
+        if self._open_node_id != nodeid:
+            return
+        self._teardown_device_panels()
+        self._open_node_id = None
+        self.current = None
+        self.tree.get_selection().unselect_all()
+        self.content.set_visible_child_name("empty")
 
     # ---- context menu ------------------------------------------------------
     def _on_tree_click(self, tree, event):

@@ -28,10 +28,12 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `mainwindow.py` | Window shell: navigation rail + page stack, device tree, grouped device pages (rights-gated, lazily built), fullscreen, window shortcuts, notification cards, node-update fan-out |
 | `general_actions.py` | Device action bar, power / more menus, context menu, *Run command* dialog, Notes dialog |
 | `desktop_panel.py` | Remote desktop: embedded viewer, native toolbar, connection state machine, keyboard, clipboard sync |
-| `terminal_panel.py` | VTE terminal over relay protocols 1 / 6 / 7 / 8 |
+| `terminal_panel.py` | VTE terminal over relay protocols 1 / 6 / 8 / 9 (shell choices like the web UI: `shell_options`) |
 | `files_panel.py` | Device file manager over relay protocol 5 |
 | `tools_panel.py` | Processes, Services, Agent Console |
-| `info_panel.py` | General, Hardware, Network, Events, Notes |
+| `software_panel.py` | Software (installed applications, Store apps, uninstall) |
+| `device_general.py` | General page (web UI p10): attributes with edit dialogs (hostname, description, consent, notifications, tags), Actions / Notes / Log Event / Run / Message / Chat (`ChatWindow`, WebKit) / Share (`ShareDialog`); `PowerTimeline` (7 day power state), links (Interfaces, MeshCmd, Web-VNC / Web-RDP / Web-SSH windows with the web session cookies), Change Group, Delete Device, User Authorizations |
+| `info_panel.py` | Hardware, Network, Events, Notes |
 | `admin_panel.py` | Users (online / offline tree with checkboxes, Select All, Group Action, filter, live session counts from `wssessioncount`; `NewAccountDialog`, export CSV/JSON, `UserImportDialog` batch import; double-click opens `user_panel.UserPage`), User Groups (+ details, broadcast), Server Events, `BroadcastDialog` |
 | `account_panel.py` | My Account: 2FA (authenticator + QR, backup codes, security keys), previous logins, notification / localization settings, password, login tokens, delete account, device groups, account image |
 | `server_panel.py` | *Server*: server actions, live statistics (cairo gauges), history charts, server console |
@@ -64,7 +66,8 @@ pkg/                                   Debian package root (built with dpkg-deb)
 Every embedded panel is a `Gtk.Box` subclass with:
 
 - `__init__(app, node)`: builds widgets only; **no network traffic**.
-- `on_shown()`: first time the tab is displayed; starts requests / tunnels (guarded by `_started`).
+- `on_shown()`: first time the tab is displayed; starts requests (guarded by `_started`). The remote
+  panels (Desktop, Terminal, Files) never connect here: they wait for the user's **Connect**.
 - `teardown()`: stops tunnels, removes `ctrl.on(...)` listeners, timers.
 - `on_node_update(node)` *(optional)*, the device's data changed (e.g. online state).
 

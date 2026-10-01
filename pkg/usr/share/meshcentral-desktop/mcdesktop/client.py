@@ -23,8 +23,10 @@ PROTO_TERMINAL = 1          # Admin shell (bash / cmd)
 PROTO_DESKTOP = 2
 PROTO_FILES = 5
 PROTO_POWERSHELL = 6        # Admin PowerShell
-PROTO_USER_SHELL = 7
-PROTO_USER_POWERSHELL = 8
+# 8 / 9 like the web UI (agents/meshcore.js: 8 spawns the shell as the console user, 9 = user
+# PowerShell). 7 is NOT a shell: it is the agent's plugin data channel (2.25.0 fix, the app used 7/8).
+PROTO_USER_SHELL = 8
+PROTO_USER_POWERSHELL = 9
 
 
 def _b64(s):
@@ -372,6 +374,19 @@ class WebSession:
                 raise RuntimeError("the server did not accept the web sign-in "
                                    "(two-factor accounts need the web UI for large downloads)")
             self._logged_in = True
+
+    def session_cookies(self, on_done):
+        """Sign in (once) and hand the web session cookies to on_done(cookies, err) on the GTK loop:
+        [(name, value, path, secure)]. Used to open server pages that need a signed-in session
+        (mstsc.html / ssh.html) in a WebKit window."""
+        def run():
+            try:
+                self._login()
+                _ui(on_done, [(c.name, c.value, c.path or "/", bool(c.secure)) for c in self.jar], None)
+            except Exception as ex:
+                self._logged_in = False
+                _ui(on_done, [], str(ex))
+        threading.Thread(target=run, daemon=True).start()
 
     def download(self, link, dest, on_progress=None, on_done=None):
         """link: 'user//name/folder/file' (server path). Streams to dest."""

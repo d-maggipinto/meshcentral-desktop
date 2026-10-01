@@ -16,7 +16,9 @@ Close reasons on the control channel: `{action:'close', cause:'noauth', msg:'tok
 2FA code is needed; `cause:'noauth'` → wrong credentials.
 
 Relay protocols: `1` terminal (admin shell), `2` desktop, `5` files, `6` admin PowerShell,
-`7` user shell, `8` user PowerShell. The agent answers `c` / `cr` (recorded) before the session starts.
+`8` user shell (as the logged-in desktop user), `9` user PowerShell (⚠ `7` is the agent's plugin
+data channel, not a shell). Login shell = protocol `1` with `{type:'options', requireLogin:true}` (needs a root
+agent); `serverinfo.linuxshell` ('root' / 'user' / 'login') forces one type on non-Windows agents. The agent answers `c` / `cr` (recorded) before the session starts.
 ⚠ The file relay sends its JSON control messages as **binary** frames starting with `{`.
 
 ## Devices
@@ -30,9 +32,18 @@ Relay protocols: `1` terminal (admin shell), `2` desktop, `5` files, `6` admin P
 | `{action:'events', nodeid, limit}` | `{events:[…]}`; `time` is ISO-8601 **or** epoch ms |
 | `{action:'getNotes', id:nodeid}` | ⚠ reply action is `getNotes` (not `notes`), field `notes` |
 | `{action:'setNotes', id, notes}` | no reply |
-| `{action:'changedevice', nodeid, name / tags}` |, |
+| `{action:'changedevice', nodeid, name / host / desc / consent / tags}` | no reply; event `changenode`. `tags` as a comma string; `consent` 0 clears it (needs manage computers `4`) |
+| `{action:'changeusernotify', nodeid, notify}` | no reply; own notification bits for the device: 2/4/8 web page, 16/32/64 email, 128/256/512 messaging |
+| `{action:'setDeviceEvent', nodeid, msg}` | no reply; `msg` is URI-encoded, adds a `manual` device event (General → Log Event) |
+| `{action:'createDeviceShareLink', nodeid, guestname, p, consent, viewOnly, expire \| start+end \| start+expire+recurring}` | with a `responseid`: the request echoed with `url` and `result:'OK'`, or `{result:<error>}`. `p`: 1 terminal, 2 desktop, 4 files |
+| `{action:'powertimeline', nodeid}` | `{timeline:[state, start s, state, delta s, state, …]}` (rig: `[0, 1790856345, 1]`); with no history the server sends `Date.now()` in **ms** in the time slot |
+| `{action:'getcookie', nodeid, tcpport, tag:'novnc'\|'mstsc'\|'ssh', name}` | the request echoed with `cookie` (responseid echoed). Pages: `novnc/vnc.html?ws=wss://<host>/meshrelay.ashx?auth=<cookie>`, `mstsc.html?ws=<cookie>`, `ssh.html?ws=<cookie>`. ⚠ mstsc.html / ssh.html answer **401** without a signed-in web session (or a `login=` token, only with `allowLoginToken`) |
+| `{action:'adddeviceuser', nodeid, nodename, usernames\|userids, rights[, remove]}` | `{result:'ok'}`, ⚠ also for an unknown user name (nothing is added); event `changenode` |
+| `{action:'changeDeviceMesh', nodeids, meshid}` / `{action:'removedevices', nodeids}` | events `nodemeshchange` / `removenode` |
+| `{action:'software', nodeid, type:'installedapps'\|'installedstoreapps'}` | agent reply `{action:'software', nodeid, value:<JSON string>}`: `[{name, version, publisher, date, location, arch, scope?, uninstall?, packageFullName?}]` or `{error}`; rig Linux agent: 4154 dpkg packages, ~25 s. ⚠ never send a `responseid`: the server first answers `{result:'Denied'}` to any request carrying one. Uninstall: `type:'uninstallapp', value: base64(command)` / `'uninstallstoreapp', value:'"<name>"'` (Windows only) |
+| `{action:'meshmessenger', nodeid}` | asks the agent to open its chat window; the user side is the server page `/messenger?id=meshmessenger/<nodeid>/<userid>&title=…&auth=<authcookie>` |
 | `{action:'poweraction', nodeids, actiontype}` | wake 100, off 2, reset 3, sleep 4 |
-| `{action:'toast', nodeids, title, msg}` / `{action:'msg', type:'messagebox', …}` |, |
+| `{action:'toast', nodeids, title, msg}` / `{action:'msg', type:'messagebox', title, msg, timeout}` | no reply; `timeout` in ms, 0 = until dismissed |
 
 ⚠ When an agent goes offline (restart, `agentupdate`) the server may **drop the device from the
 `nodes` reply entirely** instead of listing it with `conn = 0`.
@@ -40,6 +51,12 @@ Relay protocols: `1` terminal (admin shell), `2` desktop, `5` files, `6` admin P
 Agent identification: `node.agent.ver` is `0` on modern agents; the web UI shows the agent type
 from its `agentsStr` table (`node.agent.id`, e.g. 6 = "Linux 64bit") and `node.agent.core`
 (the running core's build, e.g. `Feb 15 2026, 1740302142`). `agent.root === false` → restricted agent.
+
+General page fields (as the web UI shows them): `rname` OS name, `host`, `desc`, `osdesc`, `wsc` / `lsc`
+(Windows / Linux security: `antiVirus`, `autoUpdate`, `firewall` = 'OK' or not), `defender`, `pr` (pending
+reboot), `av:[{product, enabled, updated}]`, `users` / `lusers` (active / locked users), `idletime`,
+`consent` (OR'ed with `serverinfo.consent`, which the server forces), `agent.caps` (1 desktop, 2 terminal,
+4 files), `pmt` (push-capable mobile). The account's per-device notification bits are `userinfo.notify[nodeid]`.
 
 ## Devices list and Group Action
 

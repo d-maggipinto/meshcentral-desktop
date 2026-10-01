@@ -21,6 +21,7 @@ import os
 import re
 import secrets
 import time
+import urllib.parse
 
 from gi.repository import Gtk, GLib, Pango
 
@@ -648,21 +649,25 @@ MESHCMD = [(4, "Windows x86-64 (.exe)"), (3, "Windows x86-32 (.exe)"), (43, "Win
            (25, "Linux ARM 32 bit (Raspberry Pi)"), (26, "Linux ARM 64 bit (Raspberry Pi)")]
 
 
-def meshcmd_dialog(win):
-    """Web UI "MeshCmd": download the command line tool and its action file."""
+def meshcmd_dialog(win, nodeid=None):
+    """Web UI "MeshCmd": download the command line tool and its action file. With a nodeid (device
+    page link) the action file routes traffic through this server to that device."""
     d = Gtk.Dialog(title="MeshCmd", transient_for=win, modal=True)
     d.add_button("Close", Gtk.ResponseType.CLOSE)
     area = d.get_content_area()
     area.set_spacing(8)
     area.set_border_width(12)
-    area.pack_start(Gtk.Label(label="MeshCmd is MeshCentral's command line tool, for example for Intel® AMT "
-                                    "tasks and TCP port mapping.", xalign=0, wrap=True, max_width_chars=60),
-                    False, False, 0)
+    text = ("Download \"meshcmd\" with an action file to route traffic thru this server to this device. Make "
+            "sure to edit meshaction.txt and add your account password or make any changes needed." if nodeid else
+            "MeshCmd is MeshCentral's command line tool, for example for Intel® AMT tasks and TCP port mapping.")
+    area.pack_start(Gtk.Label(label=text, xalign=0, wrap=True, max_width_chars=60), False, False, 0)
+    action = ("/meshagents?meshaction=route&nodeid=" + urllib.parse.quote(nodeid, safe="")) if nodeid \
+        else "/meshagents?meshaction=generic"
     osc = _combo(MESHCMD)
     b1 = Gtk.Button(label="Download MeshCmd…")
     b1.connect("clicked", lambda *_: download_from_server(win, f"/meshagents?meshcmd={osc.get_active_id()}", "MeshCmd"))
     b2 = Gtk.Button(label="Download action file…")
-    b2.connect("clicked", lambda *_: download_from_server(win, "/meshagents?meshaction=generic", "the MeshCmd action file"))
+    b2.connect("clicked", lambda *_: download_from_server(win, action, "the MeshCmd action file"))
     _grid_rows(area, [("Operating System", osc), (None, b1), (None, b2)])
     d.show_all()
     d.connect("response", lambda *_: d.destroy())
@@ -749,8 +754,15 @@ OPS = [("export", "Export device information", 0), ("move", "Move to device grou
 
 
 class GroupActions:
-    def __init__(self, win):
+    """single=True: used by one device's General page, so the device list's checks are left alone."""
+
+    def __init__(self, win, single=False):
         self.win = win
+        self.single = single
+
+    def _done(self):
+        if not self.single:
+            self.win.clear_checked()
 
     @property
     def ctrl(self):
@@ -806,7 +818,7 @@ class GroupActions:
             self.ctrl.send({"action": "wakedevices", "nodeids": [n["_id"] for n in ok]})
             self.win.app.notify("Wake-up", f"Wake-up sent to {len(ok)} device(s).")
         self._skipped(skip)
-        self.win.clear_checked()
+        self._done()
 
     def _power(self, nodes, op, actiontype, verb):
         ok, skip = self._split(op, nodes)
@@ -818,7 +830,7 @@ class GroupActions:
         self.ctrl.send({"action": "poweraction", "nodeids": [n["_id"] for n in ok], "actiontype": actiontype})
         self.win.app.notify(verb, f"Sent to {len(ok)} device(s).")
         self._skipped(skip)
-        self.win.clear_checked()
+        self._done()
 
     def op_sleep(self, nodes):
         self._power(nodes, "sleep", 4, "Sleep")
@@ -853,7 +865,7 @@ class GroupActions:
             return
         self.ctrl.send({"action": "removedevices", "nodeids": [n["_id"] for n in ok]})
         self._skipped(skip)
-        self.win.clear_checked()
+        self._done()
 
     def op_uninstall(self, nodes):
         ok, skip = self._split("uninstall", nodes)
@@ -866,7 +878,7 @@ class GroupActions:
             return
         self.ctrl.send({"action": "uninstallagent", "nodeids": [n["_id"] for n in ok]})
         self._skipped(skip)
-        self.win.clear_checked()
+        self._done()
 
     def op_move(self, nodes):
         ok, skip = self._split("move", nodes)
@@ -887,7 +899,7 @@ class GroupActions:
             self.ctrl.send({"action": "changeDeviceMesh", "nodeids": [n["_id"] for n in ok],
                             "meshid": combo.get_active_id()})
             self._skipped(skip)
-            self.win.clear_checked()
+            self._done()
         d.destroy()
 
     def op_notify(self, nodes):
@@ -920,7 +932,7 @@ class GroupActions:
                     m["timeout"] = int(tmo.get_active_id()) * 60000
                 self.ctrl.send(m)
             self._skipped(skip)
-            self.win.clear_checked()
+            self._done()
         d.destroy()
 
     def op_tags(self, nodes):
@@ -951,7 +963,7 @@ class GroupActions:
                 if new != cur:
                     self.ctrl.send({"action": "changedevice", "nodeid": n["_id"], "tags": ",".join(new) if new else ""})
             self._skipped(skip)
-            self.win.clear_checked()
+            self._done()
         d.destroy()
 
     def op_run(self, nodes):
@@ -1046,7 +1058,7 @@ class GroupActions:
                     app.notify("Upload files", f"{len(files)} file(s) sent to the server; the agents download them now.")
             app._dl_session.post_files("/uploadfilebatch.ashx", fields, "files", list(files), None, done)
             self._skipped(skip)
-            self.win.clear_checked()
+            self._done()
         d.destroy()
 
     def op_mqtt(self, nodes):

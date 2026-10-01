@@ -135,9 +135,9 @@ class DesktopPanel(Gtk.Box):
         self._qbar = qbar = Gtk.Box(spacing=6, margin_start=6, margin_end=6, margin_bottom=4)
         self.quality = self._combo("Quality", _QUALITY, 1, qbar)
         self.speed = self._combo("Speed", _SPEED, 1, qbar)
-        # Default to JPEG: WebKitGTK's WebP tile decoding can leave green/torn-tile
-        # artifacts on the canvas. JPEG renders cleanly. (index 1 = JPEG)
-        self.encoding = self._combo("Encoding", _ENCODING, 1, qbar)
+        # Default WebP like the web UI (desktopsettings.agentencoding 4). The format the agent
+        # really sends is read from the tiles and shown after every change (_check_format).
+        self.encoding = self._combo("Encoding", _ENCODING, 0, qbar)
         self.scale = self._combo("Scale", _SCALE, 0, qbar)
         qbar.pack_start(Gtk.Label(label="Clipboard sync:"), False, False, 0)
         self.clip_sync = Gtk.Switch(valign=Gtk.Align.CENTER,
@@ -245,8 +245,9 @@ class DesktopPanel(Gtk.Box):
     def on_shown(self):
         if self._started:
             return
-        self._started = True
-        self.start_flow()
+        self._started = True             # no auto-connect: the cover offers Connect
+        self._set_status("Disconnected")
+        self._cover_show("Not connected", busy=False, button="Connect")
 
     _FLOW_TIMEOUT_S = 45
 
@@ -502,15 +503,51 @@ class DesktopPanel(Gtk.Box):
             "||!desktop.m||!desktop.m.SendCompressionLevel)return 'notready';var m=desktop.m;"
             "if(!window.__mcdNative&&(m.ScalingLevel||1024)==1024&&m.ScreenWidth>8&&m.ScreenHeight>8)"
             "{window.__mcdNative=[m.ScreenWidth,m.ScreenHeight];}"
-            f"var sc={sc};if(sc===0){{var n=window.__mcdNative;if(!n)return 'nonative';"
+            # no native size yet: keep the current scale but still send encoding / quality / speed
+            f"var sc={sc};if(sc===0){{var n=window.__mcdNative;if(!n){{sc=m.ScalingLevel||1024;}}else{{"
             "var p=document.getElementById('DeskParent');var r=window.devicePixelRatio||1;"
             "var vw=((p&&p.clientWidth)||innerWidth)*r,vh=((p&&p.clientHeight)||innerHeight)*r;"
             "sc=Math.max(256,Math.min(1024,Math.floor(1024*Math.min(vw/n[0],vh/n[1]))));"
-            "sc=Math.round(sc/32)*32;}"
+            "sc=Math.round(sc/32)*32;}}"
             f"var key=[{enc},{q},sc,{fr}].join(',');"
             f"if(!{str(force).lower()}&&window.__mcdComp===key)return 'same';"
-            f"window.__mcdComp=key;m.SendCompressionLevel({enc},{q},sc,{fr});return 'ok:'+sc;}}"
-            "catch(e){return 'err';}})()")
+            + self._FMT_HOOK_JS +
+            f"window.__mcdComp=key;window.__mcdFmt=null;m.SendCompressionLevel({enc},{q},sc,{fr});"
+            # a static screen sends no new tiles: ask for a full frame so the change shows
+            f"if({str(force).lower()}&&m.SendRefresh)m.SendRefresh();return 'ok:'+sc;}}"
+            "catch(e){return 'err';}})()", lambda r: self._after_compression(r, enc, force))
+
+    # Records the image format of the tiles the agent sends (first bytes: JPEG FF D8, PNG 89 50,
+    # WebP 'RI'FF). The viewer labels every tile image/jpeg and lets the decoder sniff it.
+    _FMT_HOOK_JS = ("if(!m.__mcdFmtHook&&m.ProcessPictureMsg){var o=m.ProcessPictureMsg;"
+                    "m.ProcessPictureMsg=function(d,x,y){try{var t=d.slice(4);"
+                    "if(t instanceof ArrayBuffer)t=new Uint8Array(t);var a=t[0],b=t[1];"
+                    "window.__mcdFmt=(a==255&&b==216)?'JPEG':(a==137&&b==80)?'PNG':(a==82&&b==73)?'WEBP':'?';"
+                    "}catch(e){}return o.call(m,d,x,y);};m.__mcdFmtHook=1;}")
+
+    def _after_compression(self, result, enc, force):
+        if force and result.startswith("ok"):
+            gen = self._gen
+            GLib.timeout_add(2500, lambda: (self._check_format(enc, gen), False)[1])
+
+    def _check_format(self, enc, gen):
+        """Show which format the agent actually sends after an encoding change."""
+        if self._closing or gen != self._gen or not self._connected:
+            return
+        want = dict((v, k) for k, v in _ENCODING)[enc]
+
+        def got(fmt):
+            fmt = (fmt or "").strip('"')
+            if fmt in ("", "null", "undefined", "?"):
+                self.encoding.set_tooltip_text(f"Requested {want}; no new image received yet")
+                return
+            if fmt == want:
+                self.encoding.set_tooltip_text(f"The agent is sending {fmt}")
+                self._flash_status(f"Encoding: {fmt}", 3)
+            else:
+                self.encoding.set_tooltip_text(f"Requested {want}, the agent is sending {fmt}")
+                self._flash_status(f"Requested {want}, the agent sends {fmt}", 8)
+        self._js("(function(){return String(window.__mcdFmt);})()", got)
 
     def _toggle_connect(self, *_):
         if self._phase != "idle" or self._waiting_agent:

@@ -52,6 +52,11 @@ class FilesPanel(Gtk.Box):
             acts.pack_start(self._btn(icon, tip, cb), False, False, 0)
         toolbar.pack_start(acts, False, False, 0)
 
+        # Opening the tab does NOT connect: the user presses Connect (like Desktop / Terminal).
+        self.connect_btn = Gtk.Button(label="Connect")
+        self.connect_btn.get_style_context().add_class("suggested-action")
+        self.connect_btn.connect("clicked", self._toggle)
+        toolbar.pack_end(self.connect_btn, False, False, 0)
         self.status_label = Gtk.Label(label="Disconnected", xalign=1)
         self.status_label.get_style_context().add_class("dim-label")
         toolbar.pack_end(self.status_label, False, False, 0)
@@ -108,16 +113,17 @@ class FilesPanel(Gtk.Box):
 
     # ---- lifecycle ---------------------------------------------------------
     def on_shown(self):
-        if self._started:
-            return
-        self._started = True
-        self.connect_tunnel()
+        self._started = True             # no auto-connect: wait for the Connect button
 
     def teardown(self):
+        self.disconnect_tunnel()
+
+    def disconnect_tunnel(self):
         if self.tunnel:
-            self.tunnel.stop()
-            self.tunnel = None
-        # a transfer interrupted by closing the device: close its file, drop the partial download
+            t, self.tunnel = self.tunnel, None
+            t.on_state = None
+            t.stop()
+        # a transfer interrupted by Disconnect or closing the device: close its file, drop the partial download
         if self.download:
             self._finish_download(ok=False)
         if self.upload and self.upload.get("fh"):
@@ -128,7 +134,15 @@ class FilesPanel(Gtk.Box):
             self.upload = None
 
     # ---- connection --------------------------------------------------------
+    def _toggle(self, *_):
+        if self.tunnel and self.tunnel.state:
+            self.disconnect_tunnel()
+            self._on_state(0)
+        else:
+            self.connect_tunnel()
+
     def connect_tunnel(self):
+        self.disconnect_tunnel()
         self.tunnel = Tunnel(self.app.ctrl, self.node["_id"], PROTO_FILES, binary_in_thread=False)
         self.tunnel.on_state = self._on_state
         self.tunnel.on_text = self._on_text
@@ -138,6 +152,11 @@ class FilesPanel(Gtk.Box):
 
     def _on_state(self, s):
         self.status_label.set_text(STATE_TEXT.get(s, ""))
+        self.connect_btn.set_label("Disconnect" if s else "Connect")
+        ctx = self.connect_btn.get_style_context()
+        (ctx.remove_class if s else ctx.add_class)("suggested-action")
+        if s == 0:
+            self.store.clear()
         if s == 3:
             self.go_to([])
 

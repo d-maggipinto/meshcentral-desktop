@@ -38,6 +38,19 @@ Server-wide ("site") rights come from `userinfo.siteadmin`; `0xFFFFFFFF` is a fu
 | Edit notes (viewing is always allowed) | Set notes `128` |
 | Rename, edit tags | Manage devices `4` |
 | Message box, toast | `8` |
+| General: edit hostname, description, tags | Manage computers `4` |
+| General: edit user consent | Edit device group `1` |
+| General: Actions button | Any of `4`, `8`, `64`, `262144`, on an agent device (not MeshCentral Assistant) |
+| General: Run | Agent group, agent online, remote commands `131072` |
+| General: Message, Chat | `8` + chat & notify `16384`, agent online (or a push-capable mobile device) |
+| General: Share | Remote control `8` + guest sharing `0x80000`, not "no guest sharing" `0x1000` (unless full rights), agent online and desktop or terminal capable, guest sharing enabled on the server |
+| General: Notes, Log Event, Notifications | Always (notes are read-only without `128`) |
+| Software tab | Remote control `8` and not "no software" `8388608`; uninstall needs full device rights |
+| General: Interfaces link | Device details `1048576`, agent device |
+| General: MeshCmd link | Remote control `8`, terminal allowed, not "no MeshCmd" (site `128`) |
+| General: Web-VNC / Web-RDP / Web-SSH | Remote control `8`, agent online (or a local device); hidden when the server disables them |
+| General: Change Group / Delete Device | Edit device group `1` / uninstall `32768` |
+| General: Add User / Add User Group / edit or remove | Any of `1`, `2`, `4` / manage device group users `2` |
 | Clipboard agent patch | `8` + `16` |
 | Device group folder in *Files* | Server files `32` on that group |
 
