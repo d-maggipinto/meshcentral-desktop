@@ -73,6 +73,15 @@ def runtime_version():
     return s
 
 
+def _rect_type():
+    """RECT as the type library names it (tagRECT; the typelib imports it from the Windows SDK)."""
+    wv = module()
+    for name in ("tagRECT", "RECT", "_RECT"):
+        if hasattr(wv, name):
+            return getattr(wv, name)
+    return wintypes.RECT
+
+
 def _ref(p):
     """Balance comtypes' Release-on-collect for a pointer received in a callback."""
     if p:
@@ -196,7 +205,7 @@ class WebView2Widget(Gtk.DrawingArea):
                 self.on_error(err or "WebView2 is not available")
             return
         wv = module()
-        h = _handler(wv.ICoreWebView2CreateControllerCompletedHandler, self._got_controller)
+        h = _handler(wv.ICoreWebView2CreateCoreWebView2ControllerCompletedHandler, self._got_controller)
         self._handlers.append(h)
         env.CreateCoreWebView2Controller(self._hwnd, h)
 
@@ -268,7 +277,7 @@ class WebView2Widget(Gtk.DrawingArea):
             return
         a = self.get_allocation()
         sc = self.get_scale_factor()
-        r = module().tagRECT(0, 0, max(1, a.width * sc), max(1, a.height * sc))
+        r = _rect_type()(0, 0, max(1, a.width * sc), max(1, a.height * sc))
         try:
             self.controller.Bounds = r
         except Exception:
