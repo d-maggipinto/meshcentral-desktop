@@ -13,7 +13,14 @@ import sys
 import traceback
 
 
+def _save(results, out_path):
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(results, f, indent=2)
+
+
 def _check(results, name, fn):
+    results[name] = {"ok": False, "error": "running (did not finish)"}
+    _save(results, results["_out"])              # progress: a hang shows which step it was
     try:
         val = fn()
         results[name] = {"ok": True, "value": val}
@@ -23,12 +30,16 @@ def _check(results, name, fn):
 
 
 def run(out_path):
+    import faulthandler
+    # a hung step must not block the build: dump every thread's stack and exit after 2 minutes
+    hang_log = open(out_path + ".hang.txt", "w")
+    faulthandler.dump_traceback_later(120, exit=True, file=hang_log)
     import gi
     gi.require_version("Gtk", "3.0")                  # before any app module (they import Gtk unversioned)
     import mcdesktop
     from . import osdep
     from . import __version__
-    r = {}
+    r = {"_out": out_path}
 
     def modules():
         names = sorted(m.name for m in pkgutil.iter_modules(mcdesktop.__path__))
@@ -85,9 +96,15 @@ def run(out_path):
             return False
         val = v.get("value")
         return all(val.values()) if isinstance(val, dict) else bool(val)
+    r.pop("_out")
     r["all_ok"] = all(ok(v) for k, v in r.items() if isinstance(v, dict))
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(r, f, indent=2)
+    _save(r, out_path)
+    faulthandler.cancel_dump_traceback_later()
+    hang_log.close()
+    try:
+        os.remove(out_path + ".hang.txt")
+    except OSError:
+        pass
     return 0 if r["all_ok"] else 1
 
 
