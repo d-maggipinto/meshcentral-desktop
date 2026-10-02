@@ -19,7 +19,7 @@ import json
 import urllib.parse
 import time
 
-from . import rights
+from . import rights, ui
 import gi
 gi.require_version("Gtk", "3.0")
 gi.require_version("WebKit2", "4.1")
@@ -652,17 +652,21 @@ class DesktopPanel(Gtk.Box):
             self._apply_compression()      # display size changed -> maybe new auto scale
         return False
 
-    # ---- Ctrl+Alt+Del: inject the real key sequence (works on Linux too, like NoMachine) ----
+    # ---- Ctrl+Alt+Del ----------------------------------------------------------------
+    # Windows: Ctrl+Alt+Del is the secure attention sequence, which Windows NEVER acts on
+    # when it arrives as injected keys -> the viewer's own CTRLALTDEL message (sendcad, like
+    # the web UI's button; the agent service calls SendSAS). Linux ignores that message
+    # but acts on the real key combo: Ctrl(17) + Alt(18) + Delete(46, extended).
     def _send_cad(self):
-        # Ctrl(17) + Alt(18) + Delete(46, extended) down, then up in reverse. This is a
-        # real key-combo injection, which Linux desktops act on, unlike the Windows-only
-        # sendcad() "secure attention" command the Linux agent ignores.
+        if ui.is_windows(self.node):
+            body = "m.SendCtrlAltDelMsg();"
+        else:
+            body = ("m.SendKeyMsgKC(1,17,false);m.SendKeyMsgKC(1,18,false);m.SendKeyMsgKC(1,46,true);"
+                    "m.SendKeyMsgKC(2,46,true);m.SendKeyMsgKC(2,18,false);m.SendKeyMsgKC(2,17,false);")
         self._js(
             "(function(){try{"
             "if(typeof desktop==='undefined'||!desktop||desktop.State!==3||!desktop.m)return 'notready';"
-            "var m=desktop.m;"
-            "m.SendKeyMsgKC(1,17,false);m.SendKeyMsgKC(1,18,false);m.SendKeyMsgKC(1,46,true);"
-            "m.SendKeyMsgKC(2,46,true);m.SendKeyMsgKC(2,18,false);m.SendKeyMsgKC(2,17,false);"
+            "var m=desktop.m;" + body +
             "return 'ok';}catch(e){return 'err';}})()",
             lambda r: self._set_status("Ctrl+Alt+Del sent" if r == "ok" else "Connect the desktop first"))
 
@@ -780,13 +784,37 @@ class DesktopPanel(Gtk.Box):
     # held Right-Alt BEFORE the composed character, so the remote sees e.g. Alt+@ and
     # garbles @ # [ ] { } € on non-US layouts. Swallow AltGraph; the character that
     # AltGr produced still arrives as Unicode.
+    # Super / Windows key: WebKitGTK reports it with keyCode 0 and metaKey false, so the
+    # viewer sent key 0 (nothing) and typed Win+R's "r" as Unicode text, which Windows
+    # never treats as a shortcut. Send Super as VK_LWIN/VK_RWIN (extended, like the web
+    # UI's own Start button) and, while it is held, printable keys as key codes; their
+    # key-up goes out as the same code. handleReleaseKeys (focus loss) forgets it all.
+    # Ctrl+Alt+Delete typed on the keyboard: on a Windows target (m.__mcdWin, set after the
+    # hook) it becomes the secure attention message, see _send_cad.
     _KEYS_JS = ("(function(){try{var m=desktop.m;if(!m||m.__mcdKeys)return 'skip';"
-                "var kd=m.handleKeyDown,ku=m.handleKeyUp;"
+                "var kd=m.handleKeyDown,ku=m.handleKeyUp,kp=m.handleKeys,rk=m.handleReleaseKeys;"
+                "var sup={},held={};"
                 "function ag(e){return !!e&&e.key==='AltGraph';}"
-                "m.handleKeyDown=function(e){if(ag(e)){if(e.preventDefault)e.preventDefault();return false;}"
+                "function sk(e){if(!e)return 0;var c=e.code||'',k=e.key||'';"
+                "if(c==='OSRight'||c==='MetaRight')return 92;"
+                "if(c==='OSLeft'||c==='MetaLeft'||k==='Super'||k==='Meta'||k==='OS')return 91;return 0;}"
+                "function on(){for(var x in sup)return true;return false;}"
+                "function no(e){if(e.preventDefault)e.preventDefault();if(e.stopPropagation)e.stopPropagation();return false;}"
+                "function live(){return m.stopInput!==true&&m.State==3;}"
+                "m.handleKeyDown=function(e){if(ag(e))return no(e);var w=sk(e);"
+                "if(w){if(live()){sup[w]=1;m.SendKeyMsgKC(1,w,true);}return no(e);}"
+                "if(m.__mcdWin&&e.keyCode==46&&e.ctrlKey&&e.altKey){if(live()){held['cad']=1;m.SendCtrlAltDelMsg();}return no(e);}"
+                "if(on()&&live()&&typeof e.key=='string'&&e.key.length==1&&e.keyCode){"
+                "held[e.code||e.keyCode]=e.keyCode;m.SendKeyMsgKC(1,e.keyCode,false);return no(e);}"
                 "return kd.apply(m,arguments);};"
-                "m.handleKeyUp=function(e){if(ag(e)){if(e.preventDefault)e.preventDefault();return false;}"
+                "m.handleKeyUp=function(e){if(ag(e))return no(e);var w=sk(e);"
+                "if(w){if(sup[w]){delete sup[w];if(live())m.SendKeyMsgKC(2,w,true);}return no(e);}"
+                "if(e&&e.keyCode==46&&held['cad']){delete held['cad'];return no(e);}"
+                "var h=e&&held[e.code||e.keyCode];"
+                "if(h){delete held[e.code||e.keyCode];if(live())m.SendKeyMsgKC(2,h,false);return no(e);}"
                 "return ku.apply(m,arguments);};"
+                "m.handleKeys=function(e){if(on())return no(e);return kp.apply(m,arguments);};"
+                "m.handleReleaseKeys=function(){sup={};held={};return rk.apply(m,arguments);};"
                 "m.__mcdKeys=1;return 'ok';}catch(e){return 'err';}})()")
 
     def show_hint(self, text, secs=3):
@@ -1207,6 +1235,7 @@ class DesktopPanel(Gtk.Box):
             self._set_phase("connected")
             self._set_controls_enabled(True)
             self._js(self._KEYS_JS)
+            self._js("desktop.m.__mcdWin=%d;" % (1 if ui.is_windows(self.node) else 0))
             self._apply_compression(force=True)
             self._wait_first_frame(0, 0, self._gen)
         elif not now_connected and self._phase == "connected":

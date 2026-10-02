@@ -43,7 +43,8 @@ Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
 ### Devices
 - Device list like the web interface's *My Devices*: status filter (online, offline, sessions,
   starred, tagged and more), seven sort orders, *Show OS name*, stars, and a filter box with the web
-  interface's search syntax (`tag:`, `ip:`, `group:`, `os:`, `user:`, `!`, `and`, `or`...).
+  interface's search syntax (`tag:`, `ip:`, `group:`, `os:`, `user:`, `!`, `and`, `or`...). Groups start
+  collapsed and the ones you open are remembered; a search or filter expands them all.
 - **Group Action** on checked devices: export (CSV or JSON), move to another group, notification,
   tags, run commands (with the output of each device), upload files, wake, sleep, reset, power off,
   uninstall agent, delete.
@@ -54,8 +55,10 @@ Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
   **Run**, **Message**, **Chat** and **Share** (guest link for desktop, terminal or files); 7 day power state,
   Web-VNC / Web-RDP, MeshCmd, Change Group, Delete Device and per-device user permissions.
 - Device pages in three groups: **Overview** (General, Hardware, Network, Events, Notes),
-  **Remote** (Desktop, Terminal, Files) and **Tools** (Processes, Services, Software, Agent Console). The remote
-  pages connect only when you press **Connect**.
+  **Remote** (Desktop, Terminal, Files, and Registry on Windows) and **Tools** (Processes, Services, Software,
+  Agent Console). The remote pages connect only when you press **Connect**.
+- **Registry** (Windows devices, MeshCentral 1.2 or later): browse hives and keys, go to a typed path, create
+  keys and values, edit string and number values, rename, delete, export a key as a `.reg` file.
 - Actions: run commands and see their output, wake, sleep, restart, power off, message box, toast
   notification, rename, tags, notes, open in the web interface.
 - Agents that restart or update are detected: the panels say so and the remote desktop reconnects
@@ -68,7 +71,8 @@ Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
 - **Send hotkeys**: Super, Alt+Tab, Alt+F4 and similar shortcuts go to the remote computer while its
   screen has focus.
 - Correct characters on non-US keyboard layouts (AltGr combinations such as `@ # [ ] { } €`).
-- Ctrl+Alt+Del (also on Linux targets), quality, speed, encoding and scaling controls.
+- The Windows key and Windows shortcuts (Win+R, Win+E, Win+D...), Ctrl+Alt+Del on Windows and Linux
+  targets, quality, speed, encoding and scaling controls.
 - **Clipboard sync** in both directions, automatic, plus manual copy, paste and "type the
   clipboard as keystrokes".
 

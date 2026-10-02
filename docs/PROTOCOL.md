@@ -15,11 +15,30 @@ marked ⚠.
 Close reasons on the control channel: `{action:'close', cause:'noauth', msg:'tokenrequired'}` → a
 2FA code is needed; `cause:'noauth'` → wrong credentials.
 
-Relay protocols: `1` terminal (admin shell), `2` desktop, `5` files, `6` admin PowerShell,
+Relay protocols: `1` terminal (admin shell), `2` desktop, `4` registry (Windows), `5` files, `6` admin PowerShell,
 `8` user shell (as the logged-in desktop user), `9` user PowerShell (⚠ `7` is the agent's plugin
 data channel, not a shell). Login shell = protocol `1` with `{type:'options', requireLogin:true}` (needs a root
 agent); `serverinfo.linuxshell` ('root' / 'user' / 'login') forces one type on non-Windows agents. The agent answers `c` / `cr` (recorded) before the session starts.
 ⚠ The file relay sends its JSON control messages as **binary** frames starting with `{`.
+
+**Registry relay** (protocol `4`, MeshCentral 1.2.x, agent module `win-registry-remote`; writes go through
+`reg.exe` on the device). Requests are JSON with a `reqid` that every reply echoes, together with `action`;
+a failure carries `error` (a non-Windows agent answers every request with
+`error: 'Registry is currently supported on Windows agents only.'`).
+
+| Request | Reply |
+|---|---|
+| `{action:'listroots'}` | `{roots:['HKEY_LOCAL_MACHINE', 'HKEY_CURRENT_USER', 'HKEY_USERS', 'HKEY_CLASSES_ROOT', 'HKEY_CURRENT_CONFIG']}` |
+| `{action:'list', hive, path}` | `{hive, path, subkeys:[name], values:[{name, rawname, type, value}]}`; the default value has `rawname:''`, `name:'(Default)'`; `value` is text (objects as JSON) |
+| `{action:'createkey', hive, path, name}` | `{success:true}` |
+| `{action:'setvalue', hive, path, name, type, value}` | `{success:true}`; writable types REG_SZ, REG_EXPAND_SZ, REG_DWORD, REG_QWORD (numbers: decimal or `0x` hex) |
+| `{action:'delete', items:[{kind:'key'\|'value', hive, path, name}]}` | `{success:true}`; keys are deleted with their subkeys, hives never |
+| `{action:'rename', item:{kind, hive, path, name}, newName}` | `{success:true}` (key = copy + delete; the default value cannot be renamed) |
+| `{action:'export', hive, path}` | `{content:<.reg text>}` (the app saves it as UTF-16LE with a BOM, like `reg export`) |
+
+The server refuses the tunnel when the device rights include "no registry" `0x400000`; the agent itself
+only needs remote control `8`. Consent bit `0x100` makes the agent ask the local user first
+(console message), `0x80` shows a notification.
 
 ## Devices
 

@@ -93,8 +93,11 @@ The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
   ```
   Under Xvfb the app's clipboard is separate from the desktop session's, which makes clipboard sync
   tests meaningful.
-- Test instances use their own application id. With the default id a
-  running installed copy would be activated instead, and the test would exit silently.
+- Test instances use their own application id. With the default id a running installed copy would
+  be activated instead, and the test would exit silently.
+- Test instances also use their own config, data and cache folders, so they never change your real
+  settings: set `XDG_CONFIG_HOME` / `XDG_DATA_HOME` before GLib is imported (the app reads its paths
+  when its modules are imported).
 - For the self-signed local certificate the scripts turn off TLS verification (WebSocket client,
   WebKit and HTTP transfers). **Local testing only.**
 - The test agent drives the real desktop it runs on: when testing keyboard handling, stub the
@@ -124,6 +127,7 @@ The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
 | Devices list | status filters, search syntax, every sort, stars, checked devices and Select All, Group Action edit tags / move / delete / export, Add Agent links and commands, invite link, Add Device Group (agentless test devices) |
 | Users | list with live session counts, filter, Select All, Group Action; New Account (plain and email-as-user-name server, password policy); import and export; user page: every edit dialog, memberships, notes, password change, previous logins, account image, events, delete |
 | Groups | list counts, Select All, Group Action delete, New Group, Duplicate Group; group page: rename, description, consent, members with suggestions, device group and device permissions, delete |
+| Registry | tab only for Windows devices with an agent and without "no registry"; browse, GoTo, new key / value, edit (number validation), rename, delete, export `.reg`; a non-Windows agent answers with its "Windows agents only" error over the real tunnel |
 | Layout / Server | rail entries per account, only the visible device page is built, fullscreen hides the rail; live statistics, history, server console, backup download |
 
 ## Release checklist

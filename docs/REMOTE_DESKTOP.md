@@ -73,13 +73,26 @@ automatically…" and a full reconnect starts as soon as the agent is back onlin
   AltGr arrives as its own key (`AltGraph`) and the viewer forwarded it as a held Right-Alt *before*
   the character, so the remote received e.g. Alt+@. The panel wraps the viewer's key handlers and
   drops `AltGraph`; the character AltGr produced still arrives.
+- **Windows / Super key**: WebKitGTK reports Super with `keyCode` 0 and `metaKey` false, so the viewer
+  sent key 0 (ignored by the remote) and typed the letter of Win+R, Win+E... as Unicode text, which
+  Windows never treats as a shortcut. The wrapper sends Super as VK_LWIN / VK_RWIN with the extended
+  flag (like the web UI's Start button) and, while it is held, printable keys as key codes; their key-up
+  is sent with the same code even if Win was released first. Releasing keys on focus loss resets it.
+  Accounts limited to basic input still cannot send it (the page's own rights check runs first).
 - **Send hotkeys** (switch, default on): while the remote screen has keyboard focus the panel grabs
   the keyboard (`Gdk.Seat.grab`). On Wayland, GTK turns this into the *keyboard shortcuts inhibit*
   protocol (GNOME asks the user once; Super+Esc restores local shortcuts); on X11 it is a keyboard
   grab. It is released when focus leaves the remote screen, on disconnect and when switched off.
 - **Ctrl+Alt+F** is handled by the main window before the WebView sees the key, so it always works;
   **Esc** is not intercepted and reaches the remote.
-- **Ctrl+Alt+Del** is sent as a real key sequence (`SendKeyMsgKC`), which Linux desktops act on too.
+- **Ctrl+Alt+Del**: on Windows it is the secure attention sequence, which Windows never acts on when it
+  arrives as injected keys, so for Windows devices the button (and Ctrl+Alt+Delete typed while the remote
+  screen has focus) sends the viewer's own Ctrl+Alt+Del message, like the web interface's button. On
+  Linux the button sends a real key sequence (`SendKeyMsgKC`), which Linux desktops act on.
+- **Elevated windows (Windows)**: Windows drops input sent to an administrator window (UAC, admin
+  PowerShell) by a process with a lower integrity level. Whether that works depends on how the agent
+  runs on the device (installed as a service versus a user-level agent such as MeshCentral Assistant),
+  not on this app: it sends the same input messages as the web interface.
 - **Type clipboard** sends the local clipboard as Unicode keystrokes (Enter / Tab as real keys): useful
   when clipboard sharing is not available.
 

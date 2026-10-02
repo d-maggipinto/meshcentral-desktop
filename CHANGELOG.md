@@ -7,6 +7,30 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [2.25.2] - 2026-10-02
+### Added
+- **Registry** tab for Windows devices (Remote group), like the web interface's Registry page: browse the
+  hives and keys, go to a typed path (short names such as `HKLM\SOFTWARE` work), create keys and values,
+  edit REG_SZ / REG_EXPAND_SZ / REG_DWORD / REG_QWORD values, rename, delete (with confirmation), export a
+  key as a `.reg` file that `regedit` can import, save the selection as text and show details. It needs
+  MeshCentral 1.2 or later, remote control rights and no "No Registry" restriction.
+
+### Changed
+- **Devices**: device groups now start collapsed, which keeps the list short on servers with many
+  groups. The groups you open (or *Expand all*) are remembered across restarts. While a search or a
+  status filter is active every group is expanded so all matches stay visible; a list with a single
+  section is always expanded.
+
+### Fixed
+- **Remote desktop**: the Windows (Super) key did nothing on the remote computer and shortcuts such as
+  Win+R, Win+E, Win+D, Win+L or Win+Shift+S typed the letter instead. WebKitGTK reports the key with no
+  key code, so the viewer sent an empty key; it is now sent as the real Windows key, and keys pressed
+  while it is held are sent as key codes so the remote treats them as shortcuts. Requires *Send hotkeys*
+  (on by default) so the local desktop does not take the key first.
+- **Remote desktop**: Ctrl+Alt+Del did nothing on Windows computers. Windows ignores it as injected
+  keys; the button, and Ctrl+Alt+Delete typed on the keyboard, now send MeshCentral's Ctrl+Alt+Del
+  command to Windows devices (as the web interface does). Linux devices still get the key sequence.
+
 ## [2.25.1] - 2026-10-01
 ### Security
 Fixes from a full security review of the code (five parallel reviews plus bandit and semgrep):

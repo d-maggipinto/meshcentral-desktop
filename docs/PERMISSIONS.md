@@ -46,6 +46,7 @@ Server-wide ("site") rights come from `userinfo.siteadmin`; `0xFFFFFFFF` is a fu
 | General: Share | Remote control `8` + guest sharing `0x80000`, not "no guest sharing" `0x1000` (unless full rights), agent online and desktop or terminal capable, guest sharing enabled on the server |
 | General: Notes, Log Event, Notifications | Always (notes are read-only without `128`) |
 | Software tab | Remote control `8` and not "no software" `8388608`; uninstall needs full device rights |
+| Registry tab | Windows device with an agent; remote control `8` and not "no registry" `4194304` (the server refuses the tunnel too) |
 | General: Interfaces link | Device details `1048576`, agent device |
 | General: MeshCmd link | Remote control `8`, terminal allowed, not "no MeshCmd" (site `128`) |
 | General: Web-VNC / Web-RDP / Web-SSH | Remote control `8`, agent online (or a local device); hidden when the server disables them |

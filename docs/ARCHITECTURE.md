@@ -32,6 +32,7 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `files_panel.py` | Device file manager over relay protocol 5 |
 | `tools_panel.py` | Processes, Services, Agent Console |
 | `software_panel.py` | Software (installed applications, Store apps, uninstall) |
+| `registry_panel.py` | Registry (Windows devices only, relay protocol 4): browse, GoTo, new key / value, edit, rename, delete, export `.reg` |
 | `device_general.py` | General page (web UI p10): attributes with edit dialogs (hostname, description, consent, notifications, tags), Actions / Notes / Log Event / Run / Message / Chat (`ChatWindow`, WebKit) / Share (`ShareDialog`); `PowerTimeline` (7 day power state), links (Interfaces, MeshCmd, Web-VNC / Web-RDP / Web-SSH windows with the web session cookies), Change Group, Delete Device, User Authorizations |
 | `info_panel.py` | Hardware, Network, Events, Notes |
 | `admin_panel.py` | Users (online / offline tree with checkboxes, Select All, Group Action, filter, live session counts from `wssessioncount`; `NewAccountDialog`, export CSV/JSON, `UserImportDialog` batch import; double-click opens `user_panel.UserPage`), User Groups (+ details, broadcast), Server Events, `BroadcastDialog` |
@@ -104,7 +105,7 @@ JavaScript, while a native overlay hides everything except the remote screen. Se
 
 | Location | Content |
 |---|---|
-| `~/.config/meshcentral-desktop/config.json` | server, username, remember flag, dark theme, `clipboard_sync`, `desktop_hotkeys`, `desktop_display` (per device) |
+| `~/.config/meshcentral-desktop/config.json` | server, username, remember flag, dark theme, `clipboard_sync`, `desktop_hotkeys`, `desktop_display` (per device), `devices_view` (filter, sort, OS name), `stars`, `devices_expanded` (open device-list sections; all start collapsed) |
 | System keyring (libsecret) | password, only when *Remember password* is ticked |
 | `~/.local/share/meshcentral-desktop/webkit*` | private WebKit profile of the embedded viewer (cookies, cache) |
 | `~/.local/share/meshcentral-desktop/serverstats-<host>.json` | CPU of the server's live 5-minute stats samples recorded since sign-in (30 days): the server's NeDB/MongoDB history does not contain CPU |

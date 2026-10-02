@@ -21,6 +21,7 @@ CTRL = "102938"
 # Relay protocols
 PROTO_TERMINAL = 1          # Admin shell (bash / cmd)
 PROTO_DESKTOP = 2
+PROTO_REGISTRY = 4          # Windows registry (agents/meshcore.js + win-registry-remote, MeshCentral 1.2.x)
 PROTO_FILES = 5
 PROTO_POWERSHELL = 6        # Admin PowerShell
 # 8 / 9 like the web UI (agents/meshcore.js: 8 spawns the shell as the console user, 9 = user

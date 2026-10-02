@@ -15,6 +15,7 @@ from .files_panel import FilesPanel
 from .desktop_panel import DesktopPanel
 from .tools_panel import ProcessesPanel, ServicesPanel, ConsolePanel
 from .software_panel import SoftwarePanel
+from .registry_panel import RegistryPanel
 from .admin_panel import UsersPanel, ServerEventsPanel
 from .group_panel import UserGroupsPanel
 from . import device_list as dl
@@ -38,6 +39,7 @@ DEVICE_GROUPS = [
         ("Desktop", DesktopPanel, True, "desktop"),
         ("Terminal", TerminalPanel, True, "terminal"),
         ("Files", FilesPanel, True, "files"),
+        ("Registry", RegistryPanel, True, "registry"),
     ]),
     ("tools", "Tools", [
         ("Processes", ProcessesPanel, True, "tools"),
@@ -47,6 +49,8 @@ DEVICE_GROUPS = [
     ]),
 ]
 # flat list kept for callers/tests: (label, class, online_only, cap)
+# Tabs only for Windows devices with an agent (web UI: MainDevRegistry needs node.agent + isWindowsNode)
+WINDOWS_ONLY_TABS = {"Registry"}
 DEVICE_TABS = [t for _g, _t, tabs in DEVICE_GROUPS for t in tabs]
 
 
@@ -75,6 +79,7 @@ _NAV_TITLES = {"devices": "Devices", "files": "Files", "server": "Server", "user
 _TAB_DENIED = {
     "desktop": "remote desktop", "terminal": "the terminal", "files": "file access",
     "tools": "device tools (processes and services)", "software": "the software list", "console": "the agent console",
+    "registry": "the registry",
 }
 
 
@@ -100,7 +105,9 @@ class MainWindow(Gtk.ApplicationWindow):
         self._view = app.config.setdefault("devices_view", {"filter": 0, "sort": 0, "osname": False})
         self.stars = set(app.config.get("stars") or [])
         self._checked = set()
-        self._collapsed = set()      # collapsed header keys (session only)
+        # expanded section keys; sections start collapsed (many groups on big servers), remembered
+        self._expanded = set(app.config.get("devices_expanded") or [])
+        self._auto_expand = False    # search / filter active: every section open, folds not remembered
         self._lastconnects = None    # {nodeid: ms} for the Last Seen sort
         self._rebuilding = False
         self.group_actions = dl.GroupActions(self)
@@ -256,7 +263,6 @@ class MainWindow(Gtk.ApplicationWindow):
         self.app.save_config()
         if key == "sort" and value == 5 and self._lastconnects is None:
             self.ctrl.send({"action": "lastconnects"})
-        self._collapsed.clear()
         self._tree_sig = None
         self._rebuild_tree()
 
@@ -309,17 +315,27 @@ class MainWindow(Gtk.ApplicationWindow):
 
     # ---- folding -----------------------------------------------------------
     def _on_row_fold(self, it, collapsed):
-        if self._rebuilding:
+        if self._rebuilding or self._auto_expand:
             return
         key = self.store[it][6]
-        if key:
-            (self._collapsed.add if collapsed else self._collapsed.discard)(key)
+        if key and (key in self._expanded) == collapsed:
+            (self._expanded.discard if collapsed else self._expanded.add)(key)
+            self.app.config["devices_expanded"] = sorted(self._expanded)
+            self.app.save_config()
 
     def _fold_all(self, collapse):
+        self._rebuilding = True                        # one config write, not one per section
         if collapse:
             self.tree.collapse_all()
         else:
             self.tree.expand_all()
+        self._rebuilding = False
+        if not self._auto_expand:
+            keys = set()
+            self.store.foreach(lambda m, _p, it: keys.add(m[it][6]) if m[it][6] else None)
+            self._expanded = self._expanded - keys if collapse else self._expanded | keys
+            self.app.config["devices_expanded"] = sorted(self._expanded)
+            self.app.save_config()
 
     def toggle_star(self, node):
         nid = node["_id"]
@@ -576,11 +592,15 @@ class MainWindow(Gtk.ApplicationWindow):
             for n in nodes:
                 self.store.append(parent, [self._node_icon(n), dl.node_name(n, osname) or "None", self._node_sub(n),
                                            n["_id"], True, n["_id"] in self._checked, ""])
-        self.tree.expand_all()
-        def fold(m, path, it):
-            if m[it][6] in self._collapsed:
-                self.tree.collapse_row(path)
-        self.store.foreach(fold)
+        # a search or filter opens every section (results must be visible), so does a lone section
+        self._auto_expand = bool(query.strip() or v.get("filter")) or len(sections) == 1
+        if self._auto_expand:
+            self.tree.expand_all()
+        else:
+            def unfold(m, path, it):
+                if m[it][6] and m[it][6] in self._expanded:
+                    self.tree.expand_row(path, False)
+            self.store.foreach(unfold)
         self._rebuilding = False
         if self._open_node_id:
             self._reselect_silent(self._open_node_id)
@@ -727,7 +747,10 @@ class MainWindow(Gtk.ApplicationWindow):
         caps = rights.node_caps(self.ctrl, self.meshes, node)
         for gid, _title, tabs in DEVICE_GROUPS:
             nb = self._group_nbs[gid]
-            for page, (label, cls, online_only, cap) in enumerate(tabs):
+            for label, cls, online_only, cap in tabs:
+                if label in WINDOWS_ONLY_TABS and not (node.get("agent") and ui.is_windows(node)):
+                    continue
+                page = nb.get_n_pages()
                 container = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
                 tab_label = Gtk.Label(label=label)
                 allowed = cap is None or getattr(caps, cap)
