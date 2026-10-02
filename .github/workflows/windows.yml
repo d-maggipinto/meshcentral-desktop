@@ -63,7 +63,7 @@ jobs:
 
       # ---- the whole app against a throwaway local MeshCentral server and a REAL Windows agent ----
       # (local to this CI run: the account below exists only here)
-      - name: Local MeshCentral server
+      - name: Local MeshCentral server (install)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force mc | Out-Null
@@ -71,27 +71,20 @@ jobs:
           npm install --no-audit --no-fund meshcentral@1.2.5 | Out-Null
           node node_modules/meshcentral/meshcentral --cert 127.0.0.1 --createaccount ciadmin --pass "Ci-Test-12345!"
           node node_modules/meshcentral/meshcentral --adminaccount ciadmin
-          Start-Process node -ArgumentList "node_modules/meshcentral/meshcentral","--cert","127.0.0.1","--port","8443","--redirport","8080","--exactports" `
-            -RedirectStandardOutput server.log -RedirectStandardError server.err -WindowStyle Hidden
-          for ($i = 0; $i -lt 120; $i++) {
-            try { $r = Invoke-WebRequest -Uri https://127.0.0.1:8443/ -SkipCertificateCheck -UseBasicParsing -TimeoutSec 5
-                  if ($r.StatusCode -eq 200) { "server up after $i tries"; break } } catch {}
-            Start-Sleep -Seconds 2
-          }
 
-      - name: Windows agent for the test device group
-        run: python scripts/windows/ci_server.py https://127.0.0.1:8443 ciadmin 'Ci-Test-12345!' "$(cygpath -w "$PWD/agent")"
-
-      - name: Start the agent
-        shell: pwsh
+      # One step: background processes do not survive the end of the step that started them.
+      - name: App against the server and a real Windows agent
         run: |
-          Start-Process -FilePath "$PWD\agent\meshagent.exe" -ArgumentList "connect" -WorkingDirectory "$PWD\agent" `
-            -RedirectStandardOutput "$PWD\agent\agent.log" -RedirectStandardError "$PWD\agent\agent.err" -WindowStyle Hidden
-          Start-Sleep -Seconds 15
-          Get-Process meshagent -ErrorAction SilentlyContinue | Format-Table Id, ProcessName, StartTime
-
-      - name: App against the server and the agent
-        run: |
+          NODE="/c/Program Files/nodejs/node.exe"
+          (cd mc && "$NODE" node_modules/meshcentral/meshcentral --cert 127.0.0.1 --port 8443 --redirport 8080 \
+             --exactports > server.log 2> server.err &)
+          for i in $(seq 1 120); do
+            [ "$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/)" = 200 ] && { echo "server up ($i)"; break; }
+            sleep 2
+          done
+          python scripts/windows/ci_server.py https://127.0.0.1:8443 ciadmin 'Ci-Test-12345!' "$(cygpath -w "$PWD/agent")"
+          (cd agent && ./meshagent.exe connect > agent.log 2> agent.err &)
+          sleep 20
           export MCD_WEBVIEW2_DIR="$(cygpath -w "$PWD/build/webview2")"
           export MCD_ASSETS_DIR="$(cygpath -w "$PWD/build/assets")"
           cd smoke
