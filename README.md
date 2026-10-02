@@ -143,7 +143,7 @@ Download the latest `.deb` and `SHA256SUMS` from the
 
 ```bash
 sha256sum -c --ignore-missing SHA256SUMS      # verify the download
-sudo apt install ./meshcentral-desktop_2.24.0_all.deb
+sudo apt install ./meshcentral-desktop_<version>_all.deb
 meshcentral-desktop
 ```
 
@@ -251,9 +251,12 @@ Build steps, the local test server, the testing rules and the release checklist 
 
 ## Roadmap
 
+In development: the **Windows app** (setup `.exe` and `.msi`, same features, built and tested on Windows
+in CI), see [docs/WINDOWS.md](docs/WINDOWS.md).
+
 Planned next: the full remote desktop toolbar (guest sharing, refresh, session recording,
 screenshots, wallpaper toggle, open a web address, notifications and chat on the remote computer),
-Windows and macOS apps, testing with Windows and macOS remote computers, a refreshed interface and
+a macOS app, testing with Windows and macOS remote computers, a refreshed interface and
 security improvements such as signed releases. See [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
@@ -265,6 +268,7 @@ security improvements such as signed releases. See [ROADMAP.md](ROADMAP.md).
 | [docs/REMOTE_DESKTOP.md](docs/REMOTE_DESKTOP.md) | remote desktop, keyboard and clipboard internals |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | how MeshCentral rights map to app features |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | build, tests and release |
+| [docs/WINDOWS.md](docs/WINDOWS.md) | the Windows version (in development): differences, installers, build, tests |
 | [ROADMAP.md](ROADMAP.md) | planned features |
 | [CHANGELOG.md](CHANGELOG.md) | release history |
 

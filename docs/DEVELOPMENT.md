@@ -43,6 +43,13 @@ the front. Quit it first (`pkill -f meshcentral-desktop`).
    all Python bytecode (the build machine's Python may differ from the target's) and writes
    `dist/meshcentral-desktop_<version>_all.deb`.
 
+### Windows build
+
+The Windows version is built from the same sources in an MSYS2 UCRT64 shell (`scripts/windows/build.sh`,
+PyInstaller, then Inno Setup and WiX). The `windows` job of the CI workflow builds it on every push, runs
+the Windows tests and installs both installers; on a version tag the release gets the setup `.exe` and
+the `.msi` next to the `.deb`. Details in [WINDOWS.md](WINDOWS.md).
+
 ## Tests
 
 The test scripts are kept outside the public repository. Every feature is verified against a

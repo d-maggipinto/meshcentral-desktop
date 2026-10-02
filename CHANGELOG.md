@@ -7,6 +7,18 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Added
+- **Windows version in development** (not released yet): the same app on Windows 10 / 11 with Edge
+  WebView2 for the embedded remote desktop and chat, an xterm.js terminal, Windows Credential Manager,
+  Windows notifications and a "Send hotkeys" keyboard hook; setup `.exe` (Inno Setup) and `.msi` (WiX)
+  installers. Built and tested on Windows in CI, including against a real Windows agent. See
+  [docs/WINDOWS.md](docs/WINDOWS.md).
+
+### Changed
+- The embedded web views (remote desktop, chat, Web-VNC / RDP / SSH) and the saved password go through
+  a small platform layer (`webview.py`, `osdep.py`); Linux behaviour is unchanged.
+
 ## [2.25.2] - 2026-10-02
 ### Added
 - **Registry** tab for Windows devices (Remote group), like the web interface's Registry page: browse the

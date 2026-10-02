@@ -33,6 +33,12 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `tools_panel.py` | Processes, Services, Agent Console |
 | `software_panel.py` | Software (installed applications, Store apps, uninstall) |
 | `registry_panel.py` | Registry (Windows devices only, relay protocol 4): browse, GoTo, new key / value, edit, rename, delete, export `.reg` |
+| `webview.py` | the embedded web view API used by the remote desktop and the server-page windows: WebKitGTK on Linux, Edge WebView2 on Windows (same-origin rule, no pop-ups / downloads / page clipboard, non-blocking dialogs, session cookies) |
+| `osdep.py` | operating-system services: saved passwords (Secret Service or Windows Credential Manager); on Windows also notifications, single instance (named mutex) and the app identity |
+| `winweb.py` | Windows: `WebView2Widget`, Edge WebView2 in a native child window of a GTK widget (WebView2.tlb through comtypes) |
+| `winterm.py` | Windows: the terminal widget, xterm.js inside WebView2 with the part of the VTE API the terminal panel uses |
+| `winkeys.py` | Windows: "Send hotkeys" low-level keyboard hook |
+| `selftest.py` | `--selftest`: checks a bundled or installed copy (used by the Windows build) |
 | `device_general.py` | General page (web UI p10): attributes with edit dialogs (hostname, description, consent, notifications, tags), Actions / Notes / Log Event / Run / Message / Chat (`ChatWindow`, WebKit) / Share (`ShareDialog`); `PowerTimeline` (7 day power state), links (Interfaces, MeshCmd, Web-VNC / Web-RDP / Web-SSH windows with the web session cookies), Change Group, Delete Device, User Authorizations |
 | `info_panel.py` | Hardware, Network, Events, Notes |
 | `admin_panel.py` | Users (online / offline tree with checkboxes, Select All, Group Action, filter, live session counts from `wssessioncount`; `NewAccountDialog`, export CSV/JSON, `UserImportDialog` batch import; double-click opens `user_panel.UserPage`), User Groups (+ details, broadcast), Server Events, `BroadcastDialog` |
