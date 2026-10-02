@@ -167,17 +167,38 @@ class A(appmod.App):
         labels = [p.shell.get_model()[i][0] for i in range(len(p.shell.get_model()))]
         check("Terminal: Windows shell choices", labels == ["Admin Shell", "Admin PowerShell", "User Shell",
                                                              "User PowerShell"], labels)
-        p.shell.set_active(1)
+        self.shells = [(1, "Admin PowerShell", "Write-Output ('MCD-' + (6*7))"),
+                       (0, "Admin Shell", "set /a 6*7+1000")]
+        GLib.timeout_add(500, self.term_next)
+        return False
+
+    def term_next(self):
+        if not self.shells:
+            GLib.timeout_add(1000, self.files)
+            return False
+        idx, self.shell_name, self.cmd = self.shells.pop(0)
+        p = self.term
+        self.states = []
+        p.shell.set_active(idx)
+        orig = p._on_state
+        if not hasattr(self, "_orig_state"):
+            self._orig_state = orig
+            p._on_console = (lambda f: (lambda m: (print("agent console:", m, flush=True), f(m))))(p._on_console)
+        p._on_state = lambda s: (self.states.append(s), self._orig_state(s))
         p.connect_tunnel()
-        self.wait(lambda: p.tunnel and p.tunnel.state == 3, self.term_type, 60, "Terminal: PowerShell connected")
+        p.tunnel.on_state = p._on_state
+        p.tunnel.on_console = p._on_console
+        self.wait(lambda: 3 in self.states, self.term_type, 60, self.shell_name + ": connected")
         return False
 
     def term_type(self):
-        GLib.timeout_add(4000, self.term_send)
+        GLib.timeout_add(5000, self.term_send)
 
     def term_send(self):
         p = self.term
-        p.tunnel.send("Write-Output ('MCD-' + (6*7))\r")
+        print(self.shell_name, "states so far:", self.states, flush=True)
+        if p.tunnel and p.tunnel.state == 3:
+            p.tunnel.send(self.cmd + "\r")
         GLib.timeout_add(4000, self.term_read)
         return False
 
@@ -188,11 +209,12 @@ class A(appmod.App):
         return False
 
     def term_check(self, text):
-        text = text or ""
-        check("Terminal: PowerShell output in xterm.js", "MCD-42" in text, text[-200:])
-        shot(self.main_win, "app_terminal.png")
+        text = (text or "").rstrip()
+        want = "MCD-42" if "PowerShell" in self.shell_name else "1042"
+        check(self.shell_name + ": command output in xterm.js", want in text, (self.states, text[-300:]))
+        shot(self.main_win, "app_terminal_%s.png" % self.shell_name.replace(" ", "_"))
         self.term.disconnect_tunnel()
-        GLib.timeout_add(1000, self.files)
+        GLib.timeout_add(1500, self.term_next)
 
     # ---- files ---------------------------------------------------------------------------
     def files(self):
