@@ -2,8 +2,9 @@
 <!-- SPDX-License-Identifier: Apache-2.0
      Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
      WiX 5 source: per-machine MSI for managed deployment (Group Policy, Intune).
-     Build: wix build -arch x64 -ext WixToolset.UI.wixext -d Version=X.Y.Z -d SourceDir=dist\MeshCentralDesktop
-            -d Icon=build\meshcentral-desktop.ico -d LicenseRtf=build\LICENSE.rtf packaging\windows\MeshCentralDesktop.wxs
+     Build (absolute paths: WiX resolves relative ones from this folder):
+            wix build -arch x64 -ext WixToolset.UI.wixext -d Version=X.Y.Z -d SourceDir=<repo>\dist\MeshCentralDesktop
+            -d Icon=<repo>\build\meshcentral-desktop.ico -d LicenseRtf=<repo>\build\LICENSE.rtf packaging\windows\MeshCentralDesktop.wxs
             -o dist\MeshCentralDesktop-X.Y.Z.msi -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <!-- never change UpgradeCode: it ties every version together for upgrades -->

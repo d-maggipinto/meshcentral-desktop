@@ -113,11 +113,15 @@ jobs:
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           dotnet tool install --global wix --version 5.0.2 | Out-Null
           wix extension add -g WixToolset.UI.wixext/5.0.2
-          wix build -arch x64 -ext WixToolset.UI.wixext -d Version=$ver -d SourceDir=dist\MeshCentralDesktop `
-            -d Icon=build\meshcentral-desktop.ico -d LicenseRtf=build\LICENSE.rtf `
+          # absolute paths: WiX resolves relative ones from the .wxs folder
+          wix build -arch x64 -ext WixToolset.UI.wixext -d Version=$ver -d "SourceDir=$PWD\dist\MeshCentralDesktop" `
+            -d "Icon=$PWD\build\meshcentral-desktop.ico" -d "LicenseRtf=$PWD\build\LICENSE.rtf" `
             packaging\windows\MeshCentralDesktop.wxs -o "dist\MeshCentralDesktop-$ver.msi"
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           Get-ChildItem dist\*.exe, dist\*.msi | Format-Table Name, Length
+          foreach ($f in Get-ChildItem dist\*.exe, dist\*.msi) {
+            if ($f.Length -lt 20MB) { "$($f.Name) is too small: the app folder was not packed"; exit 1 }
+          }
 
       - name: Install, self-test and uninstall both installers
         shell: pwsh
