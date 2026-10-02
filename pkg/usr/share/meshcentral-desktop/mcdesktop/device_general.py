@@ -432,7 +432,7 @@ class GeneralPanel(Gtk.Box):
         dl.meshcmd_dialog(self._parent(), nodeid=self.node["_id"])
 
     def web_session(self, tag, port):
-        """Web-VNC / Web-RDP / Web-SSH: the server's own web clients, in a WebKit window."""
+        """Web-VNC / Web-RDP / Web-SSH: the server's own web clients, in an embedded web view window."""
         node, mesh = self.node, self._mesh()
         msg = {"action": "getcookie", "nodeid": node["_id"], "tcpport": port, "tag": tag, "name": mesh.get("name")}
         if mesh.get("mtype") == 3 and mesh.get("relayid"):          # local device through a relay agent
@@ -868,46 +868,22 @@ def _duration(secs):
 
 
 class ChatWindow(Gtk.Window):
-    """A server page in a WebKit window, like the web UI's popups: the chat (/messenger) or the
+    """A server page in an embedded web view window, like the web UI's popups: the chat (/messenger) or the
     web VNC / RDP / SSH clients."""
 
     def __init__(self, app, title, url, size=(400, 560), cookies=None):
         super().__init__(title=title)
-        import gi
-        gi.require_version("WebKit2", "4.1")
-        from gi.repository import WebKit2
+        from .webview import WebView                       # stays on the server, no pop-ups
         self.set_default_size(*size)
         if getattr(app, "main_win", None):
             self.set_transient_for(app.main_win)
-        ctx = app.web_context()
-        view = WebKit2.WebView.new_with_context(ctx)
-        view.get_settings().set_javascript_can_open_windows_automatically(False)
-        from .desktop_panel import same_origin_policy      # stay on the server, no pop-ups
-        view.connect("decide-policy", lambda v, d, t: same_origin_policy(v, d, t, app.ctrl.server.url))
-        self.add(view)
+        self.web = WebView(app, server_url=app.ctrl.server.url)
+        self.add(self.web.widget)
         self.show_all()
         if not cookies:
-            view.load_uri(url)
+            self.web.load_uri(url)
             return
-        gi.require_version("Soup", "3.0")
-        from gi.repository import Soup
-        host = urllib.parse.urlsplit(url).hostname
-        mgr, left = ctx.get_cookie_manager(), [len(cookies)]
-
-        def added(_m, res):
-            try:
-                mgr.add_cookie_finish(res)
-            except Exception:
-                pass
-            left[0] -= 1
-            if left[0] == 0:
-                view.load_uri(url)
-        for name, value, path, secure in cookies:
-            c = Soup.Cookie.new(name, value, host, path, -1)    # host-only, not stored (-1)
-            # never sent over plain http, even when the server marks it non-secure (TLS offload)
-            c.set_secure(secure or urllib.parse.urlsplit(url).scheme == "https")
-            c.set_http_only(True)
-            mgr.add_cookie(c, None, added)
+        self.web.add_cookies(url, cookies, lambda: self.web.load_uri(url))
 
 
 class ShareDialog:

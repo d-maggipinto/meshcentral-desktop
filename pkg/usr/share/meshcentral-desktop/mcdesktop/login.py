@@ -1,40 +1,11 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
 """Login window: server address, username, password, optional MFA token."""
-import gi
-gi.require_version("Secret", "1")
-from gi.repository import Gtk, GLib, Secret
+from gi.repository import Gtk, GLib
 
 from .client import ControlConnection
 from . import ui
-
-SCHEMA = Secret.Schema.new(
-    "uk.co.cyvelion.MeshCentralDesktop", Secret.SchemaFlags.NONE,
-    {"server": Secret.SchemaAttributeType.STRING, "username": Secret.SchemaAttributeType.STRING})
-
-
-def store_password(server, username, password):
-    try:
-        Secret.password_store_sync(
-            SCHEMA, {"server": server, "username": username}, Secret.COLLECTION_DEFAULT,
-            f"MeshCentral {username}@{server}", password, None)
-        return True
-    except Exception:
-        return False
-
-
-def load_password(server, username):
-    try:
-        return Secret.password_lookup_sync(SCHEMA, {"server": server, "username": username}, None)
-    except Exception:
-        return None
-
-
-def clear_password(server, username):
-    try:
-        Secret.password_clear_sync(SCHEMA, {"server": server, "username": username}, None)
-    except Exception:
-        pass
+from .osdep import store_password, load_password, clear_password, KEYRING_NAME  # noqa: F401 (re-exported)
 
 
 class LoginWindow(Gtk.ApplicationWindow):
@@ -75,7 +46,7 @@ class LoginWindow(Gtk.ApplicationWindow):
             grid.attach(Gtk.Label(label=label, xalign=1), 0, i, 1, 1)
             grid.attach(w, 1, i, 1, 1)
 
-        self.remember = Gtk.CheckButton(label="Remember password (system keyring)",
+        self.remember = Gtk.CheckButton(label="Remember password (%s)" % KEYRING_NAME,
                                         active=bool(cfg.get("remember")))
         outer.pack_start(self.remember, False, False, 0)
 

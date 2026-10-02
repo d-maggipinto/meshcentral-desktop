@@ -30,6 +30,7 @@ _env = None           # shared ICoreWebView2Environment (one browser process for
 _env_waiters = []     # callbacks waiting for the environment
 _env_handler = None   # keeps the creation handler alive
 _env_error = None
+_clear_pending = False  # sign-out asked to clear cookies / storage: done before the next page loads
 
 
 def _search_dirs():
@@ -170,6 +171,7 @@ class WebView2Widget(Gtk.DrawingArea):
       on_message(text)                  window.chrome.webview.postMessage(...)
       on_script_dialog(kind, message)   alert / confirm / prompt (beforeunload is auto-accepted)
       on_accelerator(vk, kind) -> bool  key the page would get; True = handled by the app
+      on_focus_changed(focused)         the page got / lost the keyboard focus
     """
 
     def __init__(self, user_data_dir=None, devtools=False, allow_insecure_tls=False):
@@ -182,7 +184,7 @@ class WebView2Widget(Gtk.DrawingArea):
         self._handlers = []          # keep COM handler objects alive
         self._closed = False
         self.on_ready = self.on_error = self.allow_navigation = self.on_load_finished = None
-        self.on_message = self.on_script_dialog = self.on_accelerator = None
+        self.on_message = self.on_script_dialog = self.on_accelerator = self.on_focus_changed = None
         self.connect("realize", self._on_realize)
         self.connect("size-allocate", lambda *_: self._update_bounds())
         self.connect("map", lambda *_: self._set_visible(True))
@@ -241,6 +243,10 @@ class WebView2Widget(Gtk.DrawingArea):
                   self._permission)
         self._add(self.controller.add_AcceleratorKeyPressed,
                   wv.ICoreWebView2AcceleratorKeyPressedEventHandler, self._accelerator)
+        self._add(self.controller.add_GotFocus, wv.ICoreWebView2FocusChangedEventHandler,
+                  lambda sender, args: self._focus(True, sender, args))
+        self._add(self.controller.add_LostFocus, wv.ICoreWebView2FocusChangedEventHandler,
+                  lambda sender, args: self._focus(False, sender, args))
         try:                                           # downloads: ICoreWebView2_4 (runtime 1.0.902+)
             w4 = self.webview.QueryInterface(wv.ICoreWebView2_4)
             self._add(w4.add_DownloadStarting, wv.ICoreWebView2DownloadStartingEventHandler, self._download)
@@ -254,11 +260,40 @@ class WebView2Widget(Gtk.DrawingArea):
             pass
         self._update_bounds()
         self._set_visible(self.get_mapped())
+        if _clear_pending:
+            self._clear_data(self._flush)        # sign-out cleanup first, then the queued page loads
+        else:
+            self._flush()
+
+    def _flush(self):
         pending, self._pending = self._pending, []
         for fn in pending:
             fn()
         if self.on_ready:
             self.on_ready()
+
+    def _clear_data(self, then):
+        global _clear_pending
+        wv = module()
+        kinds = (wv.COREWEBVIEW2_BROWSING_DATA_KINDS_COOKIES | wv.COREWEBVIEW2_BROWSING_DATA_KINDS_ALL_DOM_STORAGE
+                 | wv.COREWEBVIEW2_BROWSING_DATA_KINDS_DISK_CACHE)
+
+        def done(*_):
+            global _clear_pending
+            _clear_pending = False
+            then()
+        try:
+            prof = self.webview.QueryInterface(wv.ICoreWebView2_13).Profile.QueryInterface(wv.ICoreWebView2Profile2)
+            h = _handler(wv.ICoreWebView2ClearBrowsingDataCompletedHandler, done)
+            self._handlers.append(h)
+            prof.ClearBrowsingData(kinds, h)
+        except Exception:
+            traceback.print_exc()
+            try:                                  # older runtime: at least the cookies
+                self.webview.QueryInterface(wv.ICoreWebView2_2).CookieManager.DeleteAllCookies()
+            except Exception:
+                pass
+            done()
 
     def _add(self, add_fn, iface, fn):
         h = _handler(iface, fn)
@@ -364,6 +399,12 @@ class WebView2Widget(Gtk.DrawingArea):
             text = args.WebMessageAsJson
         self.on_message(text)
 
+    def _focus(self, focused, sender, args):
+        _ref(sender)
+        _ref(args)
+        if self.on_focus_changed:
+            self.on_focus_changed(focused)
+
     def _accelerator(self, sender, args):
         _ref(sender)
         _ref(args)
@@ -417,6 +458,21 @@ class WebView2Widget(Gtk.DrawingArea):
               % json.dumps(css))
         self.add_user_script(js)
 
+    def add_cookie(self, name, value, domain, path="/", secure=True):
+        """A session cookie (never written to disk), HttpOnly, for `domain` only."""
+        def go():
+            wv = module()
+            cm = self.webview.QueryInterface(wv.ICoreWebView2_2).CookieManager
+            c = cm.CreateCookie(name, value, domain, path or "/")
+            c.IsHttpOnly = True
+            c.IsSecure = bool(secure)
+            cm.AddOrUpdateCookie(c)
+        self._later(go)
+
+    def after_pending(self, fn):
+        """fn() once the calls queued so far have run (cookies before the first page load)."""
+        self._later(fn)
+
     def post_message(self, text):
         self._later(lambda: self.webview.PostWebMessageAsString(text))
 
@@ -431,3 +487,10 @@ class WebView2Widget(Gtk.DrawingArea):
             except Exception:
                 pass
         self.controller = self.webview = None
+
+
+def clear_browsing_data():
+    """Sign-out: cookies and web storage of the shared profile are cleared before the next page loads
+    (the profile can only be reached through a live WebView2, so it happens on the next creation)."""
+    global _clear_pending
+    _clear_pending = True

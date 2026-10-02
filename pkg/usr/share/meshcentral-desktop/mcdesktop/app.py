@@ -6,8 +6,7 @@ import os
 
 import gi
 gi.require_version("Gtk", "3.0")
-gi.require_version("WebKit2", "4.1")
-from gi.repository import Gtk, Gio, GLib, WebKit2, Gdk
+from gi.repository import Gtk, Gio, GLib, Gdk
 
 from .login import LoginWindow
 from .mainwindow import MainWindow
@@ -107,25 +106,14 @@ class App(Gtk.Application):
         self._show_login()
 
     def _clear_web_cookies(self):
-        try:
-            dm = self.web_context().get_website_data_manager()
-            dm.clear(WebKit2.WebsiteDataTypes.COOKIES | WebKit2.WebsiteDataTypes.SESSION_STORAGE
-                     | WebKit2.WebsiteDataTypes.LOCAL_STORAGE, 0, None, None, None)
-        except Exception:
-            pass
+        from . import webview
+        webview.clear_site_data(self)
 
-    # ---- shared web context for desktop viewer -----------------------------
+    # ---- shared web context for the embedded web views (Linux / WebKitGTK) ---
     def web_context(self):
         if self._web_context is None:
-            dm = WebKit2.WebsiteDataManager(
-                base_data_directory=os.path.join(DATA_DIR, "webkit"),
-                base_cache_directory=os.path.join(DATA_DIR, "webkit-cache"))
-            self._web_context = WebKit2.WebContext.new_with_website_data_manager(dm)
-            cm = self._web_context.get_cookie_manager()
-            cm.set_persistent_storage(os.path.join(DATA_DIR, "webkit", "cookies.sqlite"),
-                                      WebKit2.CookiePersistentStorage.SQLITE)
-            # No page may save files on its own (the app's downloads go through WebSession).
-            self._web_context.connect("download-started", lambda _c, d: d.cancel())
+            from . import webview
+            self._web_context = webview.new_web_context(DATA_DIR)
         return self._web_context
 
 

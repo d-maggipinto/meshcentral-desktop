@@ -129,9 +129,12 @@ class Smoke:
         return False
 
     def step6(self):
+        # a page loaded from a string is not a secure context: no navigator.clipboard at all (= no access);
+        # where it exists, the PermissionRequested handler must deny the read
         self.web.run_javascript(
-            "navigator.clipboard.readText().then(function(){window.chrome.webview.postMessage('clip:read')},"
-            "function(e){window.chrome.webview.postMessage('clip:denied')});1")
+            "(function(){var p=window.chrome.webview;if(!navigator.clipboard||!navigator.clipboard.readText)"
+            "{p.postMessage('clip:denied');return 1;}navigator.clipboard.readText().then("
+            "function(){p.postMessage('clip:read')},function(e){p.postMessage('clip:denied')});return 1;})()")
         GLib.timeout_add(2000, self.step7)
 
     def step7(self):

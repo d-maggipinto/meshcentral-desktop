@@ -20,10 +20,11 @@ import urllib.parse
 import time
 
 from . import rights, ui
+from .osdep import IS_WINDOWS
+from .webview import WebView, server_origin, same_origin_policy  # noqa: F401 (re-exported for callers)
 import gi
 gi.require_version("Gtk", "3.0")
-gi.require_version("WebKit2", "4.1")
-from gi.repository import Gtk, Gdk, WebKit2, GLib
+from gi.repository import Gtk, Gdk, GLib
 
 # Native combo choices -> viewer values
 _QUALITY = [("Low", 30), ("Medium", 50), ("High", 80)]
@@ -42,28 +43,6 @@ _COVER_CSS = b"""
             padding: 8px 16px; font-weight: bold; }
 """
 _cover_css_installed = False
-
-
-def server_origin(url):
-    """'https://host:port' of a server URL (what location.origin reports)."""
-    p = urllib.parse.urlsplit(url)
-    return f"{p.scheme}://{p.netloc}"
-
-
-def same_origin_policy(_view, decision, kind, server_url):
-    """WebKit decide-policy handler for views that must stay on the MeshCentral server: refuse
-    navigation to other origins and every new-window request. Returns True when handled."""
-    if kind == WebKit2.PolicyDecisionType.NEW_WINDOW_ACTION:
-        decision.ignore()
-        return True
-    if kind == WebKit2.PolicyDecisionType.NAVIGATION_ACTION:
-        uri = decision.get_navigation_action().get_request().get_uri() or ""
-        if uri.startswith(("about:", "data:", "blob:")):
-            return False
-        if server_origin(uri) != server_origin(server_url):
-            decision.ignore()
-            return True
-    return False
 
 
 class DesktopPanel(Gtk.Box):
@@ -198,21 +177,12 @@ class DesktopPanel(Gtk.Box):
         self.info.get_content_area().add(self.info_label)
         self.pack_start(self.info, False, False, 0)
 
-        self.view = WebKit2.WebView.new_with_context(app.web_context())
-        s = self.view.get_settings()
-        s.set_enable_webgl(True)
-        # The app does all clipboard work itself (getclip/setclip): the page gets NO clipboard
-        # access (in WebKitGTK this setting also allows a script to paste = read the local clipboard)
-        # and cannot open windows.
-        s.set_javascript_can_access_clipboard(False)
-        s.set_javascript_can_open_windows_automatically(False)
-        s.set_hardware_acceleration_policy(WebKit2.HardwareAccelerationPolicy.ALWAYS)
-        self.view.connect("load-changed", self._on_load)
-        # The page's dialogs would be invisible behind our cover and block forever -
-        # notably MeshCentral's "leave page?" beforeunload confirm on reconnect.
-        self.view.connect("script-dialog", self._on_script_dialog)
-        # The view only ever shows the configured server: navigation elsewhere is refused
-        self.view.connect("decide-policy", lambda v, d, t: same_origin_policy(v, d, t, app.ctrl.server.url))
+        # Embedded web view (WebKitGTK / Edge WebView2): no page clipboard access, no windows,
+        # page dialogs never block (beforeunload confirmed), only the configured server.
+        self.web = WebView(app, server_url=app.ctrl.server.url, webgl=True)
+        self.view = self.web.widget
+        self.web.on_load_finished = self._on_load
+        self.web.on_alert = lambda msg: self._note("Message from the server page: " + msg[:300])
         self.view.connect("size-allocate", self._on_view_resize)
         self._resize_timer = None
 
@@ -253,8 +223,7 @@ class DesktopPanel(Gtk.Box):
         overlay.add_overlay(self._hint_rev)
         overlay.set_overlay_pass_through(self._hint_rev, True)
         # Keyboard grab follows the remote screen's focus (see "keyboard" section).
-        self.view.connect("focus-in-event", lambda *_: (self._kb_update(), False)[1])
-        self.view.connect("focus-out-event", lambda *_: (GLib.idle_add(self._kb_update), False)[1])
+        self.web.on_focus_changed = lambda on: self._kb_update() if on else GLib.idle_add(self._kb_update)
         self.pack_start(overlay, True, True, 0)
         self.show_all()
         self._set_controls_enabled(False)
@@ -338,20 +307,8 @@ class DesktopPanel(Gtk.Box):
 
         def go(_v=None):
             if gen == self._gen and not self._closing:
-                self.view.load_uri(self.app.ctrl.server.url + "/")
+                self.web.load_uri(self.app.ctrl.server.url + "/")
         self._js(self._END_SESSION_JS, go)
-
-    def _on_script_dialog(self, _view, dialog):
-        t = dialog.get_dialog_type()
-        if t == WebKit2.ScriptDialogType.BEFORE_UNLOAD_CONFIRM:
-            dialog.confirm_set_confirmed(True)       # always allow leaving/reloading
-        elif t == WebKit2.ScriptDialogType.CONFIRM:
-            dialog.confirm_set_confirmed(False)
-        elif t == WebKit2.ScriptDialogType.ALERT:
-            msg = (dialog.get_message() or "").strip()
-            if msg:                                  # page text: label it, never pass it off as the app's
-                self._note("Message from the server page: " + msg[:300])
-        return True                                  # handled: never show a hidden dialog
 
     def teardown(self):
         self._sync_stop()
@@ -366,7 +323,7 @@ class DesktopPanel(Gtk.Box):
             GLib.source_remove(self._reveal_timer)
             self._reveal_timer = None
         try:
-            self.view.load_uri("about:blank")
+            self.web.load_uri("about:blank")
         except Exception:
             pass
 
@@ -444,11 +401,13 @@ class DesktopPanel(Gtk.Box):
         if button:
             self._cover_btn.set_label(button)
         self._cover.show()
+        self.web.set_page_visible(False)     # Windows: GTK cannot draw over the native page
 
     def _cover_hide(self):
         self._cover_spinner.stop()
         self._cover.hide()
-        self.view.grab_focus()           # keyboard goes straight to the remote screen
+        self.web.set_page_visible(True)
+        self.web.grab_focus()            # keyboard goes straight to the remote screen
 
     def _cover_action(self):
         if self._cover_btn.get_label() == "Retry":
@@ -489,19 +448,10 @@ class DesktopPanel(Gtk.Box):
             self._flash_status("View only", 5)
 
     def _js(self, code, cb=None):
-        def done(view, res):
-            if self._closing:
-                return
-            try:
-                val = view.run_javascript_finish(res).get_js_value().to_string()
-            except Exception:
-                val = ""
-            if cb:
+        def done(val):
+            if not self._closing and cb:
                 cb(val)
-        try:
-            self.view.run_javascript(code, None, done)
-        except Exception:
-            pass
+        self.web.run_js(code, done)
 
     def _call(self, method):
         """Call desktop.m.<method>() only when the KVM session is live (State===3)."""
@@ -693,7 +643,7 @@ class DesktopPanel(Gtk.Box):
             "return 'ok';}catch(e){return 'err';}})()",
             lambda r: self._set_status(f"Typed {len(text)} characters" if r == "ok"
                                        else "Connect the desktop first"))
-        self.view.grab_focus()
+        self.web.grab_focus()
 
     # ---- display picker (multi-monitor remotes) ---------------------------------
     def _refresh_displays(self):
@@ -758,8 +708,16 @@ class DesktopPanel(Gtk.Box):
     def _kb_update(self):
         want = (self._connected and not self._closing and self.hotkeys.get_active()
                 and self.caps.desktop_input
-                and self.view.has_focus())
-        if want and not self._kb_seat:
+                and self.web.has_focus())
+        if want and not self._kb_seat and IS_WINDOWS:
+            # Windows: a GTK grab would take the keys away from WebView2; a low-level hook takes
+            # only the system shortcuts away from Windows instead (winkeys.py)
+            from . import winkeys, winweb
+            top = self.get_toplevel()
+            if isinstance(top, Gtk.Window) and top.get_window() is not None:
+                self._kb_seat = winkeys.KeyboardHook(self._send_vk, winweb._hwnd_of(top.get_window()))
+                self._kb_seat.start()
+        elif want and not self._kb_seat:
             top = self.get_toplevel()
             gdkwin = top.get_window() if isinstance(top, Gtk.Window) else None
             seat = Gdk.Display.get_default().get_default_seat()
@@ -771,10 +729,15 @@ class DesktopPanel(Gtk.Box):
             self._kb_ungrab()
         return False
 
+    def _send_vk(self, vk, down, ext):
+        """A key taken by the Windows hook, sent to the remote as a key code."""
+        self._js("(function(){try{if(desktop&&desktop.State===3&&desktop.m)"
+                 "desktop.m.SendKeyMsgKC(%d,%d,%s);}catch(e){}})()" % (1 if down else 2, vk, "true" if ext else "false"))
+
     def _kb_ungrab(self):
         if self._kb_seat:
             try:
-                self._kb_seat.ungrab()
+                (self._kb_seat.stop if IS_WINDOWS else self._kb_seat.ungrab)()
             except Exception:
                 pass
             self._kb_seat = None
@@ -1125,8 +1088,8 @@ class DesktopPanel(Gtk.Box):
         return False
 
     # ---- state machine -----------------------------------------------------
-    def _on_load(self, view, event):
-        if event != WebKit2.LoadEvent.FINISHED or self._closing:
+    def _on_load(self):
+        if self._closing:
             return
         self._js(
             "(function(){"
@@ -1164,7 +1127,7 @@ class DesktopPanel(Gtk.Box):
         if not self._navigated:
             self._navigated = True
             self._set_status("Opening desktop…")
-            self.view.load_uri(self.desk_url)
+            self.web.load_uri(self.desk_url)
             return
         # On the device desktop view: strip outer chrome, then click Connect as soon as
         # the viewer's button exists (polled; no fixed delay).
