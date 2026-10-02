@@ -1,9 +1,20 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
-"""Embeddable terminal panel: a VTE terminal connected to the agent through the relay."""
-import gi
-gi.require_version("Vte", "2.91")
-from gi.repository import Gtk, Gdk, Vte, GLib
+"""Embeddable terminal panel connected to the agent through the relay: a VTE terminal on Linux,
+xterm.js in Edge WebView2 on Windows (winterm.XtermTerminal, same API subset)."""
+from gi.repository import Gtk, Gdk, GLib
+
+from .osdep import IS_WINDOWS
+
+if IS_WINDOWS:
+    from .winterm import XtermTerminal as _Terminal
+    _TEXT = None
+else:
+    import gi
+    gi.require_version("Vte", "2.91")
+    from gi.repository import Vte
+    _Terminal = Vte.Terminal
+    _TEXT = Vte.Format.TEXT
 
 from .client import Tunnel, PROTO_TERMINAL, PROTO_POWERSHELL, PROTO_USER_SHELL, PROTO_USER_POWERSHELL
 from . import ui
@@ -60,7 +71,7 @@ class TerminalPanel(Gtk.Box):
 
         for icon, tip, cb in (
                 ("edit-copy-symbolic", "Copy (Ctrl+Shift+C)",
-                 lambda *_: self.term.copy_clipboard_format(Vte.Format.TEXT)),
+                 lambda *_: self.term.copy_clipboard_format(_TEXT)),
                 ("edit-paste-symbolic", "Paste (Ctrl+Shift+V)",
                  lambda *_: self.term.paste_clipboard()),
                 ("zoom-out-symbolic", "Smaller text", lambda *_: self._zoom(-0.1)),
@@ -81,14 +92,15 @@ class TerminalPanel(Gtk.Box):
         self.pack_start(self.info, False, False, 0)
 
         # ---- terminal ----
-        self.term = Vte.Terminal()
+        self.term = _Terminal()
         self.term.set_scrollback_lines(10000)
         self.term.set_mouse_autohide(True)
         self.term.connect("commit", self._on_commit)
         self.term.connect("char-size-changed", lambda *_: self._send_size())
         self.term.connect("key-press-event", self._on_key)
         self.term.connect("size-allocate", lambda *_: GLib.idle_add(self._send_size))
-        self.pack_start(ui.scrolled(self.term), True, True, 0)
+        # VTE scrolls inside a ScrolledWindow; xterm.js has its own scrollbar
+        self.pack_start(self.term if IS_WINDOWS else ui.scrolled(self.term), True, True, 0)
 
     # ---- lifecycle ----
     def on_shown(self):
@@ -107,7 +119,7 @@ class TerminalPanel(Gtk.Box):
     def _on_key(self, _w, ev):
         ctrl_shift = (ev.state & Gdk.ModifierType.CONTROL_MASK) and (ev.state & Gdk.ModifierType.SHIFT_MASK)
         if ctrl_shift and ev.keyval in (Gdk.KEY_C, Gdk.KEY_c):
-            self.term.copy_clipboard_format(Vte.Format.TEXT)
+            self.term.copy_clipboard_format(_TEXT)
             return True
         if ctrl_shift and ev.keyval in (Gdk.KEY_V, Gdk.KEY_v):
             self.term.paste_clipboard()

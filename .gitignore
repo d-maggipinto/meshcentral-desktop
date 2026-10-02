@@ -21,3 +21,4 @@ PROTOCOL_TRUTH.md
 
 # test scripts (kept locally, not published)
 tests/
+build/

@@ -11,11 +11,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # Microsoft Edge WebView2 SDK (WebView2Loader.dll + WebView2.tlb), pinned by version AND checksum.
-  WEBVIEW2_SDK_VERSION: "1.0.4258.31"
-  WEBVIEW2_SDK_SHA256: "56f7f4b8bf9aee4b8efefbbdd4f67d5f74ebd1b100ed0806da71bf76af481aa9"
-
 jobs:
   build:
     runs-on: windows-2025
@@ -42,13 +37,9 @@ jobs:
             mingw-w64-ucrt-x86_64-python-comtypes
             mingw-w64-ucrt-x86_64-adwaita-icon-theme
 
-      - name: WebView2 SDK
-        run: |
-          curl -sSfL -o wv2.nupkg "https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/${WEBVIEW2_SDK_VERSION}"
-          echo "${WEBVIEW2_SDK_SHA256}  wv2.nupkg" | sha256sum -c -
-          mkdir -p build/webview2
-          unzip -q -j -o wv2.nupkg "build/native/x64/WebView2Loader.dll" "WebView2.tlb" -d build/webview2
-          ls -l build/webview2
+      # WebView2 SDK and xterm.js, pinned by version AND SHA-256 (see the script)
+      - name: Third-party files
+        run: scripts/windows/fetch-assets.sh
 
       - name: Syntax check
         run: python -m compileall -q pkg/usr/share/meshcentral-desktop scripts/windows
@@ -58,6 +49,14 @@ jobs:
           export MCD_WEBVIEW2_DIR="$(cygpath -w "$PWD/build/webview2")"
           mkdir -p smoke && cd smoke
           timeout 180 python ../scripts/windows/webview2_smoke.py 2>&1 | tee smoke.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Terminal (xterm.js in WebView2)
+        run: |
+          export MCD_WEBVIEW2_DIR="$(cygpath -w "$PWD/build/webview2")"
+          export MCD_ASSETS_DIR="$(cygpath -w "$PWD/build/assets")"
+          cd smoke
+          timeout 180 python ../scripts/windows/terminal_smoke.py 2>&1 | tee terminal.log
           exit ${PIPESTATUS[0]}
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
