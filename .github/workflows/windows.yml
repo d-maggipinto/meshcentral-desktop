@@ -38,6 +38,8 @@ jobs:
             mingw-w64-ucrt-x86_64-python-websocket-client
             mingw-w64-ucrt-x86_64-python-comtypes
             mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-pyinstaller
+            mingw-w64-ucrt-x86_64-pyinstaller-hooks-contrib
 
       # WebView2 SDK and xterm.js, pinned by version AND SHA-256 (see the script)
       - name: Third-party files
@@ -91,6 +93,63 @@ jobs:
           timeout 900 python ../scripts/windows/app_smoke.py https://127.0.0.1:8443 ciadmin 'Ci-Test-12345!' 2>&1 | tee app.log
           exit ${PIPESTATUS[0]}
 
+      # ---- packaging: PyInstaller folder -> Inno Setup .exe + WiX .msi, each installed and self-tested ----
+      - name: Bundle (PyInstaller)
+        run: scripts/windows/build.sh
+
+      - name: Self-test of the bundled app
+        run: |
+          ./dist/MeshCentralDesktop/MeshCentralDesktop.exe --selftest "$(cygpath -w "$PWD/smoke/selftest-bundle.json")" || rc=$?
+          cat smoke/selftest-bundle.json | python -c "import json,sys;r=json.load(sys.stdin);[print(k, v if not isinstance(v,dict) else (v['ok'], v.get('value', v.get('error')))) for k,v in r.items() if k!='modules']"
+          exit ${rc:-0}
+
+      - name: Installers (Inno Setup .exe, WiX .msi)
+        shell: pwsh
+        run: |
+          $ver = (Get-Content dist\VERSION).Trim()
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress | Out-Null }
+          & $iscc /Qp "/DAppVersion=$ver" packaging\windows\installer.iss
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          dotnet tool install --global wix --version 5.0.2 | Out-Null
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          wix build -arch x64 -ext WixToolset.UI.wixext -d Version=$ver -d SourceDir=dist\MeshCentralDesktop `
+            -d Icon=build\meshcentral-desktop.ico -d LicenseRtf=build\LICENSE.rtf `
+            packaging\windows\MeshCentralDesktop.wxs -o "dist\MeshCentralDesktop-$ver.msi"
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Get-ChildItem dist\*.exe, dist\*.msi | Format-Table Name, Length
+
+      - name: Install, self-test and uninstall both installers
+        shell: pwsh
+        run: |
+          $ver = (Get-Content dist\VERSION).Trim()
+          $fail = 0
+          # setup .exe, per-user, silent
+          $dir = "$env:LOCALAPPDATA\Programs\MCD-CI"
+          Start-Process "dist\MeshCentralDesktop-$ver-setup.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/DIR=$dir","/LOG=smoke\setup-install.log" -Wait
+          Start-Process "$dir\MeshCentralDesktop.exe" -ArgumentList "--selftest","$PWD\smoke\selftest-setup.json" -Wait -PassThru | ForEach-Object { if ($_.ExitCode) { $fail = 1; "setup.exe install: self-test failed" } else { "setup.exe install: self-test OK" } }
+          $unins = Get-ChildItem "$dir\unins*.exe" | Select-Object -First 1
+          Start-Process $unins.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait
+          if (Test-Path "$dir\MeshCentralDesktop.exe") { $fail = 1; "setup.exe: uninstall left the app behind" } else { "setup.exe: uninstalled" }
+          # .msi, per-machine, silent
+          $p = Start-Process msiexec -ArgumentList "/i","dist\MeshCentralDesktop-$ver.msi","/qn","/l*v","smoke\msi-install.log" -Wait -PassThru
+          "msiexec install exit code: $($p.ExitCode)"; if ($p.ExitCode) { $fail = 1 }
+          $exe = "$env:ProgramFiles\MeshCentral Desktop\MeshCentralDesktop.exe"
+          Start-Process $exe -ArgumentList "--selftest","$PWD\smoke\selftest-msi.json" -Wait -PassThru | ForEach-Object { if ($_.ExitCode) { $fail = 1; ".msi install: self-test failed" } else { ".msi install: self-test OK" } }
+          if (-not (Test-Path "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\MeshCentral Desktop.lnk")) { $fail = 1; ".msi: Start menu shortcut missing" } else { ".msi: Start menu shortcut OK" }
+          $p = Start-Process msiexec -ArgumentList "/x","dist\MeshCentralDesktop-$ver.msi","/qn" -Wait -PassThru
+          if ((Test-Path $exe) -or $p.ExitCode) { $fail = 1; ".msi: uninstall failed" } else { ".msi: uninstalled" }
+          exit $fail
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        if: always()
+        with:
+          name: windows-installers
+          path: |
+            dist/*.exe
+            dist/*.msi
+          if-no-files-found: ignore
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         if: always()
         with:
@@ -98,6 +157,7 @@ jobs:
           path: |
             smoke/*.png
             smoke/*.log
+            smoke/*.json
             mc/server.log
             mc/server.err
             agent/agent.log

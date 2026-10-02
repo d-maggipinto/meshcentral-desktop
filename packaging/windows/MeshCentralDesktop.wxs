@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: Apache-2.0
+     Copyright 2026 CYVELION LTD. Unofficial MeshCentral desktop client, see NOTICE.
+     WiX 5 source: per-machine MSI for managed deployment (Group Policy, Intune).
+     Build: wix build -arch x64 -ext WixToolset.UI.wixext -d Version=X.Y.Z -d SourceDir=dist\MeshCentralDesktop
+            -d Icon=build\meshcentral-desktop.ico -d LicenseRtf=build\LICENSE.rtf packaging\windows\MeshCentralDesktop.wxs
+            -o dist\MeshCentralDesktop-X.Y.Z.msi -->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs" xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+  <!-- never change UpgradeCode: it ties every version together for upgrades -->
+  <Package Name="MeshCentral Desktop" Manufacturer="CYVELION LTD" Version="$(var.Version)"
+           UpgradeCode="{B13D406E-648E-4DF3-8FE2-4E6D0A399258}" Scope="perMachine" Compressed="yes" Language="2057">
+    <MajorUpgrade DowngradeErrorMessage="A newer version of MeshCentral Desktop is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="AppIcon" SourceFile="$(var.Icon)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/d-maggipinto/meshcentral-desktop" />
+
+    <StandardDirectory Id="ProgramFiles64Folder">
+      <Directory Id="INSTALLFOLDER" Name="MeshCentral Desktop" />
+    </StandardDirectory>
+
+    <Feature Id="Main" Title="MeshCentral Desktop">
+      <Files Directory="INSTALLFOLDER" Include="$(var.SourceDir)\**" />
+      <ComponentRef Id="StartMenuShortcut" />
+    </Feature>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="{D7FC7E17-2E81-4369-A980-F3DB59B61418}">
+        <Shortcut Id="AppShortcut" Name="MeshCentral Desktop" Description="MeshCentral Desktop"
+                  Target="[INSTALLFOLDER]MeshCentralDesktop.exe" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon">
+          <ShortcutProperty Key="System.AppUserModel.ID" Value="CYVELION.MeshCentralDesktop" />
+        </Shortcut>
+        <RegistryValue Root="HKLM" Key="Software\CYVELION\MeshCentral Desktop" Name="StartMenuShortcut"
+                       Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </StandardDirectory>
+
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
+  </Package>
+</Wix>
