@@ -4,6 +4,7 @@
 # PyInstaller spec for the Windows build (MSYS2 UCRT64). Run from the repository root:
 #   scripts/windows/build.sh   (fetches the third-party files, makes the icon, then runs this spec)
 import os
+import sys
 
 from PyInstaller.utils.hooks import collect_submodules
 
@@ -14,11 +15,16 @@ BUILD = os.path.join(ROOT, "build")
 datas = [
     (os.path.join(BUILD, "webview2", "WebView2.tlb"), os.path.join("mcdesktop", "webview2")),
     (os.path.join(BUILD, "assets", "xterm"), os.path.join("mcdesktop", "assets", "xterm")),
-    (os.path.join(ROOT, "pkg", "usr", "share", "icons", "hicolor"), os.path.join("share", "icons", "hicolor")),
+    # without index.theme GTK does not treat share/icons/hicolor as a theme and the app icon is missing
+    (os.path.join(sys.prefix, "share", "icons", "hicolor", "index.theme"), os.path.join("share", "icons", "hicolor")),
     (os.path.join(BUILD, "meshcentral-desktop.ico"), "."),
     (os.path.join(ROOT, "LICENSE"), "."),
     (os.path.join(ROOT, "NOTICE"), "."),
 ]
+# the app icon as PNG only: GTK would pick the scalable SVG, and the bundle has no SVG image loader
+for _size in (16, 24, 32, 48, 64, 128, 256):
+    _d = os.path.join("share", "icons", "hicolor", "%dx%d" % (_size, _size), "apps")
+    datas.append((os.path.join(ROOT, "pkg", "usr", _d, "meshcentral-desktop.png"), _d))
 binaries = [(os.path.join(BUILD, "webview2", "WebView2Loader.dll"), os.path.join("mcdesktop", "webview2"))]
 hidden = (collect_submodules("mcdesktop") + collect_submodules("comtypes.gen")
           + ["comtypes.client", "websocket"])

@@ -148,7 +148,10 @@ def main():
     except Exception:
         pass
     if osdep.IS_WINDOWS:
-        # no D-Bus on Windows: Gtk.Application cannot find a running copy, a named mutex does
+        # No D-Bus on Windows: without this GLib tries to auto-start a session bus at
+        # Application.run() and the window only appears after a long wait. A named mutex
+        # gives the single instance instead.
+        os.environ.setdefault("DBUS_SESSION_BUS_ADDRESS", "disabled:")
         osdep.set_app_identity()
         if not osdep.acquire_single_instance(APP_ID):
             return 0

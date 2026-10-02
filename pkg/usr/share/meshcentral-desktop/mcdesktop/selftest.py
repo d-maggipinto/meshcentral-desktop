@@ -57,7 +57,9 @@ def run(out_path):
         from gi.repository import Gtk, GdkPixbuf
         theme = Gtk.IconTheme.get_default()
         return {"gtk": "%d.%d.%d" % (Gtk.get_major_version(), Gtk.get_minor_version(), Gtk.get_micro_version()),
-                "app_icon": theme.has_icon("meshcentral-desktop"),
+                # really loaded, not only listed: an icon GTK cannot decode shows as a broken image
+                "app_icon_16": theme.load_icon("meshcentral-desktop", 16, 0).get_width() > 0,
+                "app_icon_64": theme.load_icon("meshcentral-desktop", 64, 0).get_width() > 0,
                 "symbolic_icons": theme.has_icon("view-refresh-symbolic"),
                 "png_loader": "png" in [f.get_name() for f in GdkPixbuf.Pixbuf.get_formats()]}
     _check(r, "gtk", gtk)
