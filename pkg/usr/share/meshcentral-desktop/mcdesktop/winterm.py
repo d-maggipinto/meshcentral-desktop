@@ -140,7 +140,7 @@ class XtermTerminal(Gtk.Box):
                 self._cols, self._rows = c, r
                 self.emit("char-size-changed", c, r)
         elif t == "copy":
-            sel = str(m.get("d") or "")
+            sel = str(m.get("d") or "").rstrip("\r\n")    # "select all" also covers the empty rows below
             if sel:
                 Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(sel, -1)
         elif t == "paste":

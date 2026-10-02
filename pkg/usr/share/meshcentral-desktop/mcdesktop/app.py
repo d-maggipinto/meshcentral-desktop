@@ -10,6 +10,7 @@ from gi.repository import Gtk, Gio, GLib, Gdk
 
 from .login import LoginWindow
 from .mainwindow import MainWindow
+from . import osdep
 
 APP_ID = "uk.co.cyvelion.MeshCentralDesktop"
 CONFIG_DIR = os.path.join(GLib.get_user_config_dir(), "meshcentral-desktop")
@@ -125,6 +126,10 @@ class App(Gtk.Application):
             pass
 
     def notify(self, title, body):
+        if osdep.IS_WINDOWS:                     # GLib has no Windows notification backend
+            win = self.main_win or self.login_win
+            osdep.notify(osdep.window_handle(win), title, body)
+            return
         n = Gio.Notification.new(title)
         if body:
             n.set_body(body)
@@ -142,4 +147,9 @@ def main():
         Gtk.Window.set_default_icon_name("meshcentral-desktop")
     except Exception:
         pass
+    if osdep.IS_WINDOWS:
+        # no D-Bus on Windows: Gtk.Application cannot find a running copy, a named mutex does
+        osdep.set_app_identity()
+        if not osdep.acquire_single_instance(APP_ID):
+            return 0
     return App().run(sys.argv)

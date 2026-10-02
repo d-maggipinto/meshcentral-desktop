@@ -5,20 +5,20 @@
 Run by the Windows CI job (MSYS2 UCRT64 Python). Exit code 0 = every check passed.
 Writes webview2_smoke.png (a screenshot of the window) next to the working directory.
 """
-import ctypes
 import os
 import sys
 import time
-from ctypes import wintypes
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "pkg", "usr", "share", "meshcentral-desktop"))
+sys.path.insert(0, HERE)
 
 import gi  # noqa: E402
 gi.require_version("Gtk", "3.0")
 gi.require_version("GdkPixbuf", "2.0")
-from gi.repository import Gtk, GLib, GdkPixbuf  # noqa: E402
+from gi.repository import Gtk, GLib  # noqa: E402
 from mcdesktop import winweb  # noqa: E402
+from winshot import screenshot  # noqa: E402
 
 R = []
 
@@ -34,39 +34,6 @@ PAGE = """<!doctype html><html><head><title>MCD smoke</title></head>
 <script>window.addEventListener('load',function(){
   window.chrome.webview.postMessage('loaded:'+document.title+':'+window.__mcd);
 });</script></body></html>"""
-
-
-def screenshot(widget, path):
-    """BitBlt the window's screen area (includes the DirectComposition WebView2 content)."""
-    top = widget.get_toplevel().get_window()
-    x, y = top.get_origin()[1:]
-    w, h = top.get_width() * top.get_scale_factor(), top.get_height() * top.get_scale_factor()
-    u32, g32 = ctypes.windll.user32, ctypes.windll.gdi32
-    sdc = u32.GetDC(0)
-    mdc = g32.CreateCompatibleDC(sdc)
-    bmp = g32.CreateCompatibleBitmap(sdc, w, h)
-    g32.SelectObject(mdc, bmp)
-    g32.BitBlt(mdc, 0, 0, w, h, sdc, x, y, 0x00CC0020)       # SRCCOPY
-
-    class BIH(ctypes.Structure):
-        _fields_ = [("biSize", wintypes.DWORD), ("biWidth", wintypes.LONG), ("biHeight", wintypes.LONG),
-                    ("biPlanes", wintypes.WORD), ("biBitCount", wintypes.WORD), ("biCompression", wintypes.DWORD),
-                    ("biSizeImage", wintypes.DWORD), ("biXPelsPerMeter", wintypes.LONG),
-                    ("biYPelsPerMeter", wintypes.LONG), ("biClrUsed", wintypes.DWORD),
-                    ("biClrImportant", wintypes.DWORD)]
-    bih = BIH(ctypes.sizeof(BIH), w, -h, 1, 32, 0, 0, 0, 0, 0, 0)
-    buf = ctypes.create_string_buffer(w * h * 4)
-    g32.GetDIBits(mdc, bmp, 0, h, buf, ctypes.byref(bih), 0)
-    g32.DeleteObject(bmp)
-    g32.DeleteDC(mdc)
-    u32.ReleaseDC(0, sdc)
-    raw = bytearray(buf.raw)
-    raw[0::4], raw[2::4] = raw[2::4], raw[0::4]                # BGRA -> RGBA
-    pb = GdkPixbuf.Pixbuf.new_from_bytes(GLib.Bytes.new(bytes(raw)), GdkPixbuf.Colorspace.RGB, True, 8, w, h, w * 4)
-    pb.savev(path, "png", [], [])
-    # mostly-white page area = the web content was painted (a missing WebView2 leaves the GTK background)
-    sample = raw[(h // 2) * w * 4:(h // 2) * w * 4 + w * 4]
-    return sum(1 for i in range(0, len(sample), 4) if sample[i] > 240 and sample[i + 1] > 240) / max(1, w)
 
 
 class Smoke:
