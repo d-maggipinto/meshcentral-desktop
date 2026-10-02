@@ -51,8 +51,20 @@ loader and xterm.js). Settings are kept in `%LOCALAPPDATA%\meshcentral-desktop`,
 
 The installers are not code-signed yet, so Windows SmartScreen may show "Windows protected your PC";
 choose *More info > Run anyway*. The build has a signing step ready (`scripts/windows/sign.ps1`): it
-signs the app and both installers as soon as the repository has a code-signing certificate
-(secrets `WINDOWS_SIGN_PFX_BASE64` and `WINDOWS_SIGN_PFX_PASSWORD`).
+signs every binary of the app (the `.exe` and all its `.dll` / `.pyd` libraries) and both installers as
+soon as the repository has a code-signing certificate (secrets `WINDOWS_SIGN_PFX_BASE64` and
+`WINDOWS_SIGN_PFX_PASSWORD`).
+
+**Windows 11 Smart App Control** (on by default on new Windows 11 installations) checks every binary a
+program loads. With the current unsigned build:
+
+- in its *evaluation* mode each unsigned library is looked up online the first time, so the first start
+  takes several minutes (later starts are normal);
+- once it switches to *enforcement*, unsigned libraries without a reputation are blocked and the app does
+  not start.
+
+Code signing removes both problems; until then the app is meant for computers where Smart App Control is
+off (*Windows Security > App & browser control > Smart App Control*).
 
 ## Building
 

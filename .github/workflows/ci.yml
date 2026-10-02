@@ -134,12 +134,15 @@ jobs:
           cat smoke/selftest-bundle.json | python -c "import json,sys;r=json.load(sys.stdin);[print(k, v if not isinstance(v,dict) else (v['ok'], v.get('value', v.get('error')))) for k,v in r.items() if k!='modules']"
           exit ${rc:-0}
 
-      - name: Sign the app (when a code-signing certificate is configured)
+      - name: Sign the app and its libraries (when a code-signing certificate is configured)
         shell: pwsh
         env:
           SIGN_PFX_BASE64: ${{ secrets.WINDOWS_SIGN_PFX_BASE64 }}
           SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_SIGN_PFX_PASSWORD }}
-        run: scripts/windows/sign.ps1 dist/MeshCentralDesktop/MeshCentralDesktop.exe
+        run: |
+          # every binary: Windows 11 Smart App Control checks each DLL the app loads
+          $files = (Get-ChildItem dist\MeshCentralDesktop -Recurse -Include *.exe, *.dll, *.pyd).FullName
+          scripts/windows/sign.ps1 @files
 
       - name: Installers (Inno Setup .exe, WiX .msi)
         shell: pwsh
