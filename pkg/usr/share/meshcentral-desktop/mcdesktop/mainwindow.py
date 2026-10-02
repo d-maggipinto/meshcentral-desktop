@@ -87,7 +87,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def __init__(self, app, ctrl):
         super().__init__(application=app, title="MeshCentral Desktop")
         self.app, self.ctrl = app, ctrl
-        self.set_default_size(1280, 820)
+        ui.fit_default_size(self, 1280, 820)
         self.set_icon_name("meshcentral-desktop")
         self.meshes = {}
         self.nodes = {}

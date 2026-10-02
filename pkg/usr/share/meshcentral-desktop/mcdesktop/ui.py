@@ -152,6 +152,20 @@ def form_dialog(parent, title, fields, ok_label="OK"):
     return out
 
 
+def fit_default_size(window, width, height, margin=32):
+    """set_default_size, but never larger than the monitor's work area (Windows does not keep an
+    oversized window on screen: its title bar buttons end up off screen on small displays)."""
+    from gi.repository import Gdk
+    try:
+        display = Gdk.Display.get_default()
+        mon = display.get_primary_monitor() or display.get_monitor(0)
+        wa = mon.get_workarea()
+        width, height = min(width, wa.width - margin), min(height, wa.height - margin)
+    except Exception:
+        pass
+    window.set_default_size(max(width, 400), max(height, 300))
+
+
 def text_column(title, col, expand=False, sort_col=None):
     """A readable TreeView text column. Short columns (time, user, action, state...) are NOT
     ellipsized, so they size to their content instead of collapsing to "2026-…"; only the one
