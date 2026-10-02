@@ -151,6 +151,9 @@ class DesktopPanel(Gtk.Box):
         self.hotkeys = Gtk.Switch(valign=Gtk.Align.CENTER,
                                   active=bool(app.config.get("desktop_hotkeys", True)))
         self.hotkeys.set_tooltip_text(
+            "Send system shortcuts (Windows key, Win+R, Alt+Tab, Alt+F4, Ctrl+Esc) to the remote computer "
+            "while its screen has focus. Ctrl+Alt+F always toggles fullscreen. Ctrl+Alt+Del cannot be "
+            "captured: use the Ctrl+Alt+Del button." if IS_WINDOWS else
             "Send system shortcuts (Super, Alt+Tab, Alt+F4, Ctrl+Alt+…) to the remote computer while "
             "its screen has focus. Ctrl+Alt+F always toggles fullscreen; Super+Esc (GNOME) restores "
             "local shortcuts.")
@@ -183,6 +186,8 @@ class DesktopPanel(Gtk.Box):
         self.view = self.web.widget
         self.web.on_load_finished = self._on_load
         self.web.on_alert = lambda msg: self._note("Message from the server page: " + msg[:300])
+        # Windows: keys go to WebView2, not to GTK, so the window's Ctrl+Alt+F handler never sees them
+        self.web.on_accelerator = self._on_accelerator
         self.view.connect("size-allocate", self._on_view_resize)
         self._resize_timer = None
 
@@ -780,7 +785,23 @@ class DesktopPanel(Gtk.Box):
                 "m.handleReleaseKeys=function(){sup={};held={};return rk.apply(m,arguments);};"
                 "m.__mcdKeys=1;return 'ok';}catch(e){return 'err';}})()")
 
+    def _on_accelerator(self, vk, kind):
+        """Windows: Ctrl+Alt+F from inside the page toggles fullscreen (like MainWindow._on_key)."""
+        if vk != 0x46 or kind not in (0, 2):                 # 'F'; KEY_DOWN / SYSTEM_KEY_DOWN
+            return False
+        import ctypes
+        down = lambda k: bool(ctypes.windll.user32.GetKeyState(k) & 0x8000)   # noqa: E731
+        if not (down(0x11) and down(0x12)) or down(0x10):    # Ctrl + Alt, no Shift
+            return False
+        top = self.get_toplevel()
+        if hasattr(top, "toggle_desktop_fullscreen") and (self._connected or getattr(top, "_desk_fs", False)):
+            GLib.idle_add(lambda: (top.toggle_desktop_fullscreen(self), False)[1])
+            return True
+        return False
+
     def show_hint(self, text, secs=3):
+        if IS_WINDOWS:                        # the floating hint cannot be drawn over the native page
+            self._flash_status(text, secs)
         self._hint.set_text(text)
         self._hint.show()
         self._hint_rev.show()
