@@ -59,6 +59,7 @@ def got_meshes(msg):
     loop.quit()
 
 
+c.on_close = lambda reason: print("control connection closed:", reason, flush=True)
 c.connect()
 GLib.timeout_add(200, ready)
 GLib.timeout_add_seconds(180, lambda: (print("timeout", flush=True), loop.quit()))
