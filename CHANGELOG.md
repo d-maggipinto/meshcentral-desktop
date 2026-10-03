@@ -7,6 +7,16 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Added
+- **The server's own icons** (Linux and Windows): the device-type icons (device list and the open device),
+  the menu and the status badges (Windows / Linux security and antivirus, server warnings, notifications,
+  previous logins) now come from the server you sign in to, the same images its web interface uses. A
+  server with a restyled icon set looks the same in the app; a standard server shows MeshCentral's icons.
+  Offline devices are shown faded. The icons are cached per server, so the next start shows them at once,
+  and refreshed at every sign-in. A near-white menu set (made for a dark web sidebar) gets a dark copy on
+  light themes.
+
 ## [2.28.0] - 2026-10-03
 ### Added
 - **Windows 11 look** (Windows): Segoe UI, Windows 11 colours, rounded controls and windows, the Windows

@@ -31,7 +31,7 @@ from datetime import datetime
 
 from gi.repository import Gtk, GLib, Pango, PangoCairo
 
-from . import ui, rights
+from . import ui, rights, servericons
 from . import device_list as dl
 from .general_actions import NotesDialog
 from .info_panel import agent_description, _group_name
@@ -112,6 +112,15 @@ def security_markup(state, keys):
         if v is not None:
             parts.append(f"{label} - " + (_ok("OK") if v == "OK" else _bad("BAD")))
     return ", ".join(parts)
+
+
+def _shield(states):
+    """Badge for a security row: all OK, all bad, or mixed ("OK" / "BAD" / None = not reported)."""
+    s = [x for x in states if x is not None]
+    if not s:
+        return None
+    bad = sum(1 for x in s if x != "OK")
+    return "shield-ok" if not bad else ("shield-error" if bad == len(s) else "shield-warning")
 
 
 def antivirus_markup(av):
@@ -216,6 +225,13 @@ class GeneralPanel(Gtk.Box):
         if tip:
             v.set_tooltip_text(tip)
         box = Gtk.Box(spacing=4, hexpand=True)
+        badge = (getattr(self, "_badges", None) or {}).get(key)
+        if badge:
+            fallback = {"shield-ok": "security-high-symbolic", "shield-warning": "security-medium-symbolic",
+                        "shield-error": "security-low-symbolic"}[badge]
+            img = Gtk.Image.new_from_icon_name(servericons.icon("status", badge, fallback), Gtk.IconSize.MENU)
+            img.set_valign(Gtk.Align.START)
+            box.pack_start(img, False, False, 0)
         box.pack_start(v, False, False, 0)
         if edit:
             b = Gtk.Button.new_from_icon_name("document-edit-symbolic", Gtk.IconSize.MENU)
@@ -255,9 +271,11 @@ class GeneralPanel(Gtk.Box):
             rows.append(("Mesh Agent", _esc(desc), None))
         if node.get("osdesc"):
             rows.append(("Operating System", _esc(node["osdesc"]), None))
+        self._badges = {}
         wsc = security_markup(node.get("wsc"), (("antiVirus", "AV"), ("autoUpdate", "Update"), ("firewall", "Firewall")))
         if node.get("wsc"):
             rows.append(("Windows Security", wsc, None))
+            self._badges["Windows Security"] = _shield(node["wsc"].get(k) for k in ("antiVirus", "autoUpdate", "firewall"))
         dfd = node.get("defender") or {}
         if dfd:
             y = []
@@ -268,6 +286,9 @@ class GeneralPanel(Gtk.Box):
                 y.append("SignatureVersion - " + _ok(_esc(dfd["AntivirusSignatureVersion"])))
             if y:
                 rows.append(("Windows Defender", ", ".join(y), None))
+                self._badges["Windows Defender"] = _shield(
+                    "OK" if dfd.get(k) is True else ("BAD" if dfd.get(k) is False else None)
+                    for k in ("RealTimeProtection", "TamperProtected"))
         if node.get("pr"):
             pr = node["pr"]
             pr = pr.values() if isinstance(pr, dict) else pr
@@ -275,9 +296,12 @@ class GeneralPanel(Gtk.Box):
         lsc = security_markup(node.get("lsc"), (("antiVirus", "AV"), ("firewall", "Firewall")))
         if lsc:
             rows.append(("Linux Security", lsc, None))
+            self._badges["Linux Security"] = _shield(node["lsc"].get(k) for k in ("antiVirus", "firewall"))
         av = antivirus_markup(node.get("av"))
         if av:
             rows.append(("Antivirus", av, None))
+            self._badges["Antivirus"] = _shield("OK" if a.get("enabled") is True and a.get("updated") is True else "BAD"
+                                                for a in node.get("av") or [] if isinstance(a, dict) and a.get("product"))
         users = node.get("users") or []
         if users:
             rows.append(("Active Users" if len(users) > 1 else "Active User", _esc(active_users(node)), None))

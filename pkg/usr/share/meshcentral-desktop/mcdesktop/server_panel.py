@@ -25,7 +25,7 @@ from datetime import datetime
 
 from gi.repository import Gtk, Gdk, GLib, Pango
 
-from . import ui, rights
+from . import ui, rights, servericons
 from .client import WebSession
 
 STATS_INTERVAL_MS = 10000
@@ -667,7 +667,11 @@ class MyServerPanel(Gtk.Box):
             text, hint = warning_text(w)
             l = Gtk.Label(xalign=0, wrap=True, selectable=True)
             l.set_markup("<span foreground='#e01b24'><b>WARNING: " + GLib.markup_escape_text(text) + "</b></span>")
-            self.warn_box.pack_start(l, False, False, 0)
+            row = Gtk.Box(spacing=6)
+            row.pack_start(Gtk.Image.new_from_icon_name(servericons.icon("status", "warning", "dialog-warning-symbolic"),
+                                                        Gtk.IconSize.MENU), False, False, 0)
+            row.pack_start(l, True, True, 0)
+            self.warn_box.pack_start(row, False, False, 0)
             if hint:
                 h = Gtk.Label(label=hint, xalign=0, wrap=True, max_width_chars=110)
                 h.get_style_context().add_class("dim-label")

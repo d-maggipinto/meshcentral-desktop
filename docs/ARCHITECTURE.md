@@ -38,6 +38,7 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `winweb.py` | Windows: `WebView2Widget`, Edge WebView2 in a native child window of a GTK widget (WebView2.tlb through comtypes) |
 | `winterm.py` | Windows: the terminal widget, xterm.js inside WebView2 with the part of the VTE API the terminal panel uses |
 | `winkeys.py` | Windows: "Send hotkeys" low-level keyboard hook |
+| `servericons.py` | the signed-in server's own icons: its `/images/` sprite sheets (device types, menu, status) cut like the web UI's CSS, registered as GTK icons, cached per server, refreshed at each sign-in |
 | `winstyle.py` | Windows: the Windows 11 look (style sheet from the system light / dark mode and accent colour, followed live; caption buttons; DWM title bars of dialogs) |
 | `updater.py` | update check (GitHub releases, stable / preview channel), verified download (SHA256SUMS), install per installation type (pkexec apt, Inno Setup, msiexec, portable) |
 | `update_ui.py` | "New version available" card and the Updates dialog |

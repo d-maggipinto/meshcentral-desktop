@@ -214,6 +214,19 @@ the app records its CPU from sign-in in `~/.local/share/meshcentral-desktop/serv
 | `GET /backup.zip` | web session + backup right; the server creates the backup first (up to 2 min); `403 Backup disabled` when `settings.autobackup.backupintervalhours` is -1 |
 | `POST /restoreserver.ashx` | multipart `datafile` (+ `auth`), web session + restore right; replaces the server database and restarts |
 
+## Server icons (public `/images/`)
+
+The web UI draws its icons from sprite sheets in the server's public folder, which a server can override
+(`meshcentral-web/public/images/`). They need no sign-in (`GET <server>/images/<file>`; with a login
+domain, under the domain's path). Cells, left to right, as the web UI's `style.css` cuts them:
+
+| File | Cell | Cells |
+|---|---|---|
+| `icons16.png`, `icons32.png`, `icons64.png` (also 50, 100) | 16 / 32 / 64 px | device type `node.icon` 1..8: desktop, laptop, phone, server, disk / NAS, router, embedded board, virtual machine (`icons256-<icon>-1.png` = large picture) |
+| `leftbar-64.png`, `leftbar-128.png` | 64 / 128 px | `.lb1`..`.lb6`: My Account, My Devices, My Events, My Files, My Users, My Server |
+| `notify16.png`, `notify24.png`, `notify48.png` | 16 / 24 / 48 px | `.NotifyIconTiny1`..`9`: success, error, warning, blocked, info, question, shield warning, shield OK, shield error (login events 107 success, 108 error, 109 blocked, 110 warning) |
+| `images16.png` | 16 px | `.m2` (cell 6) user, `.m4` (cell 8) user group; cells 1..5 are used by inline styles |
+
 ## Server file storage ("My Files")
 
 | Request | Notes |

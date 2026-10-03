@@ -5,7 +5,7 @@ import secrets
 
 from gi.repository import Gtk, Gdk, GLib
 
-from . import ui, rights
+from . import ui, rights, servericons
 
 POWER = {"wake": 100, "off": 2, "reset": 3, "sleep": 4}
 RUN_TYPE = {"Windows Command": 0, "Windows PowerShell": 2, "Linux/macOS Shell": 3}
@@ -136,6 +136,8 @@ class DeviceActions:
         self.name_label = Gtk.Label(xalign=0)
         self.name_label.get_style_context().add_class("dim-label")
         bar.pack_end(self.name_label, True, True, 6)
+        self.node_icon = Gtk.Image(pixel_size=24)         # device type, from the server's icon set
+        bar.pack_end(self.node_icon, False, False, 0)
         return bar
 
     def _power_menu(self):
@@ -180,6 +182,9 @@ class DeviceActions:
             self.items[key].set_sensitive(bool(on))
         self.buttons["power"].set_sensitive(bool(c.wake or c.power))
         self.name_label.set_text(node.get("name", ""))
+        local = (self.win.meshes.get(node.get("meshid")) or {}).get("mtype") == 3
+        self.node_icon.set_from_icon_name(servericons.device_icon(node, online or local, "computer-symbolic"),
+                                          Gtk.IconSize.LARGE_TOOLBAR)
 
     # ---- context menu ------------------------------------------------------
     def context_menu(self, event, node, extra=None):

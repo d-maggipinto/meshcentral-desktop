@@ -5,7 +5,7 @@ import time
 
 from gi.repository import Gtk, Gdk, GLib, Pango
 
-from . import ui, winstyle
+from . import ui, winstyle, servericons
 from .client import PROTO_TERMINAL
 from .general_actions import DeviceActions
 from .device_general import GeneralPanel
@@ -98,6 +98,7 @@ class MainWindow(Gtk.ApplicationWindow):
         self._building = False       # suppress lazy panel creation while tabs are (re)built
         self._pages = {}             # rail page id -> panel (built on first visit)
         self._nav_buttons = {}
+        self._nav_images = {}        # pid -> (Gtk.Image, fallback icon name): server icons replace them
         self._open_node_id = None    # nodeid currently shown (guards selection re-fires)
         self._refresh_timer = None   # debounced device-refresh timer
         self._tree_sig = None        # signature of the last rendered device tree
@@ -164,6 +165,10 @@ class MainWindow(Gtk.ApplicationWindow):
         # even while the remote desktop has the keyboard. Ctrl+Alt+F toggles fullscreen
         # (like NoMachine); Esc is deliberately NOT used, it must reach the remote.
         self.connect("key-press-event", self._on_key)
+        self._icons_off = servericons.listen(self._on_server_icons)
+        # light / dark switch (Windows follows the system live): menu icons may have a dark copy
+        self._theme_sig = Gtk.Settings.get_default().connect(
+            "notify::gtk-application-prefer-dark-theme", lambda *_: GLib.idle_add(self._on_server_icons))
         self.show_all()
         self.content.set_visible_child_name("empty")
         self.load_devices()
@@ -378,7 +383,9 @@ class MainWindow(Gtk.ApplicationWindow):
             b.set_relief(Gtk.ReliefStyle.NONE)
             b.get_style_context().add_class("mcd-rail-btn")
             inner = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=2)
-            img = Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.LARGE_TOOLBAR)
+            img = Gtk.Image.new_from_icon_name(servericons.nav_icon(pid, icon, rail), Gtk.IconSize.LARGE_TOOLBAR)
+            img.set_pixel_size(24)
+            self._nav_images[pid] = (img, icon)
             inner.pack_start(img, False, False, 0)
             cap = Gtk.Label(label=caption)
             cap.get_style_context().add_class("mcd-rail-caption")
@@ -472,7 +479,8 @@ class MainWindow(Gtk.ApplicationWindow):
         self.content = Gtk.Stack()
 
         empty = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
-        img = Gtk.Image.new_from_icon_name("computer-symbolic", Gtk.IconSize.DIALOG)
+        img = self._empty_img = Gtk.Image.new_from_icon_name(servericons.icon("device", 1, "computer-symbolic"),
+                                                             Gtk.IconSize.DIALOG)
         img.set_pixel_size(72)
         img.get_style_context().add_class("dim-label")
         empty.pack_start(img, False, False, 8)
@@ -556,6 +564,7 @@ class MainWindow(Gtk.ApplicationWindow):
     def _tree_signature(self):
         v = self._view
         nodes = tuple(sorted((n["_id"], n.get("meshid"), n.get("name"), n.get("rname"), n.get("conn"), n.get("pwr"),
+                              n.get("icon"),
                               n.get("ip"), n.get("osdesc"), tuple(n.get("tags") or ()), n.get("lastbootuptime"),
                               tuple(sorted(k for k, x in (n.get("sessions") or {}).items() if x)))
                              for n in self.nodes.values()))
@@ -634,7 +643,8 @@ class MainWindow(Gtk.ApplicationWindow):
         return (self.meshes.get(n.get("meshid")) or {}).get("mtype") == 3
 
     def _node_icon(self, n):
-        return "computer-symbolic" if ui.is_online(n) or self._is_local(n) else "network-offline-symbolic"
+        online = ui.is_online(n) or self._is_local(n)
+        return servericons.device_icon(n, online, "computer-symbolic" if online else "network-offline-symbolic")
 
     def _node_sub(self, n):
         if self._is_local(n):
@@ -912,7 +922,8 @@ class MainWindow(Gtk.ApplicationWindow):
         if broadcast:
             card.get_style_context().add_class("mcd-broadcast")
         top = Gtk.Box(spacing=8)
-        icon = Gtk.Image.new_from_icon_name("mail-unread-symbolic" if broadcast else "dialog-information-symbolic",
+        icon = Gtk.Image.new_from_icon_name("mail-unread-symbolic" if broadcast else
+                                            servericons.icon("status", "info", "dialog-information-symbolic"),
                                             Gtk.IconSize.MENU)
         top.pack_start(icon, False, False, 0)
         t = Gtk.Label(xalign=0, ellipsize=Pango.EllipsizeMode.END)
@@ -1005,7 +1016,20 @@ class MainWindow(Gtk.ApplicationWindow):
         ui.message(self, "Disconnected", "The connection to the server was lost.", Gtk.MessageType.WARNING)
         self.app.sign_out()
 
+    def _on_server_icons(self):
+        """The server's icon set arrived or changed: menu, device list, open device, placeholder."""
+        for pid, (img, fallback) in self._nav_images.items():
+            img.set_from_icon_name(servericons.nav_icon(pid, fallback, self.rail), Gtk.IconSize.LARGE_TOOLBAR)
+            img.set_pixel_size(24)
+        self._empty_img.set_from_icon_name(servericons.icon("device", 1, "computer-symbolic"), Gtk.IconSize.DIALOG)
+        self._tree_sig = None
+        self._rebuild_tree()
+        if self.current:
+            self.actions.update(self.current)
+
     def _on_destroy(self, *_):
+        self._icons_off()
+        Gtk.Settings.get_default().disconnect(self._theme_sig)
         if self._refresh_timer:
             GLib.source_remove(self._refresh_timer)
             self._refresh_timer = None

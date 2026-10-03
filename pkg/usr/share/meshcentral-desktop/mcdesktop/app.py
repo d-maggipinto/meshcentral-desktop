@@ -91,6 +91,13 @@ class App(Gtk.Application):
         # server_panel.StatsRecorder), independent of whether My Server is ever opened.
         from .server_panel import StatsRecorder
         self.stats_recorder = StatsRecorder(ctrl, DATA_DIR)
+        # the server's own icons (device types, menu, status), cached per server, refreshed now
+        from . import servericons, client
+        try:                                       # never in the way of signing in: default icons instead
+            servericons.CURRENT = servericons.ServerIcons(ctrl.server.url, DATA_DIR, client.http_ssl_context)
+            servericons.CURRENT.start()
+        except Exception:
+            servericons.CURRENT = None
         self.main_win = MainWindow(self, ctrl)
         # Panels resolve device-group names via app.meshes; share the main window's dict.
         self.meshes = self.main_win.meshes
@@ -101,6 +108,10 @@ class App(Gtk.Application):
             self.updates.show_card()
 
     def sign_out(self):
+        from . import servericons
+        if servericons.CURRENT:
+            servericons.CURRENT.close()
+            servericons.CURRENT = None
         if self.ctrl:
             self.ctrl.close()
             self.ctrl = None

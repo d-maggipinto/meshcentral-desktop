@@ -45,6 +45,10 @@ Current version: **2.28.0**, see the [changelog](CHANGELOG.md).
 ## Features
 
 ### Devices
+- **The server's own icons**: device types (desktop, laptop, phone, server, NAS, router, board, virtual
+  machine), the menu and status badges come from the server you sign in to, so a server with a custom
+  icon set (restyled web interface) looks the same in the app; a standard server shows MeshCentral's
+  icons. Offline devices are shown faded, as on the web page.
 - Device list like the web interface's *My Devices*: status filter (online, offline, sessions,
   starred, tagged and more), seven sort orders, *Show OS name*, stars, and a filter box with the web
   interface's search syntax (`tag:`, `ip:`, `group:`, `os:`, `user:`, `!`, `and`, `or`...). Groups start
@@ -235,7 +239,10 @@ system shortcuts. Choose **Allow**.
 - **TLS**: connections to the server are verified against the system certificate store (on Windows,
   the Windows certificate store), and only
   `https://` servers are accepted, so the password is never sent unencrypted.
-- **Local files**: settings and the app's data folder (WebKit cookies, server stats) are private to
+- **Server icons**: the app downloads the public icon images of the server you sign in to (`/images/`,
+  no sign-in needed), only over HTTPS from that same server, PNG only and size-limited, and caches them
+  in its data folder.
+- **Local files**: settings and the app's data folder (WebKit cookies, server stats, icons) are private to
   your account (0700 folders, 0600 settings). Signing out clears the web sessions, so the next account
   does not inherit them.
 - **Downloads** never write outside the folder you pick: file names from the server or a device are

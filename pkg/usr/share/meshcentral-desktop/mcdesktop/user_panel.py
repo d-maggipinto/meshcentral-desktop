@@ -21,7 +21,7 @@ import time
 
 from gi.repository import Gtk, Gdk, GLib, GdkPixbuf, Pango
 
-from . import ui, rights
+from . import ui, rights, servericons
 from .client import WebSession
 
 FULL = 0xFFFFFFFF
@@ -455,7 +455,10 @@ def show_previous_logins(parent, ctrl, userid=None, title="Previous logins"):
         area = d.get_content_area()
         area.set_spacing(6)
         area.set_border_width(10)
-        store = Gtk.ListStore(str, str, str)
+        store = Gtk.ListStore(str, str, str, str)
+        # web UI badges per event: 107 login, 108 wrong 2nd factor, 109 locked account, 110 invalid login
+        badge = {107: ("success", "emblem-ok-symbolic"), 108: ("error", "dialog-error-symbolic"),
+                 109: ("blocked", "action-unavailable-symbolic"), 110: ("warning", "dialog-warning-symbolic")}
         for e in sorted(msg.get("events") or [], key=lambda e: str(e.get("t")), reverse=True):
             a = [str(x) for x in (e.get("a") or [])]
             if e.get("m") == 107 and len(a) >= 3:
@@ -466,8 +469,10 @@ def show_previous_logins(parent, ctrl, userid=None, title="Previous logins"):
                 what, detail = f"Event {e.get('m')}", ", ".join(a)
             if e.get("tn"):
                 detail += f"  (token: {e['tn']})"
-            store.append([ui.fmt_time(e.get("t")), what, detail])
+            st, fb = badge.get(e.get("m"), ("info", "dialog-information-symbolic"))
+            store.append([ui.fmt_time(e.get("t")), what, detail, servericons.icon("status", st, fb)])
         tv = Gtk.TreeView(model=store)
+        tv.append_column(Gtk.TreeViewColumn("", Gtk.CellRendererPixbuf(), icon_name=3))
         for i, (t, ex) in enumerate((("Time", False), ("Event", False), ("From", True))):
             tv.append_column(ui.text_column(t, i, ex))
         ui.row_tooltip(tv, 2)
