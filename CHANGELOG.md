@@ -7,7 +7,7 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [2.28.0] - 2026-10-03
 ### Added
 - **Windows 11 look** (Windows): Segoe UI, Windows 11 colours, rounded controls and windows, the Windows
   minimise / maximise / close buttons, tabs with an accent underline, an accent marker on the selected
