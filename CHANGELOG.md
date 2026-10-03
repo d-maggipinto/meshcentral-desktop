@@ -13,8 +13,8 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
   server only applies to folders; files and folders are now sent as separate requests.
 - **Device Files on Windows agents:** opening a folder showed nothing, because the agent names the folder
   differently from the request (`C:\` and `C:\/Windows`). Paths are now compared by their parts.
-- **HTTPS transfers with MeshCentral's own certificate:** on Python 3.13 and later (current Kali, the
-  Windows build) My Files, Web-RDP / Web-SSH sign-in and other HTTPS requests failed with "Missing
+- **HTTPS transfers with MeshCentral's own certificate:** on Python 3.13 and later (recent Linux
+  distributions, the Windows build) My Files, Web-RDP / Web-SSH sign-in and other HTTPS requests failed with "Missing
   Authority Key Identifier" even when the certificate was trusted. The chain and host name are still checked.
 - **Updates:** when GitHub's API limit for the address is used up (60 requests per hour, shared by everyone
   behind one public IP) the check now reads the latest release page instead of failing.

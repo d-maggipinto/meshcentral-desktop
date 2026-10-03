@@ -141,7 +141,7 @@ The screenshots were taken on a local test server with sample data.
 ## Requirements
 
 - **Tested on Debian and Debian based distributions only**: Debian 12 or later, Ubuntu 22.04 or
-  later, Kali Linux. Other distributions may work when the same libraries are installed, but they
+  later. Other distributions may work when the same libraries are installed, but they
   are not tested.
 - Python 3.11 or later, GTK 3, WebKitGTK 4.1 (`gir1.2-webkit2-4.1`), VTE 2.91, libsecret.
 - A MeshCentral server you can sign in to (user name, password and, if enabled, a two-factor code).

@@ -817,7 +817,7 @@ class DesktopPanel(Gtk.Box):
 
     # ---- clipboard sync (automatic, both directions) ----------------------------
     # On connect we patch the running agent ONCE (in memory; reverts on agent restart):
-    #  * monitor-info.getXInfo: when it returns an empty display (the user's Kali target),
+    #  * monitor-info.getXInfo: when it returns an empty display (seen on XFCE/LightDM targets),
     #    fall back to DISPLAY/XAUTHORITY of a desktop-user process from /proc;
     #  * clipboard.dispatchWrite (Linux + xclip): keep the xclip that owns the selection
     #    alive until someone else copies, the stock writer SIGKILLs it after 20 s, which
@@ -950,7 +950,7 @@ class DesktopPanel(Gtk.Box):
     # every admin's console, so the clipboard text is never printed that way).
     # Agent-side read, run via console eval (no double quotes / backslashes allowed: it
     # travels inside  eval "<js>" ). Mirrors the agent's own xclip read, but fixes the bug
-    # seen on the user's Kali target: the agent's display lookup (monitor-info getXInfo)
+    # seen on XFCE/LightDM targets: the agent's display lookup (monitor-info getXInfo)
     # returns an EMPTY display, so xclip fails with "Can't open display:". If that happens
     # we take DISPLAY/XAUTHORITY from a process of the desktop user (/proc/<pid>/environ,
     # parsed byte-wise: the agent's Buffer.toString() stops at the first NUL), then run

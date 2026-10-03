@@ -16,7 +16,7 @@ sudo apt install xvfb nodejs npm xclip
 ```
 
 The app is developed and tested on Debian and Debian based distributions (Debian 12, Ubuntu 22.04
-and later, Kali Linux). Keep the code compatible with **Python 3.11** (Debian 12): no Python 3.12
+and later). Keep the code compatible with **Python 3.11** (Debian 12): no Python 3.12
 f-string syntax (backslashes or reused quotes inside `{...}`).
 
 ## Run from source

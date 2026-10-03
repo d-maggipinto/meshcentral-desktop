@@ -314,7 +314,7 @@ jobs:
             echo
             echo "## Downloads"
             echo
-            echo "- \`meshcentral-desktop_${VER}_all.deb\`: Debian / Ubuntu / Kali package (\`sudo apt install ./meshcentral-desktop_${VER}_all.deb\`)"
+            echo "- \`meshcentral-desktop_${VER}_all.deb\`: Debian / Ubuntu package (\`sudo apt install ./meshcentral-desktop_${VER}_all.deb\`)"
             echo "- \`MeshCentralDesktop-${VER}-setup.exe\`: Windows 10 / 11 installer (per user, or all users)"
             echo "- \`MeshCentralDesktop-${VER}.msi\`: Windows installer for managed deployment (Group Policy, Intune)"
             echo "- \`MeshCentralDesktop-${VER}-portable.exe\`: Windows, single file, runs without installation"

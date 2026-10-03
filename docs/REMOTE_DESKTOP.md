@@ -120,7 +120,7 @@ Page alerts are shown as "Message from the server page: …".
 
 ### Why Linux agents need help
 On Linux, when the agent runs as a root service, MeshCentral's clipboard module:
-- looks up the logged-in user's X display, on some systems (seen on Kali with XFCE/LightDM) this
+- looks up the logged-in user's X display, on some systems (seen with XFCE/LightDM) this
   returns an **empty** display, so every read fails with `Can't open display:` and the agent sends no
   reply at all;
 - writes by starting `xclip` as the user and **kills it after 20 seconds**, which empties the remote
