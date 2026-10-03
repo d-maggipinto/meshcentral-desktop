@@ -338,6 +338,10 @@ def http_ssl_context():
     TLS 1.2 or later (tests against a self-signed local rig override this)."""
     ctx = ssl.create_default_context()
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    # Python 3.13+ adds VERIFY_X509_STRICT, which rejects MeshCentral's own self-generated server
+    # certificates ("Missing Authority Key Identifier") even when the user trusts them. Browsers, the
+    # control connection and WebView2 accept them: the chain and the host name are still verified.
+    ctx.verify_flags &= ~getattr(ssl, "VERIFY_X509_STRICT", 0)
     return ctx
 
 
