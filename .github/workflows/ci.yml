@@ -200,6 +200,38 @@ jobs:
           if ((Test-Path $exe) -or $p.ExitCode) { $fail = 1; ".msi: uninstall failed" } else { ".msi: uninstalled" }
           exit $fail
 
+      # The in-app upgrade, for real: the app's hidden helper waits for the app to exit, runs the installer
+      # silently and starts the app again (updater.install_windows), for both installers.
+      - name: In-app upgrade hand-over (install)
+        shell: pwsh
+        run: |
+          $ver = (Get-Content dist\VERSION).Trim()
+          Start-Process "dist\MeshCentralDesktop-$ver-setup.exe" -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/CURRENTUSER","/DIR=$env:LOCALAPPDATA\Programs\MCD-UPD" -Wait
+          $p = Start-Process msiexec -ArgumentList "/i","dist\MeshCentralDesktop-$ver.msi","/qn" -Wait -PassThru
+          if ($p.ExitCode -or -not (Test-Path "$env:LOCALAPPDATA\Programs\MCD-UPD\MeshCentralDesktop.exe")) { exit 1 }
+
+      - name: In-app upgrade hand-over (setup .exe, then .msi)
+        run: |
+          ver=$(cat dist/VERSION)
+          cd smoke
+          inno_exe="$(cygpath -w "$LOCALAPPDATA")\Programs\MCD-UPD\MeshCentralDesktop.exe"
+          msi_exe="$(cygpath -w "$PROGRAMFILES")\MeshCentral Desktop\MeshCentralDesktop.exe"
+          python ../scripts/windows/updater_smoke.py inno "$(cygpath -w ../dist/MeshCentralDesktop-$ver-setup.exe)" "$inno_exe"
+          powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/windows/updater_wait.ps1 -Exe "$inno_exe" -CopyListFile updater-inno.copy || rc=1
+          python ../scripts/windows/updater_smoke.py msi "$(cygpath -w ../dist/MeshCentralDesktop-$ver.msi)" "$msi_exe"
+          powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/windows/updater_wait.ps1 -Exe "$msi_exe" -CopyListFile updater-msi.copy || rc=1
+          exit ${rc:-0}
+
+      - name: In-app upgrade hand-over (clean up)
+        if: always()
+        shell: pwsh
+        run: |
+          $ver = (Get-Content dist\VERSION).Trim()
+          Get-Process MeshCentralDesktop -ErrorAction SilentlyContinue | Stop-Process -Force
+          $u = Get-ChildItem "$env:LOCALAPPDATA\Programs\MCD-UPD\unins*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          if ($u) { Start-Process $u.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait }
+          Start-Process msiexec -ArgumentList "/x","dist\MeshCentralDesktop-$ver.msi","/qn" -Wait
+
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         if: always()
         with:

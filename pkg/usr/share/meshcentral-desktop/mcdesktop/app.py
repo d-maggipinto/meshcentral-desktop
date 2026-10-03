@@ -36,6 +36,8 @@ class App(Gtk.Application):
         self.login_win = None
         self.main_win = None
         self._web_context = None
+        from .update_ui import UpdateUI
+        self.updates = UpdateUI(self)
 
     # ---- config ------------------------------------------------------------
     def load_config(self):
@@ -91,6 +93,10 @@ class App(Gtk.Application):
         # Panels resolve device-group names via app.meshes; share the main window's dict.
         self.meshes = self.main_win.meshes
         self.main_win.present()
+        # update check: at start and every 12 h (Updates dialog: on / off, channel)
+        self.updates.start()
+        if self.updates.info is not None and self.config.get("update_skip") != self.updates.info["text"]:
+            self.updates.show_card()
 
     def sign_out(self):
         if self.ctrl:

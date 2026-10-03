@@ -1009,7 +1009,8 @@ class MainWindow(Gtk.ApplicationWindow):
     def _app_menu(self):
         pop = Gtk.Popover()
         box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, margin=6)
-        for label, cb in (("Sign out", lambda *_: self.app.sign_out()),
+        for label, cb in (("Check for updates…", lambda *_: self.app.updates.open_dialog(check=True)),
+                          ("Sign out", lambda *_: self.app.sign_out()),
                           ("About", self._about)):
             b = Gtk.ModelButton(text=label)
             b.connect("clicked", cb)
