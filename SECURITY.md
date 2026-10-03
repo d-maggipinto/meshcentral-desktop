@@ -26,6 +26,11 @@ gh attestation verify meshcentral-desktop_<version>_all.deb --repo d-maggipinto/
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
+The Windows files (since 2.26.0) are covered the same way (`gh attestation verify
+MeshCentralDesktop-<version>-setup.exe --repo d-maggipinto/meshcentral-desktop`; on Windows,
+`Get-FileHash` shows the SHA-256 to compare with `SHA256SUMS`). They are not Authenticode code-signed
+yet.
+
 The workflow pins every action to a commit SHA, gives the build a read-only token and only the
 release job write access.
 

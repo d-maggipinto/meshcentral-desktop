@@ -7,17 +7,24 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [2.26.0] - 2026-10-03
 ### Added
-- **Windows version in development** (not released yet): the same app on Windows 10 / 11 with Edge
-  WebView2 for the embedded remote desktop and chat, an xterm.js terminal, Windows Credential Manager,
-  Windows notifications and a "Send hotkeys" keyboard hook; setup `.exe` (Inno Setup) and `.msi` (WiX)
-  installers. Built and tested on Windows in CI, including against a real Windows agent. See
-  [docs/WINDOWS.md](docs/WINDOWS.md).
+- **Windows version (preview)**: the same app on Windows 10 / 11, with Edge WebView2 for the embedded
+  remote desktop and chat, an xterm.js terminal, Windows Credential Manager for the saved password,
+  Windows notifications, a single running copy, and a "Send hotkeys" keyboard hook (Windows key,
+  Win+key, Alt+Tab, Alt+F4, Ctrl+Esc go to the remote computer). Downloads: setup `.exe` (per user or
+  all users), `.msi` (Group Policy / Intune) and a portable single-file `.exe`. Built and tested on
+  Windows in CI, including the whole app against a real Windows agent and a silent install of each
+  installer; checked on Windows 11. **Not code-signed yet**: Windows 11 Smart App Control must be off.
+  See [docs/WINDOWS.md](docs/WINDOWS.md).
+- `--selftest <file.json>`: checks an installed or bundled copy (modules, GTK and icons, TLS with the
+  system certificate store and, on Windows, WebView2, the terminal and Credential Manager).
 
 ### Changed
 - The embedded web views (remote desktop, chat, Web-VNC / RDP / SSH) and the saved password go through
   a small platform layer (`webview.py`, `osdep.py`); Linux behaviour is unchanged.
+- The main window's starting size fits the screen's work area.
+- Releases now also carry the Windows files, in `SHA256SUMS` and the build provenance.
 
 ## [2.25.2] - 2026-10-02
 ### Added

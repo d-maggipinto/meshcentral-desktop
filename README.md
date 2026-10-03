@@ -3,21 +3,24 @@
 [![CI](https://github.com/d-maggipinto/meshcentral-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/d-maggipinto/meshcentral-desktop/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-A native Linux desktop client for [MeshCentral](https://github.com/Ylianst/MeshCentral). Manage your
-devices, open remote desktops, terminals and file transfers, and administer the server from a GTK
-application instead of a browser tab.
+A native desktop client for [MeshCentral](https://github.com/Ylianst/MeshCentral) on **Linux** and
+**Windows**. Manage your devices, open remote desktops, terminals and file transfers, and administer
+the server from a desktop application instead of a browser tab.
 
 > **Unofficial project.** MeshCentral Desktop is an independent client made by CYVELION LTD. It is not
 > affiliated with, endorsed by or supported by the MeshCentral project. It works with a standard,
 > unmodified MeshCentral server.
 
 - **Native interface** (GTK 3): navigation rail, device tree, grouped device pages, dark theme,
-  desktop notifications.
+  desktop notifications. The same application on Linux and Windows.
 - **Standard MeshCentral protocol**: the app talks to your existing server over the same control
   channel as the MeshCentral web interface. No server changes or plugins are needed.
-- **Debian package** (`.deb`), developed and tested on Debian and Debian based distributions.
+- **Linux**: Debian package (`.deb`), developed and tested on Debian and Debian based distributions.
+- **Windows 10 / 11** (preview): setup `.exe`, `.msi` for managed deployment, and a portable
+  single-file `.exe`. Remote desktop, terminal and chat are embedded with Microsoft Edge WebView2.
+  Not code-signed yet, see [Windows](#windows).
 
-Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
+Current version: **2.26.0**, see the [changelog](CHANGELOG.md).
 
 ![Users list](docs/images/users.png)
 
@@ -27,6 +30,7 @@ Current version: **2.24.0**, see the [changelog](CHANGELOG.md).
 - [Screenshots](#screenshots)
 - [Requirements](#requirements)
 - [Install](#install)
+- [Windows](#windows)
 - [Usage](#usage)
 - [Security notes](#security-notes)
 - [Known limitations](#known-limitations)
@@ -168,6 +172,33 @@ The version is shown in the window subtitle (`user @ server · vX.Y.Z`) and in *
 sudo apt remove meshcentral-desktop
 ```
 
+## Windows
+
+The Windows version (preview, since 2.26.0) is built from the same source code and has the same
+features; the parts that depend on Linux libraries have Windows equivalents (Edge WebView2 for the
+remote desktop and chat, an xterm.js terminal, Windows Credential Manager, Windows notifications).
+Details, differences and the build: [docs/WINDOWS.md](docs/WINDOWS.md).
+
+Download one of these from the [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases):
+
+| File | Use |
+|---|---|
+| `MeshCentralDesktop-<version>-setup.exe` | installer: for your account (no administrator needed) or for all users; Start menu entry, uninstall from *Settings > Apps* |
+| `MeshCentralDesktop-<version>.msi` | per-machine installer for managed deployment (Group Policy, Intune, `msiexec /i ... /qn`) |
+| `MeshCentralDesktop-<version>-portable.exe` | single file, runs without installation (starts more slowly) |
+
+Requirements: Windows 10 1809 or later / Windows 11, 64-bit, with the Microsoft Edge WebView2 Runtime
+(part of Windows 11 and current Windows 10).
+
+**Not code-signed yet.** Windows SmartScreen shows "Windows protected your PC": choose *More info >
+Run anyway*. Windows 11 **Smart App Control** blocks unsigned apps, so it must be off
+(*Windows Security > App & browser control > Smart App Control*). Code signing is planned.
+
+Preview status: sign-in, devices, Registry, Files, the terminal, the remote desktop, the installers
+and notifications are tested on Windows; some features (Send hotkeys, clipboard sync, chat and
+Web-VNC / RDP / SSH windows, My Files transfers, server charts, account settings) are not yet tested
+there. Please report problems on the issue tracker.
+
 ## Usage
 
 1. Start **MeshCentral Desktop** from the application menu.
@@ -188,9 +219,11 @@ system shortcuts. Choose **Allow**.
 ## Security notes
 
 - **Credentials**: the password is stored only if you tick *Remember password*, and then only in the
-  system keyring (libsecret, GNOME Keyring). Settings are in `~/.config/meshcentral-desktop/config.json`
-  and contain no secrets.
-- **TLS**: connections to the server are verified against the system certificate store, and only
+  system keyring (libsecret, GNOME Keyring) or, on Windows, in the Windows Credential Manager.
+  Settings are in `~/.config/meshcentral-desktop/config.json` (Windows:
+  `%LOCALAPPDATA%\meshcentral-desktop\config.json`) and contain no secrets.
+- **TLS**: connections to the server are verified against the system certificate store (on Windows,
+  the Windows certificate store), and only
   `https://` servers are accepted, so the password is never sent unencrypted.
 - **Local files**: settings and the app's data folder (WebKit cookies, server stats) are private to
   your account (0700 folders, 0600 settings). Signing out clears the web sessions, so the next account
@@ -230,7 +263,8 @@ Please report security problems privately, see [SECURITY.md](SECURITY.md).
   a web browser.
 - *Previous logins* lists only sign-ins to the web interface; the server does not record app
   sign-ins there.
-- Only tested on Debian based distributions.
+- Linux: only tested on Debian based distributions.
+- Windows: preview, not code-signed (see [Windows](#windows)).
 
 ## Building from source
 
@@ -251,8 +285,8 @@ Build steps, the local test server, the testing rules and the release checklist 
 
 ## Roadmap
 
-In development: the **Windows app** (setup `.exe` and `.msi`, same features, built and tested on Windows
-in CI), see [docs/WINDOWS.md](docs/WINDOWS.md).
+Windows: code signing, testing of the remaining features, a Windows 11 look. See
+[docs/WINDOWS.md](docs/WINDOWS.md).
 
 Planned next: the full remote desktop toolbar (guest sharing, refresh, session recording,
 screenshots, wallpaper toggle, open a web address, notifications and chat on the remote computer),
@@ -268,7 +302,7 @@ security improvements such as signed releases. See [ROADMAP.md](ROADMAP.md).
 | [docs/REMOTE_DESKTOP.md](docs/REMOTE_DESKTOP.md) | remote desktop, keyboard and clipboard internals |
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | how MeshCentral rights map to app features |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | build, tests and release |
-| [docs/WINDOWS.md](docs/WINDOWS.md) | the Windows version (in development): differences, installers, build, tests |
+| [docs/WINDOWS.md](docs/WINDOWS.md) | the Windows version: differences, installers, build, tests |
 | [ROADMAP.md](ROADMAP.md) | planned features |
 | [CHANGELOG.md](CHANGELOG.md) | release history |
 

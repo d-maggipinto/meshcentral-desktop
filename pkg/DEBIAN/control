@@ -1,5 +1,5 @@
 Package: meshcentral-desktop
-Version: 2.25.2
+Version: 2.26.0
 Section: net
 Priority: optional
 Architecture: all
@@ -14,6 +14,8 @@ Description: Unofficial native desktop client for MeshCentral
  agent console, server storage, server statistics, users, user groups and
  account settings. It signs in with a username, password and optional
  two-factor code and talks to the server over the documented control channel.
+ .
+ The same application is also available for Windows.
  .
  This is an independent project by CYVELION LTD. It is not affiliated with or
  endorsed by the MeshCentral project.

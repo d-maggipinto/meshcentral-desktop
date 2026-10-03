@@ -1,0 +1,38 @@
+MeshCentral Desktop for Windows: third-party components
+=======================================================
+
+MeshCentral Desktop is licensed under the Apache License 2.0 (see LICENSE and NOTICE).
+The Windows build bundles the components below, unmodified. Their licence texts are in the
+"licenses" folder of the installation (as shipped by the MSYS2 project) or listed here.
+
+Component                       Licence                         Source
+------------------------------  ------------------------------  -------------------------------------------
+Python 3                        PSF License                     https://www.python.org
+GTK 3, GLib, GIO, GDK-Pixbuf,   LGPL 2.1 or later               https://gitlab.gnome.org/GNOME
+  Pango, ATK, libepoxy           (libepoxy: MIT)
+PyGObject                       LGPL 2.1 or later               https://gitlab.gnome.org/GNOME/pygobject
+cairo                           LGPL 2.1 or MPL 1.1             https://cairographics.org
+pycairo                         LGPL 2.1 or MPL 1.1             https://github.com/pygobject/pycairo
+HarfBuzz, FriBidi, fontconfig,  MIT / LGPL 2.1 / MIT-style /    see the "licenses" folder
+  FreeType, libpng, zlib,        FreeType License / zlib /
+  pixman, libffi, libiconv,      MIT / LGPL / BSD and others
+  gettext, PCRE2, expat, bzip2,
+  brotli, graphite2, libjpeg,
+  libtiff, libwebp
+OpenSSL                         Apache License 2.0              https://www.openssl.org
+Adwaita and hicolor icon        LGPL 3 or CC BY-SA 3.0 /        https://gitlab.gnome.org/GNOME
+  themes                         GPL 2 or later (hicolor)
+websocket-client                Apache License 2.0              https://github.com/websocket-client/websocket-client
+comtypes                        MIT                             https://github.com/enthought/comtypes
+xterm.js 6.0.0, addon-fit       MIT                             https://github.com/xtermjs/xterm.js
+  (licence files in mcdesktop\assets\xterm)
+Microsoft Edge WebView2 Loader  Microsoft WebView2 SDK licence  https://www.nuget.org/packages/Microsoft.Web.WebView2
+  (WebView2Loader.dll,           (redistributable)
+  WebView2.tlb)
+MSYS2 / mingw-w64 runtime       ZPL 2.1, MIT and others         https://www.msys2.org
+
+The LGPL libraries are used as separate dynamic libraries (DLL files in the installation folder),
+which may be replaced with compatible builds. Their source code is available from the projects
+above and from the MSYS2 package repository (https://packages.msys2.org).
+
+The Microsoft Edge WebView2 Runtime itself is not included: it is part of Windows.

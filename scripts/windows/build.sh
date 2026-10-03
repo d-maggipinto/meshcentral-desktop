@@ -13,5 +13,6 @@ python scripts/windows/make_meta.py "$VER"
 python -c "import sys, comtypes.client; comtypes.client.GetModule(sys.argv[1])" "$(cygpath -w "$PWD/build/webview2/WebView2.tlb")"
 PYTHONPATH="$PWD/pkg/usr/share/meshcentral-desktop" pyinstaller --noconfirm --clean \
   --distpath dist --workpath build/pyinstaller packaging/windows/meshcentral-desktop.spec
+mv -f dist/MeshCentralDesktop-portable.exe "dist/MeshCentralDesktop-$VER-portable.exe"
 echo "$VER" > dist/VERSION
-du -sh dist/MeshCentralDesktop
+du -sh dist/MeshCentralDesktop "dist/MeshCentralDesktop-$VER-portable.exe"

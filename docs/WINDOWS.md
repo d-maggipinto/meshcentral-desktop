@@ -5,9 +5,12 @@ The interface is the same GTK application; the parts that depend on Linux-only l
 equivalents. Nothing opens in a browser: the remote desktop, the terminal and the chat windows are
 embedded in the app.
 
-**Status: in development, not released yet.** Every change is built and tested on a Windows machine in
-CI (see [Tests](#tests)); the installers are published with a release once they have also been checked
-by hand on Windows 11.
+**Status: preview since 2.26.0, not code-signed yet.** Every change is built and tested on a Windows
+machine in CI (see [Tests](#tests)) and checked on Windows 11. Tested on Windows so far: sign-in, the
+device list, Registry, Files, the terminal (cmd and PowerShell, admin and user), the remote desktop,
+notifications, the saved password and the installers. Not yet tested there: Send hotkeys, clipboard
+sync, the chat and Web-VNC / RDP / SSH windows, My Files transfers, the server charts and the account
+settings.
 
 ## What is different on Windows
 
@@ -44,8 +47,9 @@ Notes:
 |---|---|
 | `MeshCentralDesktop-<version>-setup.exe` | Inno Setup wizard. Installs for the current user (no administrator needed) or, if chosen, for all users. Start menu entry, optional desktop shortcut, uninstall from *Settings > Apps*. Closes a running copy before upgrading. |
 | `MeshCentralDesktop-<version>.msi` | Per-machine Windows Installer package for managed deployment (Group Policy, Intune, `msiexec /i ... /qn`). Major upgrades replace older versions. |
+| `MeshCentralDesktop-<version>-portable.exe` | Single file, runs without installation. It unpacks itself to a temporary folder at each start, so it starts more slowly than the installed copy. Settings are the same as the installed app's. |
 
-Both install the same program folder (`MeshCentralDesktop.exe` with its own Python, GTK, the WebView2
+The setup `.exe` and the `.msi` install the same program folder (`MeshCentralDesktop.exe` with its own Python, GTK, the WebView2
 loader and xterm.js). Settings are kept in `%LOCALAPPDATA%\meshcentral-desktop`, the web view data in
 `%LOCALAPPDATA%\MeshCentralDesktop\webview2`.
 

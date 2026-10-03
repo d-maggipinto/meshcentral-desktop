@@ -27,13 +27,14 @@ The goal is to offer every action of the MeshCentral web viewer's toolbar in the
 
 ## 2. More platforms
 
-MeshCentral Desktop runs on Linux today and is tested on Debian and Debian based distributions.
+MeshCentral Desktop runs on Linux (tested on Debian and Debian based distributions) and, since 2.26.0,
+on Windows 10 / 11 as a preview (see [docs/WINDOWS.md](docs/WINDOWS.md)).
 
 | Feature | Status | Notes |
 |---|---|---|
-| **Test with Windows and macOS remote computers** | Planned | Verify remote desktop, terminal (PowerShell), files, processes, services and the other tools against Windows and macOS agents, and document the differences (for example Windows services, macOS screen recording permission). |
-| **Windows app** | Planned | A native Windows client with an installer. The current app is built on GTK 3, WebKitGTK and VTE, and WebKitGTK and VTE are not available on Windows, so this needs a decision on the toolkit first (for example a cross-platform toolkit with an embedded web engine for the MeshCentral viewer). The protocol layer (`client.py`) and the permission rules (`rights.py`) can be shared. |
-| **macOS app** | Planned | A native macOS client, signed and notarised, distributed as a `.dmg`. Same toolkit decision as the Windows app. |
+| **Test with Windows and macOS remote computers** | Partly done | Windows agents: Registry, terminal (cmd and PowerShell, admin and user), files and the remote desktop are tested (Windows Server 2025 in CI, Windows 11). Still to do: processes, services and the other tools on Windows, and everything on macOS agents (for example the screen recording permission). |
+| **Windows app** | Preview (2.26.0) | Same GTK code base; Edge WebView2 replaces WebKitGTK, xterm.js replaces VTE, Windows Credential Manager replaces the keyring. Setup `.exe`, `.msi` and portable `.exe`, built and tested on Windows in CI. Still to do: code signing (Azure Artifact Signing), testing the remaining features on Windows, a Windows 11 look. |
+| **macOS app** | Planned | A native macOS client, signed and notarised, distributed as a `.dmg`, using the same approach as the Windows app (GTK with the system web view). |
 | **Test the client on more Linux distributions** | Planned | Fedora, Arch and openSUSE with the same libraries, then document the required packages. |
 
 ## 3. User interface

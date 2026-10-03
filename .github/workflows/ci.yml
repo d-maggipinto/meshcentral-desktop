@@ -128,10 +128,15 @@ jobs:
       - name: Bundle (PyInstaller)
         run: scripts/windows/build.sh
 
-      - name: Self-test of the bundled app
+      - name: Self-test of the bundled app and the portable .exe
         run: |
+          ver=$(cat dist/VERSION)
           ./dist/MeshCentralDesktop/MeshCentralDesktop.exe --selftest "$(cygpath -w "$PWD/smoke/selftest-bundle.json")" || rc=$?
-          cat smoke/selftest-bundle.json | python -c "import json,sys;r=json.load(sys.stdin);[print(k, v if not isinstance(v,dict) else (v['ok'], v.get('value', v.get('error')))) for k,v in r.items() if k!='modules']"
+          ./dist/MeshCentralDesktop-$ver-portable.exe --selftest "$(cygpath -w "$PWD/smoke/selftest-portable.json")" || rc=$?
+          for f in smoke/selftest-bundle.json smoke/selftest-portable.json; do
+            echo "== $f"
+            python -c "import json,sys;r=json.load(open(sys.argv[1]));[print(k, v if not isinstance(v,dict) else (v['ok'], v.get('value', v.get('error')))) for k,v in r.items() if k!='modules']" "$f"
+          done
           exit ${rc:-0}
 
       - name: Sign the app and its libraries (when a code-signing certificate is configured)
@@ -271,6 +276,9 @@ jobs:
             echo "- \`meshcentral-desktop_${VER}_all.deb\`: Debian / Ubuntu / Kali package (\`sudo apt install ./meshcentral-desktop_${VER}_all.deb\`)"
             echo "- \`MeshCentralDesktop-${VER}-setup.exe\`: Windows 10 / 11 installer (per user, or all users)"
             echo "- \`MeshCentralDesktop-${VER}.msi\`: Windows installer for managed deployment (Group Policy, Intune)"
+            echo "- \`MeshCentralDesktop-${VER}-portable.exe\`: Windows, single file, runs without installation"
+            echo ""
+            echo "The Windows files are a **preview** and are **not code-signed** yet: SmartScreen shows a warning (More info > Run anyway) and Windows 11 Smart App Control must be off. See docs/WINDOWS.md."
             echo "- \`meshcentral-desktop-${VER}.tar.gz\`, \`meshcentral-desktop-${VER}.zip\`: source code"
             echo "- \`SHA256SUMS\`: checksums, verify with \`sha256sum -c SHA256SUMS\`"
             echo "- Build provenance: \`gh attestation verify meshcentral-desktop_${VER}_all.deb --repo ${GITHUB_REPOSITORY}\`"

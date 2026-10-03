@@ -20,6 +20,9 @@ datas = [
     (os.path.join(BUILD, "meshcentral-desktop.ico"), "."),
     (os.path.join(ROOT, "LICENSE"), "."),
     (os.path.join(ROOT, "NOTICE"), "."),
+    (os.path.join(SPECPATH, "THIRD-PARTY-NOTICES.txt"), "."),
+    # licence texts of the bundled MSYS2 packages (Python, GTK, GLib, cairo, Pango, OpenSSL...)
+    (os.path.join(sys.prefix, "share", "licenses"), "licenses"),
 ]
 # the app icon as PNG only: GTK would pick the scalable SVG, and the bundle has no SVG image loader
 for _size in (16, 24, 32, 48, 64, 128, 256):
@@ -51,3 +54,17 @@ exe = EXE(
     version=os.path.join(BUILD, "version_info.txt"),
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="MeshCentralDesktop")
+
+# Portable single-file .exe (no installation): same app, unpacked to a temporary folder at each start,
+# so it starts more slowly than the installed copy.
+portable = EXE(
+    pyz,
+    a.scripts,
+    a.binaries,
+    a.datas,
+    [("X utf8_mode=1", None, "OPTION")],
+    name="MeshCentralDesktop-portable",
+    console=False,
+    icon=os.path.join(BUILD, "meshcentral-desktop.ico"),
+    version=os.path.join(BUILD, "version_info.txt"),
+)
