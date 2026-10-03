@@ -7,6 +7,12 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [2.26.1] - 2026-10-03
+### Fixed
+- **Windows**: the server CPU and memory gauges, the server statistics charts and the device power timeline
+  stayed empty. The Windows build left out the cairo module that GTK uses to hand drawing to Python; it is
+  now included, and the self-test checks that custom drawing works.
+
 ## [2.26.0] - 2026-10-03
 ### Added
 - **Windows version (preview)**: the same app on Windows 10 / 11, with Edge WebView2 for the embedded

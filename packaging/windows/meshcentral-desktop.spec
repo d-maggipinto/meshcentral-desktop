@@ -30,7 +30,10 @@ for _size in (16, 24, 32, 48, 64, 128, 256):
     datas.append((os.path.join(ROOT, "pkg", "usr", _d, "meshcentral-desktop.png"), _d))
 binaries = [(os.path.join(BUILD, "webview2", "WebView2Loader.dll"), os.path.join("mcdesktop", "webview2"))]
 hidden = (collect_submodules("mcdesktop") + collect_submodules("comtypes.gen")
-          + ["comtypes.client", "websocket"])
+          + ["comtypes.client", "websocket",
+             # pycairo: GTK's "draw" signal hands Python a cairo.Context through gi._gi_cairo, which
+             # needs the cairo module; nothing imports it by name, so without this every chart is blank
+             "cairo", "gi._gi_cairo"])
 
 a = Analysis(
     [os.path.join(APP, "main.py")],

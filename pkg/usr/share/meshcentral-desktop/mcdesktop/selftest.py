@@ -64,6 +64,28 @@ def run(out_path):
                 "png_loader": "png" in [f.get_name() for f in GdkPixbuf.Pixbuf.get_formats()]}
     _check(r, "gtk", gtk)
 
+    def cairo_drawing():
+        # custom-drawn widgets (server gauges, statistics charts) get a cairo.Context in "draw"
+        import gi
+        gi.require_foreign("cairo")
+        import cairo
+        from gi.repository import Gtk
+        surf = cairo.ImageSurface(cairo.FORMAT_ARGB32, 40, 40)
+        cr = cairo.Context(surf)
+        drawn = []
+        area = Gtk.DrawingArea()
+        area.set_size_request(40, 40)
+        area.connect("draw", lambda w, c: drawn.append(type(c).__name__))
+        win = Gtk.OffscreenWindow()
+        win.add(area)
+        win.show_all()
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+        cr.set_source_rgb(1, 0, 0)
+        cr.paint()
+        return {"pycairo": cairo.version, "draw_signal_context": drawn[:1] == ["Context"]}
+    _check(r, "cairo_drawing", cairo_drawing)
+
     def tls():
         ctx = ssl.create_default_context()
         with socket.create_connection(("www.microsoft.com", 443), timeout=15) as s:
