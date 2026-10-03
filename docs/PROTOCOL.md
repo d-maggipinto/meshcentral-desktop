@@ -219,7 +219,7 @@ the app records its CPU from sign-in in `~/.local/share/meshcentral-desktop/serv
 | Request | Notes |
 |---|---|
 | `{action:'files'}` | `{action:'files', filetree:{n:'Root', f:{<user id>:{t:1, n:'My Files', f, maxbytes}, <mesh id>:{t:4, …}}}}`; entries `t` 2 folder, 3 file (`s` size, `d` mtime ms); re-sent after every change |
-| `{action:'fileoperation', fileop, path:[rootid, sub…], …}` | `createfolder` (newfolder), `delete` (delfiles, rec), `rename` (oldname, newname), `copy` / `move` (scpath, names), `get` (file → base64 `data`, < 200 KB), `set` (file, data) |
+| `{action:'fileoperation', fileop, path:[rootid, sub…], …}` | `createfolder` (newfolder), `delete` (delfiles, rec: `rec:true` only works on folders, on a file it fails silently; send files with `rec:false`), `rename` (oldname, newname), `copy` / `move` (scpath, names), `get` (file → base64 `data`, < 200 KB), `set` (file, data) |
 | `POST /uploadfile.ashx` | multipart: `link` = URL-encoded `<rootid>/<sub…>`, `auth` = control-channel auth cookie, `files` |
 | `GET /downloadfile.ashx?link=<rootid>/<sub…>/<file>` | requires a **web session** |
 

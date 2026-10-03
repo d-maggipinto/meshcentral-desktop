@@ -268,7 +268,15 @@ class ServerFilesPanel(Gtk.Box):
             return
         if ui.confirm(self.get_toplevel(), f"Delete {len(names)} item(s)?",
                       ", ".join(names[:6]) + (" …" if len(names) > 6 else ""), "Delete", destructive=True):
-            self._op(fileop="delete", delfiles=names, rec=True)
+            # The server's recursive delete only handles folders (on a file it fails silently and the
+            # file stays), and a plain delete only removes files and empty folders: one request each.
+            sel = self._selected()
+            files = [k for k, is_dir, _s in sel if not is_dir]
+            dirs = [k for k, is_dir, _s in sel if is_dir]
+            if files:
+                self._op(fileop="delete", delfiles=files, rec=False)
+            if dirs:
+                self._op(fileop="delete", delfiles=dirs, rec=True)
 
     def clip(self, op):
         names = self._names()

@@ -7,6 +7,18 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Fixed
+- **My Files: Delete left plain files in place.** The app always asked for a recursive delete, which the
+  server only applies to folders; files and folders are now sent as separate requests.
+- **Device Files on Windows agents:** opening a folder showed nothing, because the agent names the folder
+  differently from the request (`C:\` and `C:\/Windows`). Paths are now compared by their parts.
+- **HTTPS transfers with MeshCentral's own certificate:** on Python 3.13 and later (current Kali, the
+  Windows build) My Files, Web-RDP / Web-SSH sign-in and other HTTPS requests failed with "Missing
+  Authority Key Identifier" even when the certificate was trusted. The chain and host name are still checked.
+- **Updates:** when GitHub's API limit for the address is used up (60 requests per hour, shared by everyone
+  behind one public IP) the check now reads the latest release page instead of failing.
+
 ## [2.27.0] - 2026-10-03
 ### Added
 - **In-app updates** (Linux and Windows): the app checks this project's GitHub releases at start and every

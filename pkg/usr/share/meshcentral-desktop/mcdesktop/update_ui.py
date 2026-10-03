@@ -192,7 +192,8 @@ class UpdateUI:
         if info["kind"] != "source" and not info.get("asset"):
             how = "This release has no %s for this installation: see the release page." % info["asset_name"]
         self.how.set_text(how)
-        self.notes.get_buffer().set_text(_plain(info["notes"]) or "No release notes.")
+        self.notes.get_buffer().set_text(_plain(info["notes"]) or
+                                         "Release notes: %s" % info.get("page", updater.RELEASES_PAGE))
         self.notes_sw.show_all()
         self.skip_btn.show()
         self.later_btn.set_label("Later")

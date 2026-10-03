@@ -24,6 +24,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -106,10 +107,29 @@ class Updater:
         return self._opener.open(req, timeout=timeout)
 
     # ---- check -----------------------------------------------------------------------
+    def _latest_without_api(self):
+        """GitHub's API allows 60 anonymous requests per hour per address (shared by everyone behind
+        one public IP). Without it: the "latest release" page redirects to its tag, and the release
+        files have fixed URLs. No release notes in that case. -> releases list like the API's"""
+        page = RELEASES_PAGE + "/latest"
+        with self._get(page) as r:
+            tag = r.geturl().rstrip("/").rsplit("/", 1)[-1]
+        if not parse_version(tag):
+            raise ValueError("the latest release could not be identified")
+        names = [asset_name(k, parse_version(tag)) for k in ("deb", "inno", "msi", "portable")] + ["SHA256SUMS"]
+        base = "https://github.com/%s/releases/download/%s/" % (REPO, tag)
+        return [{"tag_name": tag, "prerelease": False, "draft": False, "html_url": RELEASES_PAGE + "/tag/" + tag,
+                 "body": "", "assets": [{"name": n, "browser_download_url": base + n} for n in names]}]
+
     def latest(self, channel="stable"):
         """The newest release for the channel, as info dict, or None if this copy is up to date."""
-        with self._get(self.api) as r:
-            releases = json.loads(r.read().decode("utf-8"))
+        try:
+            with self._get(self.api) as r:
+                releases = json.loads(r.read().decode("utf-8"))
+        except urllib.error.HTTPError as ex:
+            if ex.code not in (403, 429):                 # rate limited: use the release page instead
+                raise
+            releases = self._latest_without_api()
         best = None
         for rel in releases if isinstance(releases, list) else []:
             if rel.get("draft") or (rel.get("prerelease") and channel != "preview"):

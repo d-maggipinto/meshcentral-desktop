@@ -10,6 +10,7 @@ handshake.
 import json
 import os
 import random
+import re
 import struct
 import tempfile
 
@@ -214,10 +215,15 @@ class FilesPanel(Gtk.Box):
         elif action == "refresh":
             self.refresh()
 
+    @staticmethod
+    def _same_path(a):
+        """Compare paths the agent's way: Windows agents answer "C:\\" for the requested "C:\\" folder and
+        "C:\\Windows" for "C:\\/Windows", so separators and their repetition must not matter."""
+        return re.sub("/+", "/", (a or "").replace("\\", "/")).strip("/")
+
     def _show_listing(self, msg):
         # Only apply if it matches the folder we asked for.
-        p = (msg.get("path") or "").replace("\\", "/").strip("/")
-        if p != self.cur_path.strip("/"):
+        if self._same_path(msg.get("path")) != self._same_path(self.cur_path):
             return
         self.store.clear()
         entries = msg.get("dir") or []
