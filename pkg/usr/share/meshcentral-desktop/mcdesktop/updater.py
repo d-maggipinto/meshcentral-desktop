@@ -185,15 +185,20 @@ class Updater:
 
 # ---- install ---------------------------------------------------------------------------
 _WIN_SCRIPT = r"""
-$ErrorActionPreference = 'SilentlyContinue'
-Wait-Process -Id $env:MCD_UPD_PID -Timeout 120
+$ErrorActionPreference = 'Continue'
+Start-Transcript -Path $env:MCD_UPD_LOG -Append | Out-Null
+"update helper: waiting for process $env:MCD_UPD_PID, then $env:MCD_UPD_KIND $env:MCD_UPD_FILE"
+Wait-Process -Id $env:MCD_UPD_PID -Timeout 120 -ErrorAction SilentlyContinue
 if ($env:MCD_UPD_KIND -eq 'msi') {
   $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"' + $env:MCD_UPD_FILE + '"'), '/passive', '/norestart') -Wait -PassThru
 } else {
   $p = Start-Process $env:MCD_UPD_FILE -ArgumentList @('/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
 }
+"installer exit code: $($p.ExitCode)"
 Remove-Item -LiteralPath $env:MCD_UPD_FILE -Force
 Start-Process $env:MCD_UPD_APP
+"started $env:MCD_UPD_APP"
+Stop-Transcript | Out-Null
 """
 
 
@@ -201,12 +206,19 @@ def install_windows(kind, path, app_exe=None):
     """Hand over to a hidden PowerShell that waits for this process to exit, runs the installer and starts
     the (updated) app again. The caller quits the app right after. Paths go through environment variables,
     never through a command line built from strings."""
-    env = dict(os.environ, MCD_UPD_PID=str(os.getpid()), MCD_UPD_KIND=kind, MCD_UPD_FILE=path,
-               MCD_UPD_APP=os.path.abspath(app_exe or sys.executable))
-    flags = 0x00000008 | 0x00000200 | 0x08000000      # DETACHED_PROCESS | NEW_PROCESS_GROUP | NO_WINDOW
+    import base64
+    log_dir = os.path.join(os.environ.get("LOCALAPPDATA") or os.path.expanduser("~"), "MeshCentralDesktop")
+    os.makedirs(log_dir, exist_ok=True)
+    env = dict(os.environ, MCD_UPD_PID=str(os.getpid()), MCD_UPD_KIND=kind,
+               MCD_UPD_FILE=os.path.abspath(path), MCD_UPD_APP=os.path.abspath(app_exe or sys.executable),
+               MCD_UPD_LOG=os.path.join(log_dir, "update.log"))
+    # -EncodedCommand: the script needs no command-line quoting at all (UTF-16LE, base64)
+    encoded = base64.b64encode(_WIN_SCRIPT.encode("utf-16-le")).decode("ascii")
+    flags = 0x00000200 | 0x08000000                    # CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
     subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-                      "-WindowStyle", "Hidden", "-Command", _WIN_SCRIPT], env=env, creationflags=flags,
-                     close_fds=True)
+                      "-WindowStyle", "Hidden", "-EncodedCommand", encoded], env=env, creationflags=flags,
+                     close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                     stderr=subprocess.DEVNULL)
 
 
 def install_portable(path):

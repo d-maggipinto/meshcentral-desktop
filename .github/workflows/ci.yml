@@ -220,6 +220,7 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/windows/updater_wait.ps1 -Exe "$inno_exe" -CopyListFile updater-inno.copy || rc=1
           python ../scripts/windows/updater_smoke.py msi "$(cygpath -w ../dist/MeshCentralDesktop-$ver.msi)" "$msi_exe"
           powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/windows/updater_wait.ps1 -Exe "$msi_exe" -CopyListFile updater-msi.copy || rc=1
+          cp "$LOCALAPPDATA/MeshCentralDesktop/update.log" . 2>/dev/null && cat update.log
           exit ${rc:-0}
 
       - name: In-app upgrade hand-over (clean up)
