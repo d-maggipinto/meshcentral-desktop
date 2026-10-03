@@ -113,6 +113,19 @@ def run(out_path):
             return len(q.get_matrix())
         _check(r, "qr_code", qr)
 
+        def win11_style():
+            from gi.repository import Gtk
+            from . import winstyle
+            out = {}
+            for dark in (True, False):                        # a CSS error raises: the app would look like Linux
+                Gtk.CssProvider().load_from_data(winstyle.css(dark, winstyle._palette(None)).encode("utf-8"))
+                out["dark" if dark else "light"] = True
+            dark, pal = winstyle.system_scheme()
+            out["system_accent"] = pal["base"]
+            out["font"] = winstyle._font() or ""
+            return out
+        _check(r, "win11_style", win11_style)
+
         def credentials():
             srv, user = "selftest.invalid", "mcd-selftest"
             assert osdep.store_password(srv, user, "päss-✓")

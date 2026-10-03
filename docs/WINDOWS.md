@@ -22,6 +22,7 @@ settings.
 | "Send hotkeys": keyboard grab (X11) / shortcuts inhibit (Wayland) | low-level keyboard hook while the remote screen has focus: Windows key, Win+key, Alt+Tab, Alt+Esc, Alt+Space, Alt+F4, Ctrl+Esc go to the remote computer | `winkeys.py` |
 | desktop notifications (D-Bus) | Windows notifications (notification area, shown as toasts) | `osdep.py` |
 | single instance through D-Bus | named mutex: a second launch brings the running window to the front | `osdep.py` |
+| GTK theme (Adwaita), app setting for dark mode | **Windows 11 look**: Segoe UI, the system light / dark mode and accent colour (followed live), Windows 11 controls and caption buttons, native dialog title bars in the same mode | `winstyle.py` |
 
 `webview.py` is the one API the panels use; on Linux it is the previous WebKit code, unchanged. Both
 backends apply the same rules: a view bound to the server never leaves its origin, pages cannot open
@@ -34,6 +35,18 @@ Notes:
 - Keys typed in the remote screen go to WebView2, not to GTK; Ctrl+Alt+F (fullscreen) is caught through
   WebView2's accelerator event.
 - Ctrl+Alt+Del cannot be captured on Windows (secure attention sequence): use the toolbar button.
+
+### Windows 11 look
+
+`winstyle.py` lays a style sheet over GTK's own theme. It reads *Settings > Personalization > Colors*
+from the registry (`AppsUseLightTheme` and the `AccentPalette` Windows derives from the accent colour)
+and checks again every 2 seconds, so switching between light and dark, or changing the accent colour,
+applies to the open app. Accent fills use the palette shade Windows 11 itself uses (a lighter shade in
+dark mode, a darker one in light mode). The header bars get drawn minimise / maximise / close buttons
+with the Windows 11 glyphs (GTK's own title buttons come from theme icons that CSS cannot replace);
+dialogs keep the native title bar, which DWM is told to draw in the same mode and colour, with rounded
+corners. The style can be previewed on Linux with `MCD_WIN11_STYLE=dark` (or `light`) in the
+environment; without it Linux keeps its normal look.
 
 ## Requirements
 

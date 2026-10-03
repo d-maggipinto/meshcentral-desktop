@@ -7,6 +7,14 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Added
+- **Windows 11 look** (Windows): Segoe UI, Windows 11 colours, rounded controls and windows, the Windows
+  minimise / maximise / close buttons, tabs with an accent underline, an accent marker on the selected
+  navigation item, and the content shown as a raised panel next to the navigation, as in Windows Settings.
+  The app follows the Windows light / dark mode and accent colour, also when they change while it runs.
+  Dialogs get a native title bar in the same mode. Linux keeps its look.
+
 ## [2.27.1] - 2026-10-03
 ### Fixed
 - **My Files: Delete left plain files in place.** The app always asked for a recursive delete, which the

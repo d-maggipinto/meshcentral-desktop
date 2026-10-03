@@ -185,6 +185,8 @@ sudo apt remove meshcentral-desktop
 The Windows version (preview, since 2.26.0) is built from the same source code and has the same
 features; the parts that depend on Linux libraries have Windows equivalents (Edge WebView2 for the
 remote desktop and chat, an xterm.js terminal, Windows Credential Manager, Windows notifications).
+It has a **Windows 11 look** that follows your Windows settings: light or dark mode and the accent
+colour change with the system, while the app is running.
 Details, differences and the build: [docs/WINDOWS.md](docs/WINDOWS.md).
 
 Download one of these from the [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases):
@@ -202,10 +204,10 @@ Requirements: Windows 10 1809 or later / Windows 11, 64-bit, with the Microsoft 
 Run anyway*. Windows 11 **Smart App Control** blocks unsigned apps, so it must be off
 (*Windows Security > App & browser control > Smart App Control*). Code signing is planned.
 
-Preview status: sign-in, devices, Registry, Files, the terminal, the remote desktop, the installers
-and notifications are tested on Windows; some features (Send hotkeys, clipboard sync, chat and
-Web-VNC / RDP / SSH windows, My Files transfers, server charts, account settings) are not yet tested
-there. Please report problems on the issue tracker.
+Preview status: every feature has been tested on Windows 11 against a real Windows agent (remote
+desktop with Send hotkeys and clipboard sync, terminal, files, Registry, chat and Web-RDP windows,
+My Files, server charts, account settings, updates). It is a preview because the files are not
+code-signed yet. Please report problems on the issue tracker.
 
 ## Usage
 

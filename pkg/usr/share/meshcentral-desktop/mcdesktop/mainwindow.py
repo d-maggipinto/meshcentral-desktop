@@ -5,7 +5,7 @@ import time
 
 from gi.repository import Gtk, Gdk, GLib, Pango
 
-from . import ui
+from . import ui, winstyle
 from .client import PROTO_TERMINAL
 from .general_actions import DeviceActions
 from .device_general import GeneralPanel
@@ -116,6 +116,7 @@ class MainWindow(Gtk.ApplicationWindow):
         from . import __version__
         hb.props.subtitle = f"{ctrl.username} @ {ctrl.server.host} · v{__version__}"
         self.set_titlebar(hb)
+        winstyle.caption_buttons(self, hb)
         self.refresh_btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic", Gtk.IconSize.BUTTON)
         self.refresh_btn.set_tooltip_text("Refresh devices")
         self.refresh_btn.connect("clicked", lambda *_: self.load_devices())
@@ -133,11 +134,13 @@ class MainWindow(Gtk.ApplicationWindow):
         # built on first visit). Notification cards (user broadcasts, server notices) float
         # top-right above everything, including the fullscreen remote desktop.
         self.pages = Gtk.Stack(transition_type=Gtk.StackTransitionType.CROSSFADE, transition_duration=120)
+        self.pages.get_style_context().add_class("mcd-pages")
         self.pages.add_named(paned, "devices")
         body = Gtk.Box()
         self.rail = self._build_rail()
         body.pack_start(self.rail, False, False, 0)
         self.rail_sep = Gtk.Separator(orientation=Gtk.Orientation.VERTICAL)
+        self.rail_sep.get_style_context().add_class("mcd-rail-sep")
         body.pack_start(self.rail_sep, False, False, 0)
         body.pack_start(self.pages, True, True, 0)
         root = Gtk.Overlay()
@@ -380,6 +383,13 @@ class MainWindow(Gtk.ApplicationWindow):
             cap = Gtk.Label(label=caption)
             cap.get_style_context().add_class("mcd-rail-caption")
             inner.pack_start(cap, False, False, 0)
+            if winstyle.active():                          # Windows 11: accent marker left of the selected item
+                row = Gtk.Box()
+                pill = Gtk.Box(valign=Gtk.Align.CENTER)
+                pill.get_style_context().add_class("mcd-rail-pill")
+                row.pack_start(pill, False, False, 0)
+                row.pack_start(inner, True, True, 0)
+                inner = row
             b.add(inner)
             b.set_tooltip_text(_NAV_TITLES[pid])
             b.connect("toggled", lambda w, p=pid: w.get_active() and self.show_page(p))

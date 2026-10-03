@@ -4,7 +4,7 @@
 from gi.repository import Gtk, GLib
 
 from .client import ControlConnection
-from . import ui
+from . import ui, winstyle
 from .osdep import store_password, load_password, clear_password, KEYRING_NAME  # noqa: F401 (re-exported)
 
 
@@ -19,6 +19,7 @@ class LoginWindow(Gtk.ApplicationWindow):
 
         hb = Gtk.HeaderBar(show_close_button=True, title="Sign in")
         self.set_titlebar(hb)
+        winstyle.caption_buttons(self, hb)
 
         outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14, margin=24)
         self.add(outer)

@@ -66,9 +66,11 @@ class App(Gtk.Application):
         _private_dir(DATA_DIR)             # WebKit cookies, server stats: not readable by other users
         from . import ui
         ui.set_time_format(self.config.get("date_format"))
-        settings = Gtk.Settings.get_default()
-        if self.config.get("dark", True):
-            settings.set_property("gtk-application-prefer-dark-theme", True)
+        from . import winstyle
+        if not winstyle.install():                 # Windows: Windows 11 look, follows the system theme
+            settings = Gtk.Settings.get_default()
+            if self.config.get("dark", True):
+                settings.set_property("gtk-application-prefer-dark-theme", True)
 
     def do_activate(self):
         if self.main_win:
