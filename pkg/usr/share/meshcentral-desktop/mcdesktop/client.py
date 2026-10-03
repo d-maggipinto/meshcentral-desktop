@@ -334,8 +334,11 @@ import urllib.request
 
 
 def http_ssl_context():
-    """TLS context for HTTP transfers (tests against a self-signed local rig override this)."""
-    return ssl.create_default_context()
+    """TLS context for HTTP transfers and the update check: system certificate store, host name check,
+    TLS 1.2 or later (tests against a self-signed local rig override this)."""
+    ctx = ssl.create_default_context()
+    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    return ctx
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):

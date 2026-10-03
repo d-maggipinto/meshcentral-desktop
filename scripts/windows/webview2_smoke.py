@@ -8,6 +8,7 @@ Writes webview2_smoke.png (a screenshot of the window) next to the working direc
 import os
 import sys
 import time
+import urllib.parse
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "..", "pkg", "usr", "share", "meshcentral-desktop"))
@@ -92,7 +93,8 @@ class Smoke:
     def step5(self):
         self.web.run_javascript("document.title", lambda v: (
             check("cross-site navigation cancelled by the policy", v == "MCD smoke" and
-                  any("example.com" in u for u in self.blocked), (v, self.blocked)), self.step6()))
+                  any(urllib.parse.urlsplit(u).hostname == "example.com" for u in self.blocked),
+                  (v, self.blocked)), self.step6()))
         return False
 
     def step6(self):

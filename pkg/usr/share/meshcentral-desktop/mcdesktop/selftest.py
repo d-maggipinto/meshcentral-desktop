@@ -8,7 +8,6 @@ import json
 import os
 import pkgutil
 import socket
-import ssl
 import sys
 import traceback
 
@@ -87,7 +86,8 @@ def run(out_path):
     _check(r, "cairo_drawing", cairo_drawing)
 
     def tls():
-        ctx = ssl.create_default_context()
+        from .client import http_ssl_context
+        ctx = http_ssl_context()                      # the context the app itself uses (TLS 1.2 or later)
         with socket.create_connection(("www.microsoft.com", 443), timeout=15) as s:
             with ctx.wrap_socket(s, server_hostname="www.microsoft.com") as t:
                 return t.version()
