@@ -7,7 +7,7 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [2.29.0] - 2026-10-03
 ### Added
 - **The server's own icons** (Linux and Windows): the device-type icons (device list and the open device),
   the menu and the status badges (Windows / Linux security and antivirus, server warnings, notifications,
