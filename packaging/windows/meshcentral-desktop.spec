@@ -33,7 +33,9 @@ hidden = (collect_submodules("mcdesktop") + collect_submodules("comtypes.gen")
           + ["comtypes.client", "websocket",
              # pycairo: GTK's "draw" signal hands Python a cairo.Context through gi._gi_cairo, which
              # needs the cairo module; nothing imports it by name, so without this every chart is blank
-             "cairo", "gi._gi_cairo"])
+             "cairo", "gi._gi_cairo",
+             # 2FA setup QR code (imported inside the dialog, so not found by the analysis)
+             "qrcode", "qrcode.image.base"])
 
 a = Analysis(
     [os.path.join(APP, "main.py")],

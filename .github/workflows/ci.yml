@@ -71,6 +71,11 @@ jobs:
             mingw-w64-ucrt-x86_64-adwaita-icon-theme
             mingw-w64-ucrt-x86_64-pyinstaller
             mingw-w64-ucrt-x86_64-pyinstaller-hooks-contrib
+            mingw-w64-ucrt-x86_64-python-pip
+
+      # qrcode (2FA setup QR code) is not packaged by MSYS2: from PyPI, pinned by version and hash
+      - name: Python packages from PyPI
+        run: python -m pip install --break-system-packages --no-deps --require-hashes -r scripts/windows/requirements-pypi.txt
 
       # WebView2 SDK and xterm.js, pinned by version AND SHA-256 (see the script)
       - name: Third-party files

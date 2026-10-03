@@ -332,7 +332,8 @@ class AccountPanel(Gtk.Box):
             box.pack_start(qr, False, False, 0)
             area.pack_start(box, False, False, 0)
         except ImportError:
-            area.pack_start(Gtk.Label(label="(Install python3-qrcode to show a QR code.)", xalign=0), False, False, 0)
+            area.pack_start(Gtk.Label(label="(QR code not available: enter the secret below in your authenticator app.)",
+                                      xalign=0, wrap=True), False, False, 0)
         grouped = " ".join(secret[i:i + 4] for i in range(0, len(secret), 4))
         srow = Gtk.Box(spacing=8)
         sl = Gtk.Label(xalign=0, selectable=True)

@@ -105,6 +105,14 @@ def run(out_path):
             return len(winterm.page_html())
         _check(r, "xterm_page", xterm)
 
+        def qr():
+            import qrcode                                     # bundled on Windows (optional on Linux)
+            q = qrcode.QRCode(border=2)
+            q.add_data("otpauth://totp/selftest?secret=JBSWY3DPEHPK3PXP")
+            q.make(fit=True)
+            return len(q.get_matrix())
+        _check(r, "qr_code", qr)
+
         def credentials():
             srv, user = "selftest.invalid", "mcd-selftest"
             assert osdep.store_password(srv, user, "päss-✓")
