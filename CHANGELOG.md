@@ -7,7 +7,7 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [2.27.1] - 2026-10-03
 ### Fixed
 - **My Files: Delete left plain files in place.** The app always asked for a recursive delete, which the
   server only applies to folders; files and folders are now sent as separate requests.
