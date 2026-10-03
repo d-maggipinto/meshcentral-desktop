@@ -187,6 +187,9 @@ class Updater:
 _WIN_SCRIPT = r"""
 $ErrorActionPreference = 'Continue'
 Start-Transcript -Path $env:MCD_UPD_LOG -Append | Out-Null
+# full Windows paths (backslashes): msiexec cannot open "C:/..." (error 1619)
+$env:MCD_UPD_FILE = [System.IO.Path]::GetFullPath($env:MCD_UPD_FILE)
+$env:MCD_UPD_APP = [System.IO.Path]::GetFullPath($env:MCD_UPD_APP)
 "update helper: waiting for process $env:MCD_UPD_PID, then $env:MCD_UPD_KIND $env:MCD_UPD_FILE"
 Wait-Process -Id $env:MCD_UPD_PID -Timeout 120 -ErrorAction SilentlyContinue
 if ($env:MCD_UPD_KIND -eq 'msi') {

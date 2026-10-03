@@ -221,6 +221,8 @@ jobs:
           python ../scripts/windows/updater_smoke.py msi "$(cygpath -w ../dist/MeshCentralDesktop-$ver.msi)" "$msi_exe"
           powershell -NoProfile -ExecutionPolicy Bypass -File ../scripts/windows/updater_wait.ps1 -Exe "$msi_exe" -CopyListFile updater-msi.copy || rc=1
           cp "$LOCALAPPDATA/MeshCentralDesktop/update.log" . 2>/dev/null && cat update.log
+          # both installers must have succeeded, not only the restart
+          [ "$(grep -c 'installer exit code: 0' update.log)" = 2 ] || { echo "an installer failed"; rc=1; }
           exit ${rc:-0}
 
       - name: In-app upgrade hand-over (clean up)
