@@ -93,12 +93,15 @@ class Updater:
         self.api = api
         self.current = parse_version(current) or (0, 0, 0)
         self._check_url = check_url
-        from .client import http_ssl_context
-        ctx = ssl_context or http_ssl_context()
-        self._opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), _CheckedRedirect())
+        self._ssl_context = ssl_context
+        self._opener = None              # built at the first request: nothing network-related at app start
 
     def _get(self, url, timeout=30):
         self._check_url(url)
+        if self._opener is None:
+            from .client import http_ssl_context
+            ctx = self._ssl_context or http_ssl_context()
+            self._opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=ctx), _CheckedRedirect())
         req = urllib.request.Request(url, headers={"User-Agent": _UA, "Accept": "application/vnd.github+json"})
         return self._opener.open(req, timeout=timeout)
 

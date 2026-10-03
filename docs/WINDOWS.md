@@ -70,6 +70,14 @@ program loads. With the current unsigned build:
 Code signing removes both problems; until then the app is meant for computers where Smart App Control is
 off (*Windows Security > App & browser control > Smart App Control*).
 
+## Updates
+
+The app offers new versions itself (card *New version available*, menu *Check for updates*). On Windows the
+upgrade closes the app, runs the new installer of the same kind silently (setup `.exe` keeps the per-user /
+all-users choice; the `.msi` asks for administrator rights) and starts the app again; the portable `.exe`
+downloads the new portable file next to the old one. Downloads are checked against the release's
+`SHA256SUMS`. The CI tests this hand-over for real with both installers.
+
 ## Building
 
 The build runs in an MSYS2 **UCRT64** shell on Windows:

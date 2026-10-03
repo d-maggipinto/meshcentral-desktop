@@ -20,7 +20,7 @@ the server from a desktop application instead of a browser tab.
   single-file `.exe`. Remote desktop, terminal and chat are embedded with Microsoft Edge WebView2.
   Not code-signed yet, see [Windows](#windows).
 
-Current version: **2.26.1**, see the [changelog](CHANGELOG.md).
+Current version: **2.27.0**, see the [changelog](CHANGELOG.md).
 
 ![Users list](docs/images/users.png)
 
@@ -110,6 +110,14 @@ Current version: **2.26.1**, see the [changelog](CHANGELOG.md).
   and account image.
 - **Broadcast messages** to a user group or to all users; broadcasts sent from the web interface
   appear as notification cards.
+
+### Updates
+- The app checks this project's GitHub releases at start and every 12 hours and shows a
+  **New version available** card with *Upgrade*, *Later* and *Skip this version*. *Check for updates* is in
+  the main menu; automatic checks and the channel (stable, or stable and preview) are in the Updates dialog.
+- **Upgrade from the app**: Linux installs the new `.deb` (the system asks for your password) and restarts
+  the app; Windows closes the app, installs the new setup `.exe` or `.msi` and starts it again; the portable
+  `.exe` is replaced by the new one. Every download is checked against the release's published SHA-256.
 
 ### Respects permissions
 The app reads the signed-in account's MeshCentral rights (per device group, per device, through user
@@ -247,6 +255,9 @@ system shortcuts. Choose **Allow**.
   in the server event log like any console command. Turn **Clipboard sync** off in the desktop
   toolbar to avoid it. Clipboard sync only runs while you look at the remote screen (Desktop page
   shown, app window active). Details: [docs/REMOTE_DESKTOP.md](docs/REMOTE_DESKTOP.md).
+- **Update check**: the app contacts `api.github.com` (GitHub sees your IP address and the app version) and
+  downloads only this repository's release files from GitHub over HTTPS; a file is installed only if its
+  SHA-256 matches the release's `SHA256SUMS`. Switch automatic checks off in *Check for updates*.
 - The server enforces all MeshCentral permissions; the app never tries to work around them.
 
 Please report security problems privately, see [SECURITY.md](SECURITY.md).

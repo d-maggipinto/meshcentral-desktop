@@ -7,6 +7,16 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [2.27.0] - 2026-10-03
+### Added
+- **In-app updates** (Linux and Windows): the app checks this project's GitHub releases at start and every
+  12 hours and shows a *New version available* card (*Upgrade*, *Later*, *Skip this version*); *Check for
+  updates* in the main menu opens the Updates dialog with the release notes, automatic checks on / off and
+  the channel (stable, or stable and preview). *Upgrade* downloads the right file for this installation,
+  verifies its SHA-256 against the release's `SHA256SUMS` and installs it: Linux with `pkexec apt-get`
+  (then restart), Windows by closing the app, running the setup `.exe` or `.msi` silently and starting the
+  app again, portable by starting the new portable `.exe`. Upgrades work from this version on.
+
 ## [2.26.1] - 2026-10-03
 ### Fixed
 - **Windows**: the server CPU and memory gauges, the server statistics charts and the device power timeline

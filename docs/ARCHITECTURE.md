@@ -38,6 +38,8 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `winweb.py` | Windows: `WebView2Widget`, Edge WebView2 in a native child window of a GTK widget (WebView2.tlb through comtypes) |
 | `winterm.py` | Windows: the terminal widget, xterm.js inside WebView2 with the part of the VTE API the terminal panel uses |
 | `winkeys.py` | Windows: "Send hotkeys" low-level keyboard hook |
+| `updater.py` | update check (GitHub releases, stable / preview channel), verified download (SHA256SUMS), install per installation type (pkexec apt, Inno Setup, msiexec, portable) |
+| `update_ui.py` | "New version available" card and the Updates dialog |
 | `selftest.py` | `--selftest`: checks a bundled or installed copy (used by the Windows build) |
 | `device_general.py` | General page (web UI p10): attributes with edit dialogs (hostname, description, consent, notifications, tags), Actions / Notes / Log Event / Run / Message / Chat (`ChatWindow`, WebKit) / Share (`ShareDialog`); `PowerTimeline` (7 day power state), links (Interfaces, MeshCmd, Web-VNC / Web-RDP / Web-SSH windows with the web session cookies), Change Group, Delete Device, User Authorizations |
 | `info_panel.py` | Hardware, Network, Events, Notes |

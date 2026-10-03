@@ -226,6 +226,7 @@ jobs:
         if: always()
         shell: pwsh
         run: |
+          if (-not (Test-Path dist\VERSION)) { "nothing was installed"; exit 0 }
           $ver = (Get-Content dist\VERSION).Trim()
           Get-Process MeshCentralDesktop -ErrorAction SilentlyContinue | Stop-Process -Force
           $u = Get-ChildItem "$env:LOCALAPPDATA\Programs\MCD-UPD\unins*.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
