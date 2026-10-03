@@ -14,6 +14,8 @@ BUILD = os.path.join(ROOT, "build")
 
 datas = [
     (os.path.join(BUILD, "webview2", "WebView2.tlb"), os.path.join("mcdesktop", "webview2")),
+    (os.path.join(BUILD, "webview2", "LICENSE-WebView2.txt"), "licenses"),
+    (os.path.join(BUILD, "webview2", "NOTICE-WebView2.txt"), "licenses"),
     (os.path.join(BUILD, "assets", "xterm"), os.path.join("mcdesktop", "assets", "xterm")),
     # without index.theme GTK does not treat share/icons/hicolor as a theme and the app icon is missing
     (os.path.join(sys.prefix, "share", "icons", "hicolor", "index.theme"), os.path.join("share", "icons", "hicolor")),
@@ -24,6 +26,12 @@ datas = [
     # licence texts of the bundled MSYS2 packages (Python, GTK, GLib, cairo, Pango, OpenSSL...)
     (os.path.join(sys.prefix, "share", "licenses"), "licenses"),
 ]
+# qrcode comes from PyPI (not MSYS2): its BSD licence from the installed package
+import importlib.metadata as _md
+_qr = [f for f in _md.distribution("qrcode").files or [] if f.name.upper().startswith("LICEN")]
+if not _qr:
+    raise SystemExit("qrcode licence file not found")
+datas.append((str(_qr[0].locate()), os.path.join("licenses", "qrcode")))
 # the app icon as PNG only: GTK would pick the scalable SVG, and the bundle has no SVG image loader
 for _size in (16, 24, 32, 48, 64, 128, 256):
     _d = os.path.join("share", "icons", "hicolor", "%dx%d" % (_size, _size), "apps")

@@ -25,6 +25,10 @@ get "https://registry.npmjs.org/@xterm/xterm/-/xterm-$XTERM_VERSION.tgz" "$XTERM
 get "https://registry.npmjs.org/@xterm/addon-fit/-/addon-fit-$FIT_VERSION.tgz" "$FIT_SHA256" "$T/addon-fit.tgz"
 
 unzip -q -j -o "$T/webview2.nupkg" "build/native/x64/WebView2Loader.dll" "WebView2.tlb" -d build/webview2
+# its BSD licence and notices travel with the binary (redistribution condition)
+unzip -q -j -o "$T/webview2.nupkg" "LICENSE.txt" "NOTICE.txt" -d "$T/wv2-licence"
+cp "$T/wv2-licence/LICENSE.txt" build/webview2/LICENSE-WebView2.txt
+cp "$T/wv2-licence/NOTICE.txt" build/webview2/NOTICE-WebView2.txt
 tar -xzf "$T/xterm.tgz" -C "$T" package/lib/xterm.js package/css/xterm.css package/LICENSE
 cp "$T/package/lib/xterm.js" "$T/package/css/xterm.css" build/assets/xterm/
 cp "$T/package/LICENSE" build/assets/xterm/LICENSE-xterm.txt

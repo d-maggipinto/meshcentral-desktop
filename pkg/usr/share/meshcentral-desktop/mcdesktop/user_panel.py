@@ -780,9 +780,9 @@ class UserPage(Gtk.Box):
         def done(err):
             if not err:
                 try:
-                    self._avatar_pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+                    self._avatar_pb = ui.load_image(path, size)
                     self.avatar.set_from_pixbuf(self._avatar_pb)
-                except GLib.Error:
+                except (GLib.Error, ValueError, OSError):
                     pass
             try:
                 os.remove(path)

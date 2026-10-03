@@ -149,7 +149,7 @@ class AccountPanel(Gtk.Box):
         return d, area
 
     def _copy(self, text):
-        Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)
+        ui.copy_secret(text)            # every copy here is a secret: never synced to a remote device
 
     # ---- layout -------------------------------------------------------------------
     def _build(self):
@@ -267,9 +267,9 @@ class AccountPanel(Gtk.Box):
         def done(err):
             if not err:
                 try:
-                    pb = GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+                    pb = ui.load_image(path, size)
                     self.avatar.set_from_pixbuf(pb)
-                except GLib.Error:
+                except (GLib.Error, ValueError, OSError):
                     pass
             try:
                 os.remove(path)

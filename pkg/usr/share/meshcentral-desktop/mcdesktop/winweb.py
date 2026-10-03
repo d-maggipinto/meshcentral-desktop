@@ -16,6 +16,7 @@ when the Python object is collected, so every handler AddRefs the pointers it re
 import ctypes
 import json
 import os
+import shutil
 import sys
 import traceback
 from ctypes import wintypes
@@ -34,10 +35,14 @@ _clear_pending = False  # sign-out asked to clear cookies / storage: done before
 
 
 def _search_dirs():
+    """Where WebView2Loader.dll and WebView2.tlb are. The installed / portable app uses only its own bundled
+    copy (by full path): searching the exe's folder first let a DLL planted next to the portable exe
+    (Downloads) be loaded. MCD_WEBVIEW2_DIR is for running from the source tree (development, CI)."""
     here = os.path.dirname(os.path.abspath(__file__))
-    dirs = [os.environ.get("MCD_WEBVIEW2_DIR"), os.path.dirname(sys.executable), here,
-            os.path.join(here, "webview2"), os.path.dirname(here)]
-    return [d for d in dirs if d]
+    if getattr(sys, "frozen", False):
+        return [os.path.join(here, "webview2")]
+    dirs = [os.environ.get("MCD_WEBVIEW2_DIR"), here, os.path.join(here, "webview2")]
+    return [d for d in dirs if d and os.path.isabs(d)]
 
 
 def _find(name):
@@ -127,6 +132,14 @@ def _ensure_environment(user_data_dir, cb):
             w(_env, _env_error)
 
     _env_handler = _handler(wv.ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler, done)
+    if os.path.exists(_clear_marker()):
+        # a sign-out asked for cleanup and the app quit before it could happen: drop the whole profile
+        # (cookies, storage, cache) before the browser process starts, so the next account starts clean
+        shutil.rmtree(user_data_dir, ignore_errors=True)
+        try:
+            os.remove(_clear_marker())
+        except OSError:
+            pass
     loader = ctypes.WinDLL(_find("WebView2Loader.dll"))
     create = loader.CreateCoreWebView2EnvironmentWithOptions
     create.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, ctypes.c_void_p,
@@ -142,6 +155,11 @@ def _ensure_environment(user_data_dir, cb):
 def default_user_data_dir():
     base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
     return os.path.join(base, "MeshCentralDesktop", "webview2")
+
+
+def _clear_marker():
+    """Saved sign-out cleanup request (survives quitting the app before the cleanup ran)."""
+    return default_user_data_dir() + ".clear"
 
 
 # gdk_win32_window_get_handle(GdkWindow*) -> HWND
@@ -231,6 +249,9 @@ class WebView2Widget(Gtk.DrawingArea):
         s.IsWebMessageEnabled = True
         self._add(self.webview.add_NavigationStarting, wv.ICoreWebView2NavigationStartingEventHandler,
                   self._nav_starting)
+        # frames too (WebKit's decide-policy on Linux covers them): no foreign origin inside the server's page
+        self._add(self.webview.add_FrameNavigationStarting, wv.ICoreWebView2NavigationStartingEventHandler,
+                  self._nav_starting)
         self._add(self.webview.add_NavigationCompleted, wv.ICoreWebView2NavigationCompletedEventHandler,
                   self._nav_completed)
         self._add(self.webview.add_NewWindowRequested, wv.ICoreWebView2NewWindowRequestedEventHandler,
@@ -281,6 +302,10 @@ class WebView2Widget(Gtk.DrawingArea):
         def done(*_):
             global _clear_pending
             _clear_pending = False
+            try:
+                os.remove(_clear_marker())
+            except OSError:
+                pass
             then()
         try:
             prof = self.webview.QueryInterface(wv.ICoreWebView2_13).Profile.QueryInterface(wv.ICoreWebView2Profile2)
@@ -494,3 +519,9 @@ def clear_browsing_data():
     (the profile can only be reached through a live WebView2, so it happens on the next creation)."""
     global _clear_pending
     _clear_pending = True
+    try:
+        os.makedirs(os.path.dirname(_clear_marker()), exist_ok=True)
+        with open(_clear_marker(), "w"):
+            pass
+    except OSError:
+        pass

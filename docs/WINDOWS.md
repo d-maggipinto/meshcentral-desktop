@@ -112,16 +112,24 @@ Manager round trip. It never contacts a MeshCentral server.
 
 ## Tests
 
-The `windows` job of the CI workflow runs on a Windows Server 2025 machine:
+Two CI jobs run on Windows Server 2025 machines. The `windows` job builds what is published and runs
+no third-party server code:
 
 1. `scripts/windows/webview2_smoke.py`: WebView2 inside a GTK window (page, scripts, injected CSS, blocked
    pop-ups and cross-site navigation, no clipboard access).
 2. `scripts/windows/terminal_smoke.py`: the xterm.js terminal (output, UTF-8, typing, resize, copy).
-3. `scripts/windows/app_smoke.py`: the whole app against a throwaway local MeshCentral server and a real
-   Windows agent: Registry (list, create a key and a value, export, delete), terminal (Admin Shell),
-   Files, the remote desktop in WebView2, a notification.
-4. Bundle, `--selftest` of the bundle, both installers built, each installed silently, self-tested and
-   uninstalled.
+3. Bundle, `--selftest` of the bundle, both installers built, each installed silently, self-tested and
+   uninstalled, and the in-app upgrade hand-over for both installers.
+
+The `windows-app` job runs `scripts/windows/app_smoke.py`: the whole app against a throwaway local
+MeshCentral server (installed from `scripts/windows/ci-server/package-lock.json` with `npm ci
+--ignore-scripts`) and a real Windows agent: Registry (list, create a key and a value, export, delete),
+terminal (Admin Shell), Files, the remote desktop in WebView2, a notification. Nothing from this job
+reaches the installers; the release waits for both jobs.
+
+The installed or portable app loads WebView2Loader.dll, WebView2.tlb and xterm.js only from its own
+bundle. `MCD_WEBVIEW2_DIR`, `MCD_ASSETS_DIR` and `MCD_TEST_INSECURE_TLS` are honoured only when the
+app runs from the source tree (development, CI).
 
 Known on the CI machine only: the agent closes the **Admin PowerShell** console right after opening it
 (cmd works through the same agent code and the app sends the web interface's exact options); this is

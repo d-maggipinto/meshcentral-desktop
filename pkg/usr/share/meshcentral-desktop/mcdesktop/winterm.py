@@ -13,6 +13,7 @@ page itself has no clipboard access.
 import base64
 import json
 import os
+import sys
 
 from gi.repository import Gtk, Gdk, GObject
 
@@ -22,10 +23,15 @@ _BASE_FONT = 14
 
 
 def _assets_dir():
-    """xterm.js files: MCD_ASSETS_DIR/xterm (development, CI) or assets/xterm next to the app (installed)."""
+    """xterm.js files: assets/xterm bundled with the app; MCD_ASSETS_DIR/xterm only when running from the source
+    tree (development, CI). Never a relative path: with MCD_ASSETS_DIR unset the old code looked in
+    <current folder>/xterm first, so a planted folder next to the portable exe controlled the terminal page."""
     here = os.path.dirname(os.path.abspath(__file__))
-    for d in (os.path.join(os.environ.get("MCD_ASSETS_DIR", ""), "xterm"), os.path.join(here, "assets", "xterm"),
-              os.path.join(os.path.dirname(here), "assets", "xterm")):
+    dirs = [os.path.join(here, "assets", "xterm"), os.path.join(os.path.dirname(here), "assets", "xterm")]
+    env = os.environ.get("MCD_ASSETS_DIR")
+    if env and os.path.isabs(env) and not getattr(sys, "frozen", False):
+        dirs.insert(0, os.path.join(env, "xterm"))
+    for d in dirs:
         if os.path.isfile(os.path.join(d, "xterm.js")):
             return d
     raise FileNotFoundError("xterm.js assets not found")
@@ -64,6 +70,7 @@ host.addEventListener('message', function (ev) {
   else if (m.t === 'font') { term.options.fontSize = m.s; resize(); }
   else if (m.t === 'focus') { term.focus(); }
   else if (m.t === 'copy') { send({t: 'copy', d: term.getSelection()}); }
+  else if (m.t === 'paste') { term.paste(m.d); }   // bracketed paste when the shell asks for it, like VTE
 });
 resize();
 send({t: 'ready'});
@@ -173,8 +180,8 @@ class XtermTerminal(Gtk.Box):
 
     def paste_clipboard(self):
         def got(_cb, text):
-            if text:
-                self.emit("commit", text, len(text.encode("utf-8")))
+            if text:                                  # through xterm.js: bracketed paste, \n -> \r (as on Linux)
+                self._post({"t": "paste", "d": text})
         Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).request_text(got)
 
     def get_font_scale(self):

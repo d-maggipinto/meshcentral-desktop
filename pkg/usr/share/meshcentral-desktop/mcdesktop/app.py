@@ -149,9 +149,12 @@ class App(Gtk.Application):
             win = self.main_win or self.login_win
             osdep.notify(osdep.window_handle(win), title, body)
             return
-        n = Gio.Notification.new(title)
+        # KDE, XFCE, dunst... read the text as markup (GNOME does not): a message could carry a clickable link.
+        # Look-alike characters instead of escaping, so it reads the same on every desktop.
+        plain = {ord("<"): "\u2039", ord(">"): "\u203a", ord("&"): "\uff06"}
+        n = Gio.Notification.new((title or "")[:120].translate(plain))
         if body:
-            n.set_body(body)
+            n.set_body(body[:500].translate(plain))
         self.send_notification(None, n)
 
 

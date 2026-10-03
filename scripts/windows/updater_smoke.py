@@ -18,7 +18,7 @@ from mcdesktop import updater  # noqa: E402
 kind, installer, app_exe = sys.argv[1:4]
 copy = os.path.join(tempfile.mkdtemp(prefix="mcd-update-"), os.path.basename(installer))
 shutil.copy(installer, copy)
-updater.install_windows(kind, copy, app_exe=app_exe)
+updater.install_windows(kind, copy, app_exe=app_exe, sha256=updater.sha256_file(copy))   # the re-check path too
 print("handed over to the update helper:", kind, copy, flush=True)
 with open(os.path.join(os.getcwd(), "updater-%s.copy" % kind), "w") as f:
     f.write(copy)

@@ -81,6 +81,24 @@ def _check_url(url):
         raise ValueError("refusing to download from %s" % (p.hostname or url))
 
 
+def _project_url(url, fallback=None):
+    """A release URL of THIS project on github.com (release page or release file), else fallback / error."""
+    p = urllib.parse.urlsplit(url or "")
+    if p.scheme == "https" and p.hostname == "github.com" and p.path.startswith("/%s/releases/" % REPO):
+        return url
+    if fallback is not None:
+        return fallback
+    raise ValueError("not a release file of %s: %s" % (REPO, url))
+
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
 class _CheckedRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         _check_url(newurl)                       # every hop must stay on GitHub over HTTPS
@@ -144,7 +162,7 @@ class Updater:
         kind = install_kind()
         name = asset_name(kind, v)
         return {"version": v, "text": "%d.%d.%d" % v, "tag": rel.get("tag_name"), "notes": rel.get("body") or "",
-                "page": rel.get("html_url") or RELEASES_PAGE, "kind": kind,
+                "page": _project_url(rel.get("html_url"), RELEASES_PAGE), "kind": kind,
                 "asset": assets.get(name), "sums": assets.get("SHA256SUMS"), "asset_name": name}
 
     def check(self, cb, channel="stable"):
@@ -158,7 +176,7 @@ class Updater:
 
     # ---- download + verify -----------------------------------------------------------
     def _expected_sha256(self, info):
-        with self._get(info["sums"]["browser_download_url"]) as r:
+        with self._get(_project_url(info["sums"]["browser_download_url"])) as r:
             text = r.read(1 << 20).decode("utf-8", "replace")
         for line in text.splitlines():
             parts = line.split()
@@ -179,7 +197,8 @@ class Updater:
                 folder = tempfile.mkdtemp(prefix="mcd-update-")
                 path = os.path.join(folder, info["asset_name"])
                 h = hashlib.sha256()
-                with self._get(info["asset"]["browser_download_url"], timeout=60) as r, open(path, "wb") as f:
+                with self._get(_project_url(info["asset"]["browser_download_url"]), timeout=60) as r, \
+                        open(path, "wb") as f:
                     total = int(r.headers.get("Content-Length") or info["asset"].get("size") or 0)
                     got = 0
                     while True:
@@ -195,6 +214,7 @@ class Updater:
                     os.remove(path)
                     path = None
                     raise ValueError("the download does not match its published SHA-256 checksum")
+                info["sha256"] = want              # checked again right before the installer runs
             except Exception as ex:
                 err, path = str(ex), None
                 if folder:
@@ -212,12 +232,18 @@ $env:MCD_UPD_FILE = [System.IO.Path]::GetFullPath($env:MCD_UPD_FILE)
 $env:MCD_UPD_APP = [System.IO.Path]::GetFullPath($env:MCD_UPD_APP)
 "update helper: waiting for process $env:MCD_UPD_PID, then $env:MCD_UPD_KIND $env:MCD_UPD_FILE"
 Wait-Process -Id $env:MCD_UPD_PID -Timeout 120 -ErrorAction SilentlyContinue
-if ($env:MCD_UPD_KIND -eq 'msi') {
-  $p = Start-Process msiexec.exe -ArgumentList @('/i', ('"' + $env:MCD_UPD_FILE + '"'), '/passive', '/norestart') -Wait -PassThru
+# the file was verified when it was downloaded: check again now, right before it runs
+$hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $env:MCD_UPD_FILE).Hash.ToLower()
+if ($env:MCD_UPD_SHA -and $hash -ne $env:MCD_UPD_SHA) {
+  "installer changed since it was verified ($hash): not run"
+} elseif ($env:MCD_UPD_KIND -eq 'msi') {
+  $msiexec = Join-Path $env:SystemRoot 'System32\msiexec.exe'
+  $p = Start-Process $msiexec -ArgumentList @('/i', ('"' + $env:MCD_UPD_FILE + '"'), '/passive', '/norestart') -Wait -PassThru
+  "installer exit code: $($p.ExitCode)"
 } else {
   $p = Start-Process $env:MCD_UPD_FILE -ArgumentList @('/SILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait -PassThru
+  "installer exit code: $($p.ExitCode)"
 }
-"installer exit code: $($p.ExitCode)"
 Remove-Item -LiteralPath $env:MCD_UPD_FILE -Force
 Start-Process $env:MCD_UPD_APP
 "started $env:MCD_UPD_APP"
@@ -225,7 +251,7 @@ Stop-Transcript | Out-Null
 """
 
 
-def install_windows(kind, path, app_exe=None):
+def install_windows(kind, path, app_exe=None, sha256=None):
     """Hand over to a hidden PowerShell that waits for this process to exit, runs the installer and starts
     the (updated) app again. The caller quits the app right after. Paths go through environment variables,
     never through a command line built from strings."""
@@ -234,11 +260,13 @@ def install_windows(kind, path, app_exe=None):
     os.makedirs(log_dir, exist_ok=True)
     env = dict(os.environ, MCD_UPD_PID=str(os.getpid()), MCD_UPD_KIND=kind,
                MCD_UPD_FILE=os.path.abspath(path), MCD_UPD_APP=os.path.abspath(app_exe or sys.executable),
-               MCD_UPD_LOG=os.path.join(log_dir, "update.log"))
+               MCD_UPD_LOG=os.path.join(log_dir, "update.log"), MCD_UPD_SHA=(sha256 or "").lower())
     # -EncodedCommand: the script needs no command-line quoting at all (UTF-16LE, base64)
     encoded = base64.b64encode(_WIN_SCRIPT.encode("utf-16-le")).decode("ascii")
     flags = 0x00000200 | 0x08000000                    # CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
-    subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+    powershell = os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "WindowsPowerShell",
+                              "v1.0", "powershell.exe")       # full path: never a powershell.exe next to the app
+    subprocess.Popen([powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
                       "-WindowStyle", "Hidden", "-EncodedCommand", encoded], env=env, creationflags=flags,
                      close_fds=True, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                      stderr=subprocess.DEVNULL)
@@ -255,12 +283,15 @@ def install_portable(path):
     return dest
 
 
-def install_deb(path, done):
-    """pkexec apt-get install <file> in the background; done(ok, message) on the GTK thread."""
+def install_deb(path, done, sha256=None):
+    """pkexec apt-get install <file> in the background; done(ok, message) on the GTK thread. The package is
+    checked against its verified SHA-256 again right before it is handed to apt-get."""
     def run():
         try:
-            p = subprocess.run(["pkexec", "apt-get", "install", "-y", path], capture_output=True, text=True,
-                               timeout=1800)
+            if sha256 and sha256_file(path) != sha256:
+                raise ValueError("the downloaded package changed since it was verified: not installed")
+            p = subprocess.run(["/usr/bin/pkexec", "/usr/bin/apt-get", "install", "-y", path], capture_output=True,
+                               text=True, timeout=1800)
             ok = p.returncode == 0
             msg = "" if ok else ((p.stderr or p.stdout or "").strip().splitlines() or ["apt-get failed"])[-1]
             if p.returncode in (126, 127):
@@ -276,5 +307,6 @@ def install_deb(path, done):
 def restart_linux():
     """Start a fresh copy once this process has exited (single instance), then the caller quits."""
     pid = str(os.getpid())
-    subprocess.Popen(["sh", "-c", 'while kill -0 "$0" 2>/dev/null; do sleep 0.2; done; exec meshcentral-desktop', pid],
+    subprocess.Popen(["/bin/sh", "-c", 'while kill -0 "$0" 2>/dev/null; do sleep 0.2; done; '
+                      'exec /usr/bin/meshcentral-desktop', pid],
                      start_new_session=True, close_fds=True)

@@ -17,6 +17,7 @@ Icons are registered as GTK built-in icons under names that change with every se
 import hashlib
 import os
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -132,7 +133,20 @@ def _dimmed(p):
     return out
 
 
-def _decode(data):
+def _png_size(data):
+    """(width, height) from the PNG header, before any decoding; None when it is not a PNG."""
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
+        return None
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+def _decode(data, cell=None, n=None):
+    """PNG only. With a sprite's cell size and count: the declared size must fit that sheet, so a small
+    file declaring a huge image (gigabytes once decoded) is refused before it is decoded."""
+    if cell:
+        size = _png_size(data)
+        if size is None or size[1] != cell or not cell * n <= size[0] <= cell * 64:
+            return None
     try:
         loader = GdkPixbuf.PixbufLoader.new_with_type("png")       # PNG only, whatever the server says
         loader.write(data)
@@ -140,6 +154,21 @@ def _decode(data):
         return loader.get_pixbuf()
     except GLib.Error:
         return None
+
+
+class _SameServerRedirect(urllib.request.HTTPRedirectHandler):
+    """Every redirect hop must stay on the server (https, same host and port): no requests elsewhere."""
+
+    def __init__(self, base):
+        super().__init__()
+        p = urllib.parse.urlsplit(base)
+        self.origin = (p.hostname, p.port or 443)
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        p = urllib.parse.urlsplit(newurl)
+        if p.scheme != "https" or (p.hostname, p.port or 443) != self.origin:
+            raise urllib.error.HTTPError(newurl, code, "redirect to another server refused", headers, fp)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 class ServerIcons:
@@ -205,7 +234,8 @@ class ServerIcons:
         req = urllib.request.Request(url, headers={"User-Agent": "MeshCentralDesktop (icons)"})
         if self._ssl is None:
             self._ssl = self.ssl_context_factory()
-        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self._ssl))
+        opener = urllib.request.build_opener(urllib.request.HTTPSHandler(context=self._ssl),
+                                             _SameServerRedirect(self.base))
         with opener.open(req, timeout=TIMEOUT_S) as r:
             final = urllib.parse.urlsplit(r.geturl())
             if final.scheme != "https" or final.hostname != self.host:    # no redirects elsewhere
@@ -250,7 +280,7 @@ class ServerIcons:
         _gen += 1
         prefix = "mcd-srv%d-" % _gen
         names = {}
-        cells = {f: _cut(_decode(files[f]), *SPRITES[f]) if f in files else None for f in SPRITES}
+        cells = {f: _cut(_decode(files[f], *SPRITES[f]), *SPRITES[f]) if f in files else None for f in SPRITES}
 
         def register(kind, key, sprite_cells):
             """Every size the sheets have, plus the sizes the app displays (built-in icons are not

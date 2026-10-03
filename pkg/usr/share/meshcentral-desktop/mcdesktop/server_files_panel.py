@@ -347,7 +347,7 @@ class ServerFilesPanel(Gtk.Box):
         top = self.get_toplevel()
         if len(files) == 1:
             ch = Gtk.FileChooserNative.new("Save file", top, Gtk.FileChooserAction.SAVE, "_Save", "_Cancel")
-            ch.set_current_name(files[0][0])
+            ch.set_current_name(ui.safe_filename(files[0][0]))
             ch.set_do_overwrite_confirmation(True)
         else:
             ch = Gtk.FileChooserNative.new("Download to folder", top, Gtk.FileChooserAction.SELECT_FOLDER,

@@ -927,6 +927,9 @@ class DesktopPanel(Gtk.Box):
                 return
             if not self._sync_active():
                 return                                # re-checked on focus-in / when the page is shown
+            if ui.is_copied_secret(text):             # 2FA secret, backup codes, token password copied here
+                self._sync_last_local = text
+                return
             self._sync_last_local = text
             if text != self._sync_last_remote and self.caps.desktop_input:
                 self._sync_last_remote = text         # so the next poll doesn't echo it back

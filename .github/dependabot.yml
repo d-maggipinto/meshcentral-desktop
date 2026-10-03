@@ -6,3 +6,17 @@ updates:
       interval: weekly
     commit-message:
       prefix: CI
+  # hash-pinned PyPI package of the Windows build (qrcode)
+  - package-ecosystem: pip
+    directory: /scripts/windows
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: Build
+  # the throwaway MeshCentral server of the Windows CI app test (lockfile)
+  - package-ecosystem: npm
+    directory: /scripts/windows/ci-server
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: CI

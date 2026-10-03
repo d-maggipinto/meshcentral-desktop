@@ -235,16 +235,24 @@ def json_tree(data):
     return tv
 
 
+_WIN_RESERVED = {"CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"} | {f"{p}{i}" for p in ("COM", "LPT") for i in range(10)}
+
+
 def safe_filename(name, default="download", allow_dot=False):
     """A file name from the server or a device, made safe to use in a local folder: no path parts
     (`/`, `\\`, `..`), no control characters, no leading dot (hidden files such as .bashrc) unless
-    allow_dot, at most 200 characters."""
+    allow_dot, at most 200 characters. Windows rules on every platform (the same server is used from
+    both): `: * ? " < > |` become `_` (a `C:` prefix or `name:stream` would leave the folder or write an
+    NTFS stream), no trailing dots or spaces, and device names (CON, NUL, COM1 ...) get a `_` prefix."""
     n = str(name or "").replace("\\", "/").split("/")[-1]
-    n = "".join(c for c in n if c >= " " and c != "\x7f").strip()
+    n = "".join(c for c in n if c >= " " and c != "\x7f")
+    n = "".join("_" if c in ':*?"<>|' else c for c in n).strip().rstrip(". ")
     if not allow_dot:
         n = n.lstrip(".")
     if n in ("", ".", ".."):
         n = default
+    if n.split(".")[0].strip().upper() in _WIN_RESERVED:
+        n = "_" + n
     return n[:200]
 
 
@@ -255,4 +263,37 @@ def unique_path(folder, name):
     while os.path.lexists(cand):
         cand = os.path.join(folder, f"{base} ({i}){ext}")
         i += 1
+    if os.path.dirname(os.path.abspath(cand)) != os.path.abspath(folder):
+        raise ValueError("file name leaves the folder: " + repr(name))
     return cand
+
+
+def load_image(path, size, max_side=4096):
+    """An image from the server (account pictures) scaled to `size`: PNG or JPEG only, and its declared size
+    is read from the header first, so a small file declaring a gigantic image is never decoded.
+    Raises GLib.Error / ValueError when it is not acceptable."""
+    from gi.repository import GdkPixbuf
+    if os.path.getsize(path) > 4 * 1024 * 1024:
+        raise ValueError("image file too large")
+    fmt, w, h = GdkPixbuf.Pixbuf.get_file_info(path)
+    if fmt is None or fmt.get_name() not in ("png", "jpeg") or not (0 < w <= max_side and 0 < h <= max_side):
+        raise ValueError("unsupported image")
+    return GdkPixbuf.Pixbuf.new_from_file_at_scale(path, size, size, True)
+
+
+# ---- secrets the app itself copies (2FA secret, backup codes, login-token passwords) ----------------
+_copied_secrets = set()
+
+
+def copy_secret(text):
+    """Put a secret on the clipboard for the user to paste locally. Clipboard sync never sends it to a
+    remote device (desktop_panel checks is_copied_secret)."""
+    import hashlib
+    from gi.repository import Gdk
+    _copied_secrets.add(hashlib.sha256(text.encode("utf-8")).hexdigest())
+    Gtk.Clipboard.get(Gdk.SELECTION_CLIPBOARD).set_text(text, -1)
+
+
+def is_copied_secret(text):
+    import hashlib
+    return bool(text) and hashlib.sha256(text.encode("utf-8")).hexdigest() in _copied_secrets

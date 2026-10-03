@@ -7,6 +7,35 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [2.29.1] - 2026-10-03
+Security review of the Linux and Windows code (five reviewers, static analysis, every finding validated).
+Nothing critical or high was found; everything confirmed is fixed here.
+### Fixed
+- **Update check**: the check at start-up was repeated every 5 seconds instead of once, which used up
+  GitHub's request limit for the whole network and brought the "new version" card back after *Later*.
+- **Windows portable app**: WebView2Loader.dll and the terminal's xterm.js are loaded only from the app's
+  own bundle (a file planted next to the portable .exe, for example in Downloads, was used first).
+- **Windows sign-out**: if the app was closed right after signing out, the next account could start with
+  the previous account's web session; the cleanup is now saved and done at the next start.
+- **Clipboard sync** no longer sends secrets the app copied for you (2FA secret, backup codes,
+  login-token passwords) to the remote computer.
+- **Desktop notifications on Linux** (KDE, XFCE...): message text can no longer contain markup such as a
+  clickable link.
+- **File names from the server** (My Files, device files): Windows drive prefixes (`C:`), NTFS streams
+  (`name:stream`), reserved names (`CON`, `NUL`...) and trailing dots are made safe on every platform.
+- **Windows notifications** with emoji no longer fail.
+### Security hardening
+- Updater: only this project's release files are accepted; the downloaded installer is checked against its
+  SHA-256 again right before it runs; system tools are started by their full path.
+- Server icons and account pictures: the image size is read from the header and oversized images are
+  refused before decoding; server icon downloads never follow a redirect to another server.
+- Windows: frames inside the embedded web pages follow the same-origin rule as the page (as on Linux);
+  `blob:` addresses must belong to the server; the terminal pastes through xterm.js (bracketed paste).
+- Test-only switches (`MCD_TEST_INSECURE_TLS`, asset folders) are ignored by the installed app.
+- Build: the Windows installers are built in a job that runs no third-party server code; the test server
+  is installed from a lockfile without install scripts; releases only from `main`; published releases are
+  immutable; the WebView2 SDK and qrcode licence notices are shipped with the Windows app.
+
 ## [2.29.0] - 2026-10-03
 ### Added
 - **The server's own icons** (Linux and Windows): the device-type icons (device list and the open device),

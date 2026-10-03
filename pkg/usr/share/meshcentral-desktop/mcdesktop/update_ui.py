@@ -42,7 +42,7 @@ class UpdateUI:
 
     def start(self):
         if self._timer is None:
-            GLib.timeout_add_seconds(5, self._auto_check)
+            GLib.timeout_add_seconds(5, lambda: (self._auto_check(), False)[1])     # once, shortly after start
             self._timer = GLib.timeout_add_seconds(updater.CHECK_EVERY_S, self._auto_check)
 
     def _auto_check(self):
@@ -226,10 +226,10 @@ class UpdateUI:
         self.progress.set_fraction(1)
         if kind == "deb":
             self.progress.set_text("Installing… enter your password when asked")
-            updater.install_deb(path, self._deb_done)
+            updater.install_deb(path, self._deb_done, self.info.get("sha256"))
         elif kind in ("inno", "msi"):
             self.progress.set_text("Closing the app to install the update…")
-            updater.install_windows(kind, path)
+            updater.install_windows(kind, path, sha256=self.info.get("sha256"))
             GLib.timeout_add(600, lambda: (self.app.quit(), False)[1])
         elif kind == "portable":
             dest = updater.install_portable(path)

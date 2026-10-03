@@ -9,6 +9,7 @@ pages cannot open windows, download files or read the clipboard, and page dialog
 """
 import json
 import os
+import sys
 import urllib.parse
 
 from .osdep import IS_WINDOWS
@@ -30,8 +31,10 @@ def server_origin(url):
 def navigation_allowed(uri, server_url):
     """Same-origin rule for views bound to the MeshCentral server."""
     uri = uri or ""
-    if uri.startswith(("about:", "data:", "blob:")):
+    if uri.startswith(("about:", "data:")):
         return True
+    if uri.startswith("blob:"):                       # blob:<origin>/<uuid>: only the server's own blobs
+        uri = uri[5:]
     return server_origin(uri) == server_origin(server_url)
 
 
@@ -73,7 +76,9 @@ class WebView:
         self.on_load_finished = self.on_alert = self.on_focus_changed = self.on_accelerator = None
         self._focused = False
         if IS_WINDOWS:
-            w = winweb.WebView2Widget(allow_insecure_tls=os.environ.get("MCD_TEST_INSECURE_TLS") == "1")
+            # test hook (local test server with its own certificate): never honoured by the installed app
+            insecure = os.environ.get("MCD_TEST_INSECURE_TLS") == "1" and not getattr(sys, "frozen", False)
+            w = winweb.WebView2Widget(allow_insecure_tls=insecure)
             if server_url:
                 w.allow_navigation = lambda uri: navigation_allowed(uri, server_url)
             w.on_load_finished = lambda ok: self.on_load_finished and self.on_load_finished()

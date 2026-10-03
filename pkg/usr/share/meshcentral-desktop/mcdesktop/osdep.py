@@ -180,6 +180,10 @@ if IS_WINDOWS:
         _user32.LoadIconW.restype = wintypes.HICON
         return _user32.LoadIconW(None, ctypes.c_void_p(32512))    # IDI_APPLICATION
 
+    def _wchars(text, size):
+        """Text that fits a WCHAR[size] field: cut by UTF-16 units (an emoji takes two), not by characters."""
+        return text.encode("utf-16-le")[:2 * (size - 1)].decode("utf-16-le", "ignore")
+
     def notify(hwnd, title, body):
         """A Windows notification (notification-area balloon, shown as a toast on Windows 10 / 11)."""
         if not hwnd:
@@ -191,8 +195,8 @@ if IS_WINDOWS:
         d.uFlags = _NIF_ICON | _NIF_TIP | _NIF_INFO
         d.hIcon = _icon()
         d.szTip = "MeshCentral Desktop"
-        d.szInfoTitle = (title or "")[:63]
-        d.szInfo = (body or " ")[:255]
+        d.szInfoTitle = _wchars(title or "", 64)
+        d.szInfo = _wchars(body or " ", 256)
         d.dwInfoFlags = 0x4 | 0x20                                  # NIIF_USER (our icon), NIIF_LARGE_ICON
         d.hBalloonIcon = d.hIcon
         if _tray["hwnd"] != hwnd:

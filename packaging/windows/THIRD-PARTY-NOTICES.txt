@@ -24,11 +24,16 @@ Adwaita and hicolor icon        LGPL 3 or CC BY-SA 3.0 /        https://gitlab.g
   themes                         GPL 2 or later (hicolor)
 websocket-client                Apache License 2.0              https://github.com/websocket-client/websocket-client
 comtypes                        MIT                             https://github.com/enthought/comtypes
+qrcode 8.2                      BSD 3-Clause                    https://github.com/lincolnloop/python-qrcode
+  (licence in licenses\qrcode)
 xterm.js 6.0.0, addon-fit       MIT                             https://github.com/xtermjs/xterm.js
   (licence files in mcdesktop\assets\xterm)
-Microsoft Edge WebView2 Loader  Microsoft WebView2 SDK licence  https://www.nuget.org/packages/Microsoft.Web.WebView2
-  (WebView2Loader.dll,           (redistributable)
-  WebView2.tlb)
+Microsoft Edge WebView2 Loader  BSD 3-Clause (WebView2 SDK)    https://www.nuget.org/packages/Microsoft.Web.WebView2
+  (WebView2Loader.dll,           licence and notices in
+  WebView2.tlb)                  licenses\LICENSE-WebView2.txt,
+                                 licenses\NOTICE-WebView2.txt
+PyInstaller bootloader          GPL 2.0 with the PyInstaller    https://pyinstaller.org
+                                bootloader exception
 MSYS2 / mingw-w64 runtime       ZPL 2.1, MIT and others         https://www.msys2.org
 
 The LGPL libraries are used as separate dynamic libraries (DLL files in the installation folder),
