@@ -7,6 +7,16 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Added
+- **Fullscreen toolbar position**: top, bottom, left or right (vertical), chosen in the bar's settings and
+  remembered.
+### Changed
+- The fullscreen toolbar comes back when the pointer reaches its edge anywhere along it (before, only the small
+  handle in the middle worked).
+- Compact fullscreen toolbar (icons only, a status dot instead of the status text: about a third narrower)
+  with a border, an accent line and a shadow, so it stands out from the remote computer's own panels.
+
 ## [3.0.0] - 2026-10-04
 MeshCentral Desktop 3: the complete remote desktop of the web interface in a native app, on Linux and on
 Windows (since 2.26.0: installers, Windows 11 look, in-app updates; 2.29.0: the server's own icons; 2.29.1:

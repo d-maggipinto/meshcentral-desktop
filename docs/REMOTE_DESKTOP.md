@@ -171,14 +171,22 @@ them (`features2 & 0x400`). The icons are the server's own (`icon-play.png`, `ic
 
 ## Fullscreen toolbar
 
-In fullscreen the panel's toolbar moves into an auto-hiding bar at the top of the screen (`desktop_fsbar.py`),
-with the image settings in a popover, a pin and Exit fullscreen; it moves back when fullscreen ends, so there
-is one set of buttons. The bar is shown for 3 seconds, then hides; a thin handle at the top edge brings it back
-on hover and it hides again shortly after the pointer leaves it (not while pinned or while a menu is open).
+In fullscreen the panel's toolbar moves into an auto-hiding bar on one edge of the screen (`desktop_fsbar.py`),
+in its compact form (icons only, a green status dot instead of the status text), with the image settings and
+the bar's position (top, bottom, left or right, saved as `desktop_bar_position`) in a popover, a pin and Exit
+fullscreen; it moves back when fullscreen ends, so there is one set of buttons. Left and right bars are
+vertical. A border, a blue accent line on the inner side and a shadow keep it apart from the remote
+computer's own panels.
+
+The bar is shown for 3 seconds, then hides. The pointer resting on the bar's edge of the screen, anywhere
+along it (3 px, about 0.1 s), brings it back: the position is polled every 60 ms while the bar is hidden; the
+edge triggers again only after the pointer has left it. A thin handle on that edge is the visual hint (hover
+or click works too). The bar hides again shortly after the pointer leaves it, not while pinned or while a
+menu is open.
+
 On Linux it is a revealer in the panel's overlay above the WebKit view. On Windows the remote screen is a
-native WebView2 window GTK cannot draw over, so the bar and the handle are small popup windows at the top of
-the monitor, made topmost through `SetWindowPos(HWND_TOPMOST)`; on screens narrower than 1500 px the long
-labels are dropped.
+native WebView2 window GTK cannot draw over, so the bar and the handle are small popup windows on the edge of
+the monitor, made topmost through `SetWindowPos(HWND_TOPMOST)`.
 
 ## Permissions
 

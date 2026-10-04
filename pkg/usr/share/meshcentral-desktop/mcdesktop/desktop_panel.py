@@ -95,14 +95,14 @@ class DesktopPanel(Gtk.Box):
         self.connect_btn.connect("clicked", self._toggle_connect)
         bar.pack_start(self.connect_btn, False, False, 0)
 
-        cad = Gtk.Button(label="Ctrl+Alt+Del")
+        cad = self._cad_btn = Gtk.Button(label="Ctrl+Alt+Del")
         cad.set_tooltip_text("Send Ctrl+Alt+Del to the remote computer")
         cad.connect("clicked", lambda *_: self._send_cad())
         bar.pack_start(cad, False, False, 0)
         self._ctrl_widgets.append(cad)
         self._input_widgets = [cad]                    # disabled for view-only accounts
 
-        clip = Gtk.Box()
+        clip = self._clip_box = Gtk.Box()
         clip.get_style_context().add_class("linked")
         paste = Gtk.Button.new_from_icon_name("edit-paste-symbolic", Gtk.IconSize.BUTTON)
         paste.set_tooltip_text("Send this computer's clipboard to the remote computer")
@@ -136,8 +136,9 @@ class DesktopPanel(Gtk.Box):
         self._recording = False
         self._input_locked = None        # remote user's input lock: None = unknown / not supported
         self._bg_hidden = False
-        tools = Gtk.Box()
+        tools = self._tools_box = Gtk.Box()
         tools.get_style_context().add_class("linked")
+        self._compact = False                # icons only (fullscreen bar)
         for key, fallback, tip, cb in (
                 ("tools", "utilities-system-monitor-symbolic", "Tools: the computer's processes and services",
                  self._open_tools),
@@ -306,7 +307,7 @@ class DesktopPanel(Gtk.Box):
         elif was_connected and not self._connected:
             self._sync_stop()
         self._kb_update()
-        self.connect_btn.set_label({"idle": "Connect", "connected": "Disconnect"}.get(phase, "Cancel"))
+        self._connect_label()
         if phase != "connected":
             self._set_controls_enabled(False)
         if phase in ("idle", "connected") and self._watchdog:
@@ -428,6 +429,8 @@ class DesktopPanel(Gtk.Box):
 
     def _set_status(self, text):
         self.status.set_text(text)
+        if getattr(self, "_fsbar", None) is not None:
+            self._fsbar.set_status(text, self._connected)
         if self._cover.get_visible() and self._cover_spinner.get_visible() and text:
             self._cover_label.set_text(text)
 
@@ -871,7 +874,8 @@ class DesktopPanel(Gtk.Box):
         if not visible:
             if self._fsbar is None:
                 from .desktop_fsbar import FullscreenBar
-                self._fsbar = FullscreenBar(self, self._overlay, self._toolbar, self._qbar, self.node.get("name", ""))
+                self._fsbar = FullscreenBar(self, self._overlay, self._toolbar, self._qbar, self.node.get("name", ""),
+                                            self.app.config.get("desktop_bar_position", "top"))
             self._fsbar.enter(self.node.get("name", ""))
             self._full_btn.hide()                      # the bar has its own Exit fullscreen
             self._hint_rev.set_margin_top(84)          # below the bar
@@ -879,6 +883,39 @@ class DesktopPanel(Gtk.Box):
             self._fsbar.leave()
             self._full_btn.show()
             self._hint_rev.set_margin_top(24)
+
+    def _connect_label(self):
+        text = {"idle": "Connect", "connected": "Disconnect"}.get(self._phase, "Cancel")
+        self.connect_btn.set_label("" if self._compact else text)
+        self.connect_btn.set_tooltip_text(text if self._compact else None)
+        self.connect_btn.set_always_show_image(True)
+
+    def set_compact(self, on, vertical=False):
+        """Fullscreen bar: icons only and (left / right bar) a vertical toolbar; normal toolbar otherwise."""
+        self._compact = on
+        self._connect_label()
+        self._cad_btn.set_label("" if on else "Ctrl+Alt+Del")
+        self._cad_btn.set_image(Gtk.Image.new_from_icon_name("preferences-desktop-keyboard-shortcuts-symbolic",
+                                                             Gtk.IconSize.BUTTON) if on else None)
+        self._cad_btn.set_tooltip_text("Send Ctrl+Alt+Del to the remote computer")
+        self._cad_btn.set_always_show_image(True)
+        tools = self._tool_btns["tools"][0]
+        tools.set_label("" if on else "Tools")
+        tools.set_image(Gtk.Image.new_from_icon_name("view-list-symbolic", Gtk.IconSize.BUTTON) if on else None)
+        tools.set_always_show_image(True)
+        self.status.set_visible(not on)            # the bar shows a status dot instead
+        orient = Gtk.Orientation.VERTICAL if vertical else Gtk.Orientation.HORIZONTAL
+        for box in (self._toolbar, self._clip_box, self._tools_box):
+            box.set_orientation(orient)
+        self._toolbar.set_spacing(4 if on else 6)
+        self._toolbar.set_margin_top(0 if on else 6)
+        self._toolbar.set_margin_bottom(0 if on else 6)
+        if self._fsbar is not None:
+            self._fsbar.set_status(self.status.get_text(), self._connected)
+
+    def save_bar_position(self, position):
+        self.app.config["desktop_bar_position"] = position
+        self.app.save_config()
 
     def exit_fullscreen(self):
         mw = getattr(self.app, "main_win", None)

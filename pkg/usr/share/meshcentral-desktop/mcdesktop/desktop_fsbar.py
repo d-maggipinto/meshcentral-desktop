@@ -3,38 +3,64 @@
 """Auto-hiding toolbar of the remote desktop in fullscreen (like the RDP connection bar).
 
 In fullscreen the desktop panel's own toolbar (connect, Ctrl+Alt+Del, clipboard, all the desktop tools) moves
-into a bar at the top of the screen, with the image settings in a popover, a pin and an Exit fullscreen button;
-it moves back when fullscreen ends, so there is one set of buttons. The bar is shown for a few seconds when
-fullscreen starts, then hides; a thin handle at the top edge brings it back on hover, and it hides again
-shortly after the pointer leaves it (unless pinned or a menu is open).
+into a bar on one edge of the screen, in its compact form (icons only, a status dot), with the image settings
+and the bar's position (top, bottom, left, right; remembered) in a popover, a pin and Exit fullscreen; it
+moves back when fullscreen ends, so there is one set of buttons. The bar is shown for a few seconds when
+fullscreen starts, then hides; a thin handle on that edge brings it back on hover, and it hides again shortly
+after the pointer leaves it (unless pinned or a menu is open). A border, an accent line on the inner side and
+a shadow keep it apart from the remote computer's own panels.
 
 Linux: the bar lives in the panel's Gtk.Overlay above the web view (WebKitGTK is a GTK widget).
 Windows: the remote screen is a native Edge WebView2 window that GTK cannot draw over, so the bar and the
-handle are small always-on-top popup windows placed at the top of the monitor.
+handle are small always-on-top popup windows placed on the edge of the monitor.
 """
 from gi.repository import Gdk, GLib, Gtk
 
 from .osdep import IS_WINDOWS
 
+POSITIONS = [("top", "pan-up-symbolic", "Top"), ("bottom", "pan-down-symbolic", "Bottom"),
+             ("left", "pan-start-symbolic", "Left"), ("right", "pan-end-symbolic", "Right")]
 CSS = b"""
-.mcd-fs-bar { background-color: rgba(28, 30, 34, 0.94); border-radius: 0 0 10px 10px; padding: 4px 8px;
-              box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45); }
+.mcd-fs-bar { background-color: rgba(30, 33, 38, 0.96); padding: 4px 6px;
+              border: 1px solid rgba(255, 255, 255, 0.22);
+              box-shadow: 0 3px 14px rgba(0, 0, 0, 0.55); }
+.mcd-fs-bar.top { border-top-width: 0; border-radius: 0 0 10px 10px; border-bottom: 2px solid #4c8bf5; }
+.mcd-fs-bar.bottom { border-bottom-width: 0; border-radius: 10px 10px 0 0; border-top: 2px solid #4c8bf5; }
+.mcd-fs-bar.left { border-left-width: 0; border-radius: 0 10px 10px 0; border-right: 2px solid #4c8bf5; }
+.mcd-fs-bar.right { border-right-width: 0; border-radius: 10px 0 0 10px; border-left: 2px solid #4c8bf5; }
 .mcd-fs-bar label { color: #eceef1; }
+.mcd-fs-bar .mcd-fs-title { font-weight: bold; margin: 0 6px 0 4px; }
+.mcd-fs-bar .mcd-fs-dot { font-size: 14pt; margin: 0 4px; }
+.mcd-fs-bar .mcd-fs-dot.on { color: #2ecc71; }
+.mcd-fs-bar .mcd-fs-dot.off { color: #8a8f98; }
 .mcd-fs-bar button { background-color: rgba(255, 255, 255, 0.07); background-image: none; color: #eceef1;
-                     border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: none; text-shadow: none; }
+                     border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: none; text-shadow: none;
+                     min-width: 26px; min-height: 26px; padding: 2px 4px; }
 .mcd-fs-bar button:hover { background-color: rgba(255, 255, 255, 0.15); }
 .mcd-fs-bar button:active, .mcd-fs-bar button:checked { background-color: rgba(255, 255, 255, 0.24); }
 .mcd-fs-bar button:disabled, .mcd-fs-bar button:disabled label { color: rgba(236, 238, 241, 0.35); }
 .mcd-fs-bar button.suggested-action { background-color: #2f6fd6; border-color: #2f6fd6; }
 .mcd-fs-bar button image { color: #eceef1; }
-.mcd-fs-bar .mcd-fs-title { font-weight: bold; margin: 0 8px 0 4px; }
-.mcd-fs-handle { background-color: rgba(255, 255, 255, 0.40); border-radius: 0 0 4px 4px;
-                 min-width: 140px; min-height: 5px; }
+.mcd-fs-handle { background-color: rgba(76, 139, 245, 0.85); border-radius: 3px; }
 .mcd-fs-handle-area { background-color: transparent; }
 """
 _css_done = False
 HIDE_MS = 900
 SHOW_FIRST_MS = 3000
+HANDLE_LONG, HANDLE_THICK = 160, 5
+EDGE_PX = 3              # the pointer within this distance of the bar's edge, anywhere along it, shows the bar
+EDGE_POLL_MS = 60
+EDGE_DWELL = 2           # polls in a row at the edge (about 0.1 s: not when the pointer only passes by)
+
+
+def _install_css():
+    global _css_done
+    if not _css_done:
+        prov = Gtk.CssProvider()
+        prov.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 20)
+        _css_done = True
 
 
 def _topmost(win):
@@ -51,37 +77,55 @@ def _topmost(win):
         pass
 
 
-def _install_css():
-    global _css_done
-    if not _css_done:
-        prov = Gtk.CssProvider()
-        prov.load_from_data(CSS)
-        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov,
-                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 20)
-        _css_done = True
-
-
 class FullscreenBar:
-    def __init__(self, panel, overlay, toolbar, settings_box, title):
+    def __init__(self, panel, overlay, toolbar, settings_box, title, position="top"):
         """toolbar / settings_box: the panel's widgets that move into the bar while fullscreen lasts."""
         _install_css()
-        self.panel, self.toolbar, self.settings_box = panel, toolbar, settings_box
+        self.panel, self.overlay, self.toolbar, self.settings_box = panel, overlay, toolbar, settings_box
+        self.position = position if position in [p for p, _i, _l in POSITIONS] else "top"
         self.active = self.shown = self.pinned = False
         self._timer = None
+        self._edge_timer = None
+        self._edge_hits = 0
+        self._edge_armed = True              # the edge triggers again only after the pointer has left it
         self._homes = {}                                    # widget -> (parent, position) to put it back
 
-        self.content = Gtk.Box(spacing=6)
+        self.content = Gtk.Box(spacing=4)
         self.content.get_style_context().add_class("mcd-fs-bar")
-        self.title = Gtk.Label(label=title, max_width_chars=18, ellipsize=3)
+        self.title = Gtk.Label(label=title, max_width_chars=16, ellipsize=3)
         self.title.get_style_context().add_class("mcd-fs-title")
         self.content.pack_start(self.title, False, False, 0)
+        self.dot = Gtk.Label(label="●")
+        self.dot.get_style_context().add_class("mcd-fs-dot")
+        self.content.pack_start(self.dot, False, False, 0)
         self.slot = Gtk.Box()
         self.content.pack_start(self.slot, True, True, 0)
-        self.settings = Gtk.MenuButton(tooltip_text="Image quality, display, clipboard and hotkey settings")
+        self.settings = Gtk.MenuButton(tooltip_text="Image quality, display, clipboard, hotkeys and toolbar position")
         self.settings.set_image(Gtk.Image.new_from_icon_name("emblem-system-symbolic", Gtk.IconSize.BUTTON))
         pop = Gtk.Popover()
-        self.pop_box = Gtk.Box(margin=8)
-        pop.add(self.pop_box)
+        pbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=8)
+        prow = Gtk.Box(spacing=8)
+        prow.pack_start(Gtk.Label(label="Toolbar position:"), False, False, 0)
+        group = Gtk.Box()
+        group.get_style_context().add_class("linked")
+        self.pos_btns = {}
+        first = None
+        for pid, icon, label in POSITIONS:
+            b = Gtk.RadioButton.new_from_widget(first)
+            first = first or b
+            b.set_mode(False)
+            b.set_image(Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.BUTTON))
+            b.set_tooltip_text(label)
+            b.set_active(pid == self.position)
+            b.connect("toggled", lambda w, p=pid: w.get_active() and self.set_position(p))
+            group.add(b)
+            self.pos_btns[pid] = b
+        prow.pack_start(group, False, False, 0)
+        pbox.pack_start(prow, False, False, 0)
+        self.pop_box = Gtk.Box()
+        pbox.pack_start(self.pop_box, False, False, 0)
+        pop.add(pbox)
+        pbox.show_all()
         self.settings.set_popover(pop)
         pop.connect("closed", lambda *_: self._schedule_hide())
         self.content.pack_start(self.settings, False, False, 0)
@@ -89,25 +133,22 @@ class FullscreenBar:
         self.pin.set_image(Gtk.Image.new_from_icon_name("view-pin-symbolic", Gtk.IconSize.BUTTON))
         self.pin.connect("toggled", self._on_pin)
         self.content.pack_start(self.pin, False, False, 0)
-        exit_btn = Gtk.Button(label="Exit fullscreen", tooltip_text="Exit fullscreen (Ctrl+Alt+F)",
-                              image=Gtk.Image.new_from_icon_name("view-restore-symbolic", Gtk.IconSize.BUTTON),
-                              always_show_image=True)
-        exit_btn.get_style_context().add_class("suggested-action")
-        self.exit_btn = exit_btn
-        exit_btn.connect("clicked", lambda *_: GLib.idle_add(lambda: (panel.exit_fullscreen(), False)[1]))
-        self.content.pack_start(exit_btn, False, False, 0)
+        self.exit_btn = Gtk.Button(tooltip_text="Exit fullscreen (Ctrl+Alt+F)",
+                                   image=Gtk.Image.new_from_icon_name("view-restore-symbolic", Gtk.IconSize.BUTTON))
+        self.exit_btn.get_style_context().add_class("suggested-action")
+        self.exit_btn.connect("clicked", lambda *_: GLib.idle_add(lambda: (panel.exit_fullscreen(), False)[1]))
+        self.content.pack_start(self.exit_btn, False, False, 0)
 
-        self.frame = Gtk.EventBox(above_child=False)
+        self.frame = Gtk.EventBox()
         self.frame.add(self.content)
         self.frame.connect("enter-notify-event", lambda *_: self._cancel_hide())
         self.frame.connect("leave-notify-event", self._on_leave)
 
-        handle = Gtk.Box(halign=Gtk.Align.CENTER, valign=Gtk.Align.START)
-        handle.get_style_context().add_class("mcd-fs-handle")
-        self.handle = Gtk.EventBox(halign=Gtk.Align.CENTER, valign=Gtk.Align.START)
+        self.handle_line = Gtk.Box()
+        self.handle_line.get_style_context().add_class("mcd-fs-handle")
+        self.handle = Gtk.EventBox()
         self.handle.get_style_context().add_class("mcd-fs-handle-area")
-        self.handle.set_size_request(260, 12)              # easier to hit than the 5 px line it shows
-        self.handle.add(handle)
+        self.handle.add(self.handle_line)
         self.handle.set_tooltip_text("Toolbar")
         self.handle.connect("enter-notify-event", lambda *_: self.show(hold=True))
         self.handle.connect("button-press-event", lambda *_: self.show(hold=True))
@@ -120,13 +161,80 @@ class FullscreenBar:
             for w in (self.bar_win, self.handle_win):
                 w.set_keep_above(True)
         else:
-            self.rev = Gtk.Revealer(halign=Gtk.Align.CENTER, valign=Gtk.Align.START, transition_duration=160,
-                                    transition_type=Gtk.RevealerTransitionType.SLIDE_DOWN)
+            self.rev = Gtk.Revealer(transition_duration=160)
             self.rev.add(self.frame)
             self.rev.set_no_show_all(True)
             self.handle.set_no_show_all(True)
             overlay.add_overlay(self.handle)
             overlay.add_overlay(self.rev)
+        self._layout()
+
+    # ---- position -------------------------------------------------------------------------------------
+    @property
+    def vertical(self):
+        return self.position in ("left", "right")
+
+    def _layout(self):
+        """Orientation, side styles, handle shape and (Linux) where the bar slides in from."""
+        vertical = self.vertical
+        self.content.set_orientation(Gtk.Orientation.VERTICAL if vertical else Gtk.Orientation.HORIZONTAL)
+        self.slot.set_orientation(self.content.get_orientation())
+        style = self.content.get_style_context()
+        for p, _i, _l in POSITIONS:
+            style.remove_class(p)
+        style.add_class(self.position)
+        self.title.set_visible(not vertical)
+        self.title.set_no_show_all(vertical)
+        long_, thick = HANDLE_LONG, HANDLE_THICK
+        self.handle_line.set_size_request(thick if vertical else long_, long_ if vertical else thick)
+        self.handle.set_size_request(14 if vertical else 260, 260 if vertical else 14)
+        align = {"top": (Gtk.Align.CENTER, Gtk.Align.START), "bottom": (Gtk.Align.CENTER, Gtk.Align.END),
+                 "left": (Gtk.Align.START, Gtk.Align.CENTER), "right": (Gtk.Align.END, Gtk.Align.CENTER)}
+        h, v = align[self.position]
+        for w in (self.handle, self.handle_line):
+            w.set_halign(h)
+            w.set_valign(v)
+        if not IS_WINDOWS:
+            self.rev.set_halign(h)
+            self.rev.set_valign(v)
+            self.rev.set_transition_type({
+                "top": Gtk.RevealerTransitionType.SLIDE_DOWN, "bottom": Gtk.RevealerTransitionType.SLIDE_UP,
+                "left": Gtk.RevealerTransitionType.SLIDE_RIGHT,
+                "right": Gtk.RevealerTransitionType.SLIDE_LEFT}[self.position])
+
+    def set_position(self, position):
+        if position == self.position:
+            return
+        self.position = position
+        self.panel.save_bar_position(position)
+        self.panel.set_compact(True, self.vertical)
+        self._layout()
+        if IS_WINDOWS:
+            self.bar_win.resize(1, 1)                    # shrink to the new orientation's natural size
+            self.handle_win.resize(1, 1)
+        if self.active:
+            self.show(hold=self.settings.get_active())
+
+    def _place(self, win):
+        """Windows: a popup window centred on the bar's edge of the monitor."""
+        g = self._monitor_geometry()
+        if not g:
+            return
+        # the natural size of the new layout: right after a change of orientation get_size() is still the old one
+        nat = win.get_child().get_preferred_size()[1] if win.get_child() else None
+        w, h = (nat.width, nat.height) if nat else win.get_size()
+        win.resize(w, h)
+        x = {"left": g.x, "right": g.x + g.width - w}.get(self.position, g.x + max(0, (g.width - w) // 2))
+        y = {"top": g.y, "bottom": g.y + g.height - h}.get(self.position, g.y + max(0, (g.height - h) // 2))
+        win.move(x, y)
+        _topmost(win)
+
+    # ---- status ---------------------------------------------------------------------------------------
+    def set_status(self, text, connected):
+        style = self.dot.get_style_context()
+        style.remove_class("on" if not connected else "off")
+        style.add_class("on" if connected else "off")
+        self.dot.set_tooltip_text(text or ("Connected" if connected else "Not connected"))
 
     # ---- moving the panel's toolbar in and out -------------------------------------------------------
     def _move(self, widget, new_parent):
@@ -157,28 +265,28 @@ class FullscreenBar:
         self.active = True
         if title:
             self.title.set_text(title)
+        self._layout()
+        self.content.show_all()                       # before the toolbar moves in: show_all would undo compact
+        self.title.set_visible(not self.vertical)
+        self.frame.show()
+        self.handle_line.show()
         self._move(self.toolbar, self.slot)
         self._move(self.settings_box, self.pop_box)
-        g = self._monitor_geometry()
-        narrow = g is not None and g.width < 1500             # e.g. 1280 x 800: no room for the long labels
-        self.exit_btn.set_label("" if narrow else "Exit fullscreen")
-        self.pop_box.show_all()
-        self.content.show_all()
-        self.frame.show()
-        if IS_WINDOWS:
-            self.frame.show_all()
-            self.handle.show_all()
-        else:
-            self.handle.get_child().show()
+        self.panel.set_compact(True, self.vertical)
+        if not IS_WINDOWS:
             self.rev.show()
         self.show()
         self._schedule_hide(SHOW_FIRST_MS)
+        self._edge_timer = GLib.timeout_add(EDGE_POLL_MS, self._poll_edge)
 
     def leave(self):
         if not self.active:
             return
         self.active = self.shown = False
         self._cancel_hide()
+        if self._edge_timer:
+            GLib.source_remove(self._edge_timer)
+            self._edge_timer = None
         self.pin.set_active(False)
         self.settings.set_active(False)
         if IS_WINDOWS:
@@ -190,6 +298,7 @@ class FullscreenBar:
             self.handle.hide()
         self._move_home(self.settings_box)
         self._move_home(self.toolbar)
+        self.panel.set_compact(False, False)
 
     def destroy(self):
         self.leave()
@@ -212,12 +321,8 @@ class FullscreenBar:
         self.shown = True
         if IS_WINDOWS:
             self.handle_win.hide()
-            self.bar_win.show_all()
-            g = self._monitor_geometry()
-            if g:
-                w, _h = self.bar_win.get_size()
-                self.bar_win.move(g.x + max(0, (g.width - w) // 2), g.y)
-            _topmost(self.bar_win)
+            self.bar_win.show()                       # not show_all: the compact toolbar hides some widgets
+            self._place(self.bar_win)
         else:
             self.handle.hide()
             self.rev.set_reveal_child(True)
@@ -232,18 +337,45 @@ class FullscreenBar:
         self.shown = False
         if IS_WINDOWS:
             self.bar_win.hide()
-            g = self._monitor_geometry()
-            self.handle_win.show_all()
-            if g:
-                w, _h = self.handle_win.get_size()
-                self.handle_win.move(g.x + max(0, (g.width - w) // 2), g.y)
-            _topmost(self.handle_win)
+            self.handle.show()
+            self.handle_win.show()
+            self._place(self.handle_win)
         else:
             self.rev.set_reveal_child(False)
-            self.handle.get_child().show()
-            self.handle.show()              # no_show_all: show_all() would not show it
-        self.panel.focus_remote()                           # keys go to the remote screen again
+            self.handle.show()                  # no_show_all: show_all() would not show it
+        self.panel.focus_remote()               # keys go to the remote screen again
         return False
+
+    def _poll_edge(self):
+        """While the bar is hidden: the pointer resting on the bar's edge of the screen, anywhere along it,
+        brings the bar back (the handle alone is a small target)."""
+        if not self.active:
+            self._edge_timer = None
+            return False
+        if self.shown or self.pinned:
+            self._edge_hits = 0
+            return True
+        g = self._monitor_geometry()
+        top = self.panel.get_toplevel()
+        gdkwin = top.get_window() if top else None
+        seat = Gdk.Display.get_default().get_default_seat()
+        if not g or gdkwin is None or seat is None or seat.get_pointer() is None:
+            return True
+        _w, x, y, _m = gdkwin.get_device_position(seat.get_pointer())     # window = whole monitor in fullscreen
+        ox, oy = gdkwin.get_origin()[1:]
+        x, y = x + ox - g.x, y + oy - g.y                                   # monitor coordinates
+        inside = 0 <= x < g.width and 0 <= y < g.height
+        at_edge = inside and {"top": y <= EDGE_PX, "bottom": y >= g.height - 1 - EDGE_PX,
+                              "left": x <= EDGE_PX, "right": x >= g.width - 1 - EDGE_PX}[self.position]
+        if not at_edge:
+            self._edge_armed = True
+        self._edge_hits = self._edge_hits + 1 if at_edge and self._edge_armed else 0
+        if self._edge_hits >= EDGE_DWELL:
+            self._edge_hits = 0
+            self._edge_armed = False
+            self.show(hold=True)
+            self._schedule_hide(2500)                 # hides again if the pointer never reaches the bar
+        return True
 
     def _schedule_hide(self, ms=HIDE_MS):
         self._cancel_hide()
