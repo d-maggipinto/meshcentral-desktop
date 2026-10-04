@@ -259,7 +259,9 @@ class A(appmod.App):
         p._save_dialog = lambda title, name, kind: os.path.join(self.vid_dir, name)
         p.rec_format.set_active(0)
         p._toggle_record()
-        GLib.timeout_add(9000, self.vid_stop)   # MP4 -> WebM -> .mcrec fallbacks happen by ~7 s
+        # MP4 -> WebM -> .mcrec fallbacks happen by ~7 s; .mcrec starts asynchronously (key frame first)
+        GLib.timeout_add(9000, lambda: (self.wait(lambda: self.desk._recording, self.vid_stop, 20,
+                                                  "recording running after the format checks"), False)[1])
         return False
 
     def vid_stop(self):
