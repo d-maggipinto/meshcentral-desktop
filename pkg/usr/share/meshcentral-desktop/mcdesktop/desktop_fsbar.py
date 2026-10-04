@@ -50,7 +50,17 @@ CSS = b"""
 .mcd-fs-bar button image { color: #eceef1; }
 .mcd-fs-panel { background-color: rgba(30, 33, 38, 0.98); border: 1px solid rgba(255, 255, 255, 0.22);
                 border-radius: 8px; }
+popover.mcd-fs-panel { padding: 0; border-radius: 8px; }
 .mcd-fs-panel label { color: #eceef1; }
+.mcd-fs-panel .mcd-fs-section { color: #8fb4f7; font-weight: bold; font-size: 9pt; margin-top: 8px; }
+.mcd-fs-panel button, .mcd-fs-panel combobox button { background-color: rgba(255, 255, 255, 0.07);
+    background-image: none; color: #eceef1; border: 1px solid rgba(255, 255, 255, 0.14); box-shadow: none;
+    text-shadow: none; }
+.mcd-fs-panel button:hover { background-color: rgba(255, 255, 255, 0.15); }
+.mcd-fs-panel button:checked { background-color: #2f6fd6; border-color: #2f6fd6; color: #ffffff; }
+.mcd-fs-panel button image, .mcd-fs-panel button label, .mcd-fs-panel combobox arrow { color: #eceef1; }
+.mcd-fs-panel switch { background-color: rgba(255, 255, 255, 0.14); border-color: rgba(255, 255, 255, 0.2); }
+.mcd-fs-panel switch:checked { background-color: #2f6fd6; border-color: #2f6fd6; }
 .mcd-fs-handle { background-color: rgba(76, 139, 245, 0.85); border-radius: 3px; }
 .mcd-fs-handle-area { background-color: transparent; }
 window.mcd-fs-handle-win { background-color: #4c8bf5; }
@@ -125,10 +135,11 @@ class FullscreenBar:
         # the 42 px bar, so nothing appears): the settings get their own popup window next to the bar instead
         self.settings = Gtk.ToggleButton(tooltip_text=tip) if IS_WINDOWS else Gtk.MenuButton(tooltip_text=tip)
         self.settings.set_image(Gtk.Image.new_from_icon_name("emblem-system-symbolic", Gtk.IconSize.BUTTON))
-        pbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=8)
+        pbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=14)
+        pbox.set_size_request(300, -1)
+        pbox.pack_start(self._section("Toolbar position"), False, False, 0)
         prow = Gtk.Box(spacing=8)
-        prow.pack_start(Gtk.Label(label="Toolbar position:"), False, False, 0)
-        group = Gtk.Box()
+        group = Gtk.Box(homogeneous=True)
         group.get_style_context().add_class("linked")
         self.pos_btns = {}
         first = None
@@ -137,15 +148,19 @@ class FullscreenBar:
             first = first or b
             b.set_mode(False)
             b.set_image(Gtk.Image.new_from_icon_name(icon, Gtk.IconSize.BUTTON))
-            b.set_tooltip_text(label)
+            b.set_label(label)
+            b.set_always_show_image(True)
+            b.set_tooltip_text("Toolbar at the %s edge" % label.lower())
             b.set_active(pid == self.position)
             b.connect("toggled", lambda w, p=pid: w.get_active() and self.set_position(p))
             group.add(b)
             self.pos_btns[pid] = b
-        prow.pack_start(group, False, False, 0)
+        prow.pack_start(group, True, True, 0)
         pbox.pack_start(prow, False, False, 0)
-        self.pop_box = Gtk.Box()
+        # the panel's settings row is laid out here as labelled sections while fullscreen lasts (_grid_in)
+        self.pop_box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6)
         pbox.pack_start(self.pop_box, False, False, 0)
+        self._grid_items = []
         pbox.show_all()
         if IS_WINDOWS:
             self.settings_win = Gtk.Window(type=Gtk.WindowType.POPUP)
@@ -159,6 +174,7 @@ class FullscreenBar:
             self.settings.connect("toggled", self._on_settings_toggled)
         else:
             pop = Gtk.Popover()
+            pop.get_style_context().add_class("mcd-fs-panel")
             pop.add(pbox)
             self.settings.set_popover(pop)
             pop.connect("closed", lambda *_: self._schedule_hide())
@@ -282,6 +298,74 @@ class FullscreenBar:
         style.add_class("on" if connected else "off")
         self.dot.set_tooltip_text(text or ("Connected" if connected else "Not connected"))
 
+    @staticmethod
+    def _section(text):
+        lbl = Gtk.Label(label=text, xalign=0)
+        lbl.get_style_context().add_class("mcd-fs-section")
+        return lbl
+
+    # settings row (label, widget pairs) -> sections in the panel; the label text picks the section
+    SECTIONS = [("Remote image", ("Quality", "Speed", "Encoding", "Scale", "Display")),
+                ("Recording", ("Recording",)),
+                ("While connected", ("Clipboard sync", "Send hotkeys"))]
+
+    PANEL_LABELS = {"Recording": "File format"}             # the section title already says "Recording"
+
+    def _grid_in(self):
+        box = self.settings_box
+        kids = box.get_children()
+        self._grid_items = list(kids)
+        pairs = {}
+        for lbl, w in zip(kids[0::2], kids[1::2]):
+            pairs[lbl.get_text().rstrip(":")] = (lbl, w)
+        for k in kids:
+            box.remove(k)
+        for title, names in self.SECTIONS:
+            grid = Gtk.Grid(column_spacing=16, row_spacing=6, margin_bottom=4)
+            row = 0
+            for name in names:
+                if name not in pairs:
+                    continue
+                lbl, w = pairs.pop(name)
+                if name in self.PANEL_LABELS:
+                    lbl.set_text(self.PANEL_LABELS[name])
+                lbl.set_xalign(0)
+                lbl.set_hexpand(True)
+                w.set_halign(Gtk.Align.END if isinstance(w, Gtk.Switch) else Gtk.Align.FILL)
+                if not isinstance(w, Gtk.Switch):
+                    w.set_size_request(190, -1)
+                grid.attach(lbl, 0, row, 1, 1)
+                grid.attach(w, 1, row, 1, 1)
+                row += 1
+            if row:
+                self.pop_box.pack_start(self._section(title), False, False, 0)
+                self.pop_box.pack_start(grid, False, False, 0)
+        for lbl, w in pairs.values():                  # anything new: at the end, not lost
+            grid = Gtk.Grid(column_spacing=16)
+            grid.attach(lbl, 0, 0, 1, 1)
+            grid.attach(w, 1, 0, 1, 1)
+            self.pop_box.pack_start(grid, False, False, 0)
+        self.pop_box.show_all()
+
+    def _grid_out(self):
+        for k in self._grid_items:
+            parent = k.get_parent()
+            if parent is not None:
+                parent.remove(k)
+            k.set_hexpand(False)
+            k.set_halign(Gtk.Align.FILL)
+            if isinstance(k, Gtk.Label):
+                for name, shown in self.PANEL_LABELS.items():
+                    if k.get_text() == shown:
+                        k.set_text(name + ":")
+            if isinstance(k, Gtk.ComboBox):
+                k.set_size_request(-1, -1)
+            self.settings_box.pack_start(k, False, False, 0)
+        for child in self.pop_box.get_children():
+            self.pop_box.remove(child)
+            child.destroy()
+        self._grid_items = []
+
     # ---- moving the panel's toolbar in and out -------------------------------------------------------
     def _move(self, widget, new_parent):
         old = widget.get_parent()
@@ -317,7 +401,7 @@ class FullscreenBar:
         self.frame.show()
         self.handle_line.show()
         self._move(self.toolbar, self.slot)
-        self._move(self.settings_box, self.pop_box)
+        self._grid_in()
         self.panel.set_compact(True, self.vertical)
         if not IS_WINDOWS:
             self.rev.show()
@@ -343,7 +427,7 @@ class FullscreenBar:
             self.rev.set_reveal_child(False)
             self.rev.hide()
             self.handle.hide()
-        self._move_home(self.settings_box)
+        self._grid_out()
         self._move_home(self.toolbar)
         self.panel.set_compact(False, False)
 

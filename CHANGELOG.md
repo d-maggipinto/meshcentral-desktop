@@ -16,9 +16,17 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
 - Windows: a white box around the fullscreen toolbar's edge handle (the handle window is now just the blue line).
 - Windows: a thin light line on the top and left edges of the screen in remote desktop fullscreen.
 - Remote desktop tools: "Open a web address" and "Toggle background" now report what the agent did (the web
-  UI shows nothing). On Linux devices the agent can only change the background on GNOME desktops, and opening a
-  web address or the chat needs its xdg-open to reach the user's desktop session; the app now says so instead of
-  appearing to do nothing.
+  UI shows nothing).
+
+### Added
+- Session recording as video: a recording format setting, "Video (MP4)" (the default) or "MeshCentral (.mcrec)".
+  The video is recorded from the remote screen as you see it and plays in any video player.
+- Linux devices: "Open a web address", the chat and "Toggle background" now work on Linux desktops where the
+  agent alone fails (its xdg-open cannot reach the user's desktop session, and it only changes GNOME
+  backgrounds). With agent console rights the app runs them in the console user's desktop session, like the
+  clipboard fix; XFCE backgrounds are toggled with xfconf-query. Other cases use the agent's own commands.
+- Fullscreen toolbar settings panel redesigned: labelled sections (toolbar position, remote image, recording,
+  while connected) in a dark panel matching the toolbar.
 
 ## [3.0.2] - 2026-10-04
 ### Fixed

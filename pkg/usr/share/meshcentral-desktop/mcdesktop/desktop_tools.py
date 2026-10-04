@@ -47,18 +47,22 @@ def valid_url(text):
     return (x.startswith("http://") and len(x) > 7) or (x.startswith("https://") and len(x) > 8)
 
 
-def open_url_dialog(parent, ctrl, node, on_result=None):
+def open_url_dialog(parent, ctrl, node, on_result=None, sender=None):
+    """sender(url): open it another way (Linux devices: in the user's session); default = the agent's openUrl."""
     """Web UI deviceUrlFunction: the agent opens the page in the remote user's browser."""
     d, area, ok = dl._dialog(parent, "Open a web address on the remote computer", "Open", 480)
     entry = Gtk.Entry(placeholder_text="https://example.com", activates_default=True)
     area.pack_start(entry, False, False, 0)
     ok.set_sensitive(False)
     entry.connect("changed", lambda *_: ok.set_sensitive(valid_url(entry.get_text())))
-    if dl._run(d) and valid_url(entry.get_text()):
+    url = entry.get_text().strip() if dl._run(d) and valid_url(entry.get_text()) else None
+    d.destroy()
+    if url and sender:
+        sender(url)
+    elif url:
         if on_result:
             _watch_open_url(ctrl, node, on_result)
-        ctrl.send({"action": "msg", "type": "openUrl", "nodeid": node["_id"], "url": entry.get_text().strip()})
-    d.destroy()
+        ctrl.send({"action": "msg", "type": "openUrl", "nodeid": node["_id"], "url": url})
 
 
 def _watch_open_url(ctrl, node, on_result):

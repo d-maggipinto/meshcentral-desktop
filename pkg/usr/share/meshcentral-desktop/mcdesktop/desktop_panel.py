@@ -18,6 +18,7 @@ functions, connectDesktop) via run_javascript.
 import base64
 import json
 import os
+import re
 import time
 import urllib.parse
 
@@ -35,6 +36,7 @@ _ENCODING = [("WEBP", 4), ("JPEG", 1), ("PNG", 2)]                # SendCompress
 # Agent-side scaling (1024 = 100%). "Auto" streams at the size we actually display, so a
 # big / multi-monitor remote isn't sent at full resolution just to be shrunk locally.
 _SCALE = [("Auto", 0), ("100%", 1024), ("75%", 768), ("50%", 512)]
+_REC_FORMATS = [("Video (MP4)", "video"), ("MeshCentral (.mcrec)", "mcrec")]
 _TYPE_MAX = 20000          # chars; typing is one key message pair per char
 
 _COVER_CSS = b"""
@@ -136,6 +138,7 @@ class DesktopPanel(Gtk.Box):
         self._recording = False
         self._input_locked = None        # remote user's input lock: None = unknown / not supported
         self._bg_hidden = False
+        self._rec_kind = None                # 'mp4' / 'webm' (video) or 'mcrec' while recording
         tools = self._tools_box = Gtk.Box()
         tools.get_style_context().add_class("linked")
         self._compact = False                # icons only (fullscreen bar)
@@ -180,6 +183,14 @@ class DesktopPanel(Gtk.Box):
         # really sends is read from the tiles and shown after every change (_check_format).
         self.encoding = self._combo("Encoding", _ENCODING, 0, qbar)
         self.scale = self._combo("Scale", _SCALE, 0, qbar)
+        self.rec_format = self._combo("Recording", _REC_FORMATS,
+                                      [v for _t, v in _REC_FORMATS].index(
+                                          app.config.get("desktop_record_format", "video")
+                                          if app.config.get("desktop_record_format") in ("video", "mcrec") else "video"),
+                                      qbar)
+        self.rec_format.set_tooltip_text("Video (MP4, or WebM where MP4 is not available) plays anywhere; "
+                                         "MeshCentral session files play in the server's player")
+        self.rec_format.connect("changed", self._on_rec_format)
         qbar.pack_start(Gtk.Label(label="Clipboard sync:"), False, False, 0)
         self.clip_sync = Gtk.Switch(valign=Gtk.Align.CENTER,
                                     active=bool(app.config.get("clipboard_sync", True)))
@@ -552,14 +563,101 @@ class DesktopPanel(Gtk.Box):
         from . import device_list as dl
         dl.GroupActions(self._parent_window(), single=True).op_run([self.node])
 
+    # ---- Linux devices: open URL / chat / background in the user's desktop session ---------------------------
+    # The stock agent runs xdg-open without the desktop's DISPLAY / D-Bus (fails on many Linux desktops) and
+    # changes the background only through GNOME settings. These one-shot console evals (agent console rights,
+    # logged by the server like every console command; nothing is kept in the agent except the saved XFCE
+    # background styles) find the console user's session environment in /proc and run the tool as that user.
+    # Agent-JS rules: no double quote and no backslash.
+    _LINUX_ENV_JS = (
+        "var fs=require('fs'),NL=String.fromCharCode(10),uid=require('user-sessions').consoleUid();"
+        "function senv(){var ps=fs.readdirSync('/proc'),fb=null;for(var i=0;i<ps.length;i++){var p=ps[i];"
+        "if(!(parseInt(p)>0))continue;try{var ls=fs.readFileSync('/proc/'+p+'/status').toString().split(NL);"
+        "var u=-1;for(var j=0;j<ls.length;j++){if(ls[j].indexOf('Uid:')==0){u=parseInt(ls[j].substring(4).trim());"
+        "break;}}if(u!=uid)continue;var b=fs.readFileSync('/proc/'+p+'/environ'),e={},st=0;"
+        "for(var k=0;k<=b.length;k++){if(k==b.length||b[k]==0){if(k>st){var kv=b.slice(st,k).toString();"
+        "var q=kv.indexOf('=');if(q>0){e[kv.substring(0,q)]=kv.substring(q+1);}}st=k+1;}}"
+        "if(!e.DISPLAY&&!e.WAYLAND_DISPLAY)continue;var r={},K=['DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS',"
+        "'HOME','USER','LOGNAME','XDG_RUNTIME_DIR','WAYLAND_DISPLAY','PATH','LANG','XDG_CURRENT_DESKTOP',"
+        "'XDG_SESSION_TYPE'];for(var m=0;m<K.length;m++){if(e[K[m]]){r[K[m]]=e[K[m]];}}"
+        "if(r.DBUS_SESSION_BUS_ADDRESS){return r;}if(!fb){fb=r;}}catch(x){}}return fb;}"
+        "var E=senv(),root=false;try{root=require('user-sessions').isRoot();}catch(x){}"
+        "var O=root?{uid:uid,env:E}:{env:E};")
+    _URL_JS = (
+        "(function(){try{" + _LINUX_ENV_JS +
+        "if(!E){return 'MCDURL:nodisplay';}var url=Buffer.from('%s','base64').toString();"
+        "if(url.indexOf('http://')!=0&&url.indexOf('https://')!=0){return 'MCDURL:bad';}"
+        "var x='/usr/bin/xdg-open';if(!fs.existsSync(x)){return 'MCDURL:noxdg';}"
+        "var c=require('child_process').execFile(x,['xdg-open',url],O);"
+        "c.stdout.on('data',function(){});c.stderr.on('data',function(){});return 'MCDURL:ok';}"
+        "catch(z){return 'MCDURL:err';}})()")
+    _BG_JS = (
+        "(function(){try{" + _LINUX_ENV_JS +
+        "var q='/usr/bin/xfconf-query';if(!E||!fs.existsSync(q)||"
+        "(E.XDG_CURRENT_DESKTOP||'').toUpperCase().indexOf('XFCE')<0){return 'MCDBG:other';}"
+        "function run(a){var c=require('child_process').execFile(q,['xfconf-query','-c','xfce4-desktop'].concat(a),O);"
+        "c.stdout.str='';c.stdout.on('data',function(d){this.str+=d.toString();});c.stderr.on('data',function(){});"
+        "c.waitExit();return c.stdout.str;}var A=require('MeshAgent');"
+        "if(A.__mcdBg){var s=A.__mcdBg;for(var p in s){run(['-p',p,'-s',s[p]]);}A.__mcdBg=null;return 'MCDBG:shown';}"
+        "var ls=run(['-l']).split(NL),sv={},n=0;for(var i=0;i<ls.length;i++){var p=ls[i].trim();"
+        "if(p.length>12&&p.substring(p.length-12)=='/image-style'){sv[p]=run(['-p',p]).trim();"
+        "run(['-p',p,'-s','0']);n++;}}if(!n){return 'MCDBG:other';}A.__mcdBg=sv;return 'MCDBG:hidden';}"
+        "catch(z){return 'MCDBG:err';}})()")
+
+    def _linux_session_tools(self):
+        """Use the evals above: a Linux agent and the right to use its console."""
+        return bool(self.node.get("agent")) and not ui.is_windows(self.node) and self.caps.console
+
+    def _agent_eval(self, js, tag, done, secs=20):
+        """One console eval; done(result after 'TAG:') or done(None) on timeout."""
+        ctrl = self.app.ctrl
+        state = {"done": False}
+
+        def reply(msg):
+            v = str(msg.get("value") or "")
+            if state["done"] or msg.get("type") != "console" or tag + ":" not in v:
+                return
+            finish()
+            m = re.search(re.escape(tag) + r":([a-z]+)", v)          # the agent quotes the value: "TAG:word"
+            done(m.group(1) if m else "")
+
+        def finish():
+            state["done"] = True
+            ctrl.off("msg", reply)
+
+        def timeout():
+            if not state["done"]:
+                finish()
+                done(None)
+            return False
+        ctrl.on("msg", reply)
+        ctrl.send_node_msg(self.node["_id"], "console", value='eval "%s"' % js)
+        GLib.timeout_add_seconds(secs, timeout)
+
+    def _session_open_url(self, url, what, fallback):
+        """Open url in the Linux user's session; fallback() = the stock agent path."""
+        b64 = base64.b64encode(url.encode("utf-8")).decode("ascii")
+
+        def done(r):
+            if r == "ok":
+                self._flash_status("%s opened on the remote computer" % what, 6)
+            elif r in ("nodisplay", "noxdg", None):
+                fallback()
+            else:
+                self._flash_status("The remote computer could not open the %s" % what.lower(), 8)
+        self._agent_eval(self._URL_JS % b64, "MCDURL", done)
+
     def _chat(self):
         from .device_general import open_chat
-        open_chat(self.app, self.node)
-        if not ui.is_windows(self.node):
-            # the agent opens its side with xdg-open, which often cannot reach the desktop session of a Linux
-            # computer (the same in the web UI); the agent does not report it
-            self._flash_status("Chat: the agent opens it in the remote user's web browser (on Linux this can fail "
-                               "silently)", 8)
+        if not self._linux_session_tools():
+            open_chat(self.app, self.node)
+            return
+
+        def remote_side(url):
+            # the same page the server would send the agent (meshuser.js meshmessenger), opened in the session
+            self._session_open_url(url, "Chat", lambda: self.app.ctrl.send(
+                {"action": "meshmessenger", "nodeid": self.node["_id"]}))
+        open_chat(self.app, self.node, remote_side)
 
     def _notify(self):
         from .desktop_tools import notify_dialog
@@ -567,8 +665,16 @@ class DesktopPanel(Gtk.Box):
 
     def _open_url(self):
         from .desktop_tools import open_url_dialog
+        sender = None
+        if self._linux_session_tools():
+            def sender(url):
+                self._flash_status("Opening the web address on the remote computer...")
+                self._session_open_url(url, "Web address", lambda: (
+                    _watch_open_url(self.app.ctrl, self.node, lambda t: self._flash_status(t, 8)),
+                    self.app.ctrl.send({"action": "msg", "type": "openUrl", "nodeid": self.node["_id"], "url": url})))
+        from .desktop_tools import _watch_open_url
         open_url_dialog(self._parent_window(), self.app.ctrl, self.node,
-                        lambda text: self._flash_status(text, 8))
+                        lambda text: self._flash_status(text, 8), sender)
 
     def _share(self):
         from .device_general import DeviceContext, ShareDialog
@@ -585,6 +691,20 @@ class DesktopPanel(Gtk.Box):
                  lambda r: self._flash_status("Lock sent" if r == "ok" else "Connect the desktop first"))
 
     def _toggle_background(self):
+        if self._linux_session_tools():
+            def done(r):
+                if r in ("hidden", "shown"):
+                    self._bg_hidden = r == "hidden"
+                    self._tool_icons()
+                    self._flash_status("Desktop background " + r)
+                else:
+                    self._toggle_background_stock()       # GNOME and the rest: the agent's own toggle
+            self._flash_status("Changing the desktop background...")
+            self._agent_eval(self._BG_JS, "MCDBG", done)
+            return
+        self._toggle_background_stock()
+
+    def _toggle_background_stock(self):
         """Toggle like the web UI; the agent answers with the new state ("" = background removed). It does not
         answer when it cannot change it (on Linux it only knows GNOME's settings)."""
         ctrl = self.app.ctrl
@@ -693,28 +813,114 @@ class DesktopPanel(Gtk.Box):
                     "out.push(btoa(b.join('')));}window.__mcdRec=out;return 'n'+out.length;}"
                     "catch(e){return 'err';}})()")
 
+    def _on_rec_format(self, combo):
+        i = combo.get_active()
+        if i >= 0:
+            self.app.config["desktop_record_format"] = _REC_FORMATS[i][1]
+            self.app.save_config()
+
+    # Video: the browser's MediaRecorder on the viewer's canvas (MP4 where the engine can, else WebM). Stopping
+    # is async: the file is ready when window.__mcdVidState is "n<slices>"; slices move out like a .mcrec.
+    _VID_START_JS = (
+        "(function(){try{var c=document.getElementById('Desk');"
+        "if(!c||typeof desktop==='undefined'||!desktop||desktop.State!==3)return 'no';"
+        "if(typeof MediaRecorder==='undefined'||!c.captureStream)return 'unsupported';"
+        "var T=['video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'],t='';"
+        "for(var i=0;i<T.length;i++){if(MediaRecorder.isTypeSupported(T[i])){t=T[i];break;}}"
+        "if(!t)return 'unsupported';var s=c.captureStream(15);"
+        "var r=new MediaRecorder(s,{mimeType:t,videoBitsPerSecond:6000000}),ch=[];"
+        "r.ondataavailable=function(e){if(e.data&&e.data.size)ch.push(e.data);};r.start(1000);"
+        "window.__mcdVid={r:r,ch:ch,t:t,s:s};window.__mcdVidState='rec';return 'ok:'+t;}"
+        "catch(e){return 'err:'+e;}})()")
+    _VID_STOP_JS = (
+        "(function(){try{var v=window.__mcdVid;if(!v)return 'none';window.__mcdVid=null;window.__mcdVidState='busy';"
+        "v.r.onstop=function(){new Blob(v.ch,{type:v.t}).arrayBuffer().then(function(ab){"
+        "var u=new Uint8Array(ab),out=[],C=49152;for(var i=0;i<u.length;i+=C){var p=u.subarray(i,i+C),x='';"
+        "for(var j=0;j<p.length;j+=8192){x+=String.fromCharCode.apply(null,p.subarray(j,j+8192));}"
+        "out.push(btoa(x));}window.__mcdRec=out;window.__mcdVidState='n'+out.length;})"
+        "['catch'](function(){window.__mcdVidState='err';});};"
+        "v.r.stop();v.s.getTracks().forEach(function(k){k.stop();});return 'ok:'+v.t;}catch(e){return 'err';}})()")
+
     def _toggle_record(self, then=None):
-        if not self._recording:
-            def running(v, tries):
-                if v == "1":
+        if not self._recording and self.app.config.get("desktop_record_format", "video") == "video":
+            def started(r):
+                if r.startswith("ok:"):
                     self._recording = True
+                    self._rec_kind = "mp4" if "mp4" in r else "webm"
                     self._tool_icons()
                     self._update_tools()
-                    self._flash_status("Recording the session…")
-                elif tries > 0:
-                    GLib.timeout_add(300, lambda: (self._js(self._REC_ON_JS, lambda x: running(x, tries - 1)),
-                                                   False)[1])
-                else:
-                    self._flash_status("Recording could not start")
-
-            def started(r):
-                if r == "ok":
-                    running("0", 30)
+                    self._flash_status("Recording the session as %s video…" % self._rec_kind.upper())
+                elif r == "unsupported":
+                    self._flash_status("Video recording is not available here: recording a MeshCentral "
+                                       "session file instead", 6)
+                    self._start_mcrec()
                 else:
                     self._flash_status("Recording is not available")
-            self._js(self._REC_START_JS, started)
+            self._js(self._VID_START_JS, started)
             return
+        if not self._recording:
+            self._start_mcrec()
+            return
+        if self._rec_kind in ("mp4", "webm"):
+            self._stop_video(then)
+            return
+        self._stop_mcrec(then)
+
+    def _stop_video(self, then=None):
+        kind = self._rec_kind
         self._recording = False
+        self._rec_kind = None
+        self._tool_icons()
+        self._update_tools()
+        self._flash_status("Finishing the video…", 10)
+
+        def state(v, tries):
+            if v.startswith("n"):
+                path = self._save_dialog("Save session video", self._file_name("DesktopSession", kind), kind)
+                if path:
+                    self._fetch_recording(path, int(v[1:]), then)
+                else:
+                    self._js("window.__mcdRec=null;")
+                    if then:
+                        then()
+            elif v in ("busy", "rec") and tries > 0:
+                GLib.timeout_add(250, lambda: (self._js("String(window.__mcdVidState||'')",
+                                                         lambda x: state(x, tries - 1)), False)[1])
+            else:
+                self._flash_status("The video could not be saved")
+                if then:
+                    then()
+
+        def stopped(r):
+            if r.startswith("ok:"):
+                state("busy", 240)
+            elif then:
+                then()
+        self._js(self._VID_STOP_JS, stopped)
+
+    def _start_mcrec(self):
+        def running(v, tries):
+            if v == "1":
+                self._recording = True
+                self._tool_icons()
+                self._update_tools()
+                self._flash_status("Recording the session…")
+            elif tries > 0:
+                GLib.timeout_add(300, lambda: (self._js(self._REC_ON_JS, lambda x: running(x, tries - 1)),
+                                               False)[1])
+            else:
+                self._flash_status("Recording could not start")
+
+        def started(r):
+            if r == "ok":
+                running("0", 30)
+            else:
+                self._flash_status("Recording is not available")
+        self._js(self._REC_START_JS, started)
+
+    def _stop_mcrec(self, then=None):
+        self._recording = False
+        self._rec_kind = None
         self._tool_icons()
         self._update_tools()
 

@@ -862,7 +862,7 @@ class GeneralPanel(Gtk.Box):
         ShareDialog(self)
 
 
-def open_chat(app, node):
+def open_chat(app, node, remote_side=None):
     """Web UI chat with the device's user: the server's /messenger page in a window, then the agent is
     told to open its side (meshmessenger)."""
     ctrl = app.ctrl
@@ -879,7 +879,13 @@ def open_chat(app, node):
         if node.get("pmt") == 1 and (si.get("features2") or 0) & 2:
             path += "&pmt=1"
         ChatWindow(app, f"Chat - {node.get('name', '')}", ctrl.server.url.rstrip("/") + path)
-        ctrl.send({"action": "meshmessenger", "nodeid": node["_id"]})
+        if remote_side:
+            rpath = "/messenger?id=meshmessenger/" + q(node["_id"], safe="") + "/" + q(me.get("_id", ""), safe="")
+            if si.get("domainsuffix"):
+                rpath = "/" + si["domainsuffix"] + rpath
+            remote_side(ctrl.server.url.rstrip("/") + rpath)
+        else:
+            ctrl.send({"action": "meshmessenger", "nodeid": node["_id"]})
     ctrl.get_auth_cookie(got)                   # callbacks already run on the GTK loop
 
 
