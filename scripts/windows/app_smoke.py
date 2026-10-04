@@ -264,7 +264,8 @@ class A(appmod.App):
 
     def vid_stop(self):
         p = self.desk
-        check("video recording: started as MP4 in WebView2", p._recording and p._rec_kind == "mp4", p._rec_kind)
+        check("video recording: running in WebView2 (MP4, or WebM where Windows has no H.264 encoder)",
+              p._recording and p._rec_kind in ("mp4", "webm"), p._rec_kind)
         p._refresh_desktop()
         GLib.timeout_add(1500, lambda: (p._toggle_record(), False)[1])
         self.wait(lambda: any(f.endswith((".mp4", ".webm")) for f in os.listdir(self.vid_dir)), self.vid_done, 40,
@@ -274,8 +275,10 @@ class A(appmod.App):
     def vid_done(self):
         files = [f for f in os.listdir(self.vid_dir) if f.endswith((".mp4", ".webm"))]
         data = open(os.path.join(self.vid_dir, files[0]), "rb").read() if files else b""
-        check("video recording: real MP4 file", files and files[0].endswith(".mp4") and data[4:8] == b"ftyp"
-              and len(data) > 2000, (files, len(data)))
+        check("video recording: real video file (MP4 ftyp / WebM EBML)",
+              files and len(data) > 2000 and ((files[0].endswith(".mp4") and data[4:8] == b"ftyp") or
+                                               (files[0].endswith(".webm") and data[:4] == b"\x1aE\xdf\xa3")),
+              (files, len(data)))
         self.main_win.toggle_desktop_fullscreen(self.desk)
         GLib.timeout_add(2000, self.fs_bar)
         return False

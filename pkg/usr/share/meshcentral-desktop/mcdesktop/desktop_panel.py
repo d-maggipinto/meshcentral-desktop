@@ -825,7 +825,7 @@ class DesktopPanel(Gtk.Box):
         "(function(){try{var c=document.getElementById('Desk');"
         "if(!c||typeof desktop==='undefined'||!desktop||desktop.State!==3)return 'no';"
         "if(typeof MediaRecorder==='undefined'||!c.captureStream)return 'unsupported';"
-        "var T=['video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'],t='';"
+        "var T=%s,t='';"
         "for(var i=0;i<T.length;i++){if(MediaRecorder.isTypeSupported(T[i])){t=T[i];break;}}"
         "if(!t)return 'unsupported';var s=c.captureStream(15);"
         "var r=new MediaRecorder(s,{mimeType:t,videoBitsPerSecond:6000000}),ch=[];"
@@ -841,6 +841,37 @@ class DesktopPanel(Gtk.Box):
         "['catch'](function(){window.__mcdVidState='err';});};"
         "v.r.stop();v.s.getTracks().forEach(function(k){k.stop();});return 'ok:'+v.t;}catch(e){return 'err';}})()")
 
+    _VID_TYPES = "['video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']"
+    _WEBM_TYPES = "['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']"
+    # bytes recorded so far ("type|bytes"): an engine can claim MP4 and still produce nothing (Windows without
+    # the Media Foundation H.264 encoder, e.g. Windows Server): then the recording restarts as WebM
+    _VID_SIZE_JS = ("(function(){try{var v=window.__mcdVid;if(!v)return 'x|0';var n=0;"
+                    "for(var i=0;i<v.ch.length;i++)n+=v.ch[i].size;return v.t+'|'+n;}catch(e){return 'x|0';}})()")
+    _VID_DROP_JS = ("(function(){try{var v=window.__mcdVid;window.__mcdVid=null;if(v){v.r.ondataavailable=null;"
+                    "v.r.stop();v.s.getTracks().forEach(function(k){k.stop();});}}catch(e){}return 'ok';})()")
+
+    def _check_video(self):
+        if not self._recording or self._rec_kind != "mp4":
+            return False
+
+        def got(r):
+            t, _s, n = r.partition("|")
+            if self._recording and self._rec_kind == "mp4" and "mp4" in t and n == "0":
+                self._js(self._VID_DROP_JS, lambda _r: self._js(self._VID_START_JS % self._WEBM_TYPES, restarted))
+
+        def restarted(r):
+            if r.startswith("ok:"):
+                self._rec_kind = "webm"
+                self._flash_status("MP4 is not available on this computer: recording as WebM video", 6)
+            else:
+                self._recording = False
+                self._rec_kind = None
+                self._tool_icons()
+                self._update_tools()
+                self._flash_status("Video recording is not available here")
+        self._js(self._VID_SIZE_JS, got)
+        return False
+
     def _toggle_record(self, then=None):
         if not self._recording and self.app.config.get("desktop_record_format", "video") == "video":
             def started(r):
@@ -850,13 +881,14 @@ class DesktopPanel(Gtk.Box):
                     self._tool_icons()
                     self._update_tools()
                     self._flash_status("Recording the session as %s video…" % self._rec_kind.upper())
+                    GLib.timeout_add(2500, self._check_video)
                 elif r == "unsupported":
                     self._flash_status("Video recording is not available here: recording a MeshCentral "
                                        "session file instead", 6)
                     self._start_mcrec()
                 else:
                     self._flash_status("Recording is not available")
-            self._js(self._VID_START_JS, started)
+            self._js(self._VID_START_JS % self._VID_TYPES, started)
             return
         if not self._recording:
             self._start_mcrec()
@@ -875,7 +907,12 @@ class DesktopPanel(Gtk.Box):
         self._flash_status("Finishing the video…", 10)
 
         def state(v, tries):
-            if v.startswith("n"):
+            if v == "n0":
+                self._js("window.__mcdRec=null;")
+                self._flash_status("The video is empty: nothing was recorded", 8)
+                if then:
+                    then()
+            elif v.startswith("n"):
                 path = self._save_dialog("Save session video", self._file_name("DesktopSession", kind), kind)
                 if path:
                     self._fetch_recording(path, int(v[1:]), then)

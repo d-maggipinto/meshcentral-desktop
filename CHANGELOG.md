@@ -20,7 +20,8 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
 
 ### Added
 - Session recording as video: a recording format setting, "Video (MP4)" (the default) or "MeshCentral (.mcrec)".
-  The video is recorded from the remote screen as you see it and plays in any video player.
+  The video is recorded from the remote screen as you see it and plays in any video player. Where Windows has
+  no H.264 encoder (some Windows Server editions) it switches to WebM by itself.
 - Linux devices: "Open a web address", the chat and "Toggle background" now work on Linux desktops where the
   agent alone fails (its xdg-open cannot reach the user's desktop session, and it only changes GNOME
   backgrounds). With agent console rights the app runs them in the console user's desktop session, like the
