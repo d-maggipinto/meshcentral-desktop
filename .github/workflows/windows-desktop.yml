@@ -29,7 +29,7 @@ on:
         type: boolean
         default: true
       nomachine:
-        description: "Install NoMachine (NX on port 4000, same account as Remote Desktop)"
+        description: "Install NoMachine Enterprise Desktop, 30-day evaluation (NX on port 4000, same account)"
         type: boolean
         default: true
 
@@ -96,12 +96,14 @@ jobs:
           if ($LASTEXITCODE) { "could not set the password"; exit 1 }
           "Remote Desktop enabled"
 
-      # pinned by version and SHA-256 (the same as the winget manifest NoMachine.NoMachine 10.1.7)
+      # NoMachine Enterprise Desktop: the free edition refuses Windows Server ("No subscription found"); this one
+      # starts a 30-day evaluation on every new install, and every test machine is a new install.
+      # Pinned by version and SHA-256 (the same as the winget manifest NoMachine.NoMachine.EnterpriseDesktop 10.1.7).
       - name: NoMachine (NX on port 4000)
         if: inputs.nomachine
         run: |
-          $url = "https://web9001.nomachine.com/download/10.1/Windows/nomachine-personal-edition_10.1.7_1_x64.exe"
-          $sha = "A8095A12EB49A33F3923524B91EDCF15E43F35595A1F221E108AFC05B0A44772"
+          $url = "https://web9001.nomachine.com/download/10.1/Windows/nomachine-enterprise-desktop_10.1.7_1_x64.exe"
+          $sha = "BF08C9088AC48C3C0FA351DCB3DE4DED536BE15610B621C03CF867C4B3F7A517"
           Invoke-WebRequest $url -OutFile nomachine.exe
           if ((Get-FileHash nomachine.exe -Algorithm SHA256).Hash -ne $sha) { "NoMachine installer checksum mismatch"; exit 1 }
           $p = Start-Process .\nomachine.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait -PassThru
