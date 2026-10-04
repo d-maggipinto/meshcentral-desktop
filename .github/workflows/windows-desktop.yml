@@ -28,10 +28,6 @@ on:
         description: "Also run a throwaway MeshCentral server with this machine's agent"
         type: boolean
         default: true
-      nomachine:
-        description: "Install NoMachine Enterprise Desktop, 30-day evaluation (NX on port 4000, same account)"
-        type: boolean
-        default: true
 
 permissions:
   contents: read
@@ -55,7 +51,6 @@ jobs:
       HOURS: ${{ inputs.hours }}
       BUILD: ${{ inputs.build }}
       TEST_SERVER: ${{ inputs.test_server }}
-      NOMACHINE: ${{ inputs.nomachine }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -95,25 +90,6 @@ jobs:
           net user runneradmin "$env:RDP_PASSWORD" | Out-Null
           if ($LASTEXITCODE) { "could not set the password"; exit 1 }
           "Remote Desktop enabled"
-
-      # NoMachine Enterprise Desktop: the free edition refuses Windows Server ("No subscription found"); this one
-      # starts a 30-day evaluation on every new install, and every test machine is a new install.
-      # Pinned by version and SHA-256 (the same as the winget manifest NoMachine.NoMachine.EnterpriseDesktop 10.1.7).
-      - name: NoMachine (NX on port 4000)
-        if: inputs.nomachine
-        run: |
-          $url = "https://web9001.nomachine.com/download/10.1/Windows/nomachine-enterprise-desktop_10.1.7_1_x64.exe"
-          $sha = "BF08C9088AC48C3C0FA351DCB3DE4DED536BE15610B621C03CF867C4B3F7A517"
-          Invoke-WebRequest $url -OutFile nomachine.exe
-          if ((Get-FileHash nomachine.exe -Algorithm SHA256).Hash -ne $sha) { "NoMachine installer checksum mismatch"; exit 1 }
-          $p = Start-Process .\nomachine.exe -ArgumentList "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-" -Wait -PassThru
-          "NoMachine installer exit code $($p.ExitCode)"
-          New-NetFirewallRule -DisplayName "NoMachine NX (test desktop)" -Direction Inbound -Protocol TCP -LocalPort 4000 -Action Allow | Out-Null
-          foreach ($i in 1..60) {
-            if ((Test-NetConnection 127.0.0.1 -Port 4000 -WarningAction SilentlyContinue).TcpTestSucceeded) { "NoMachine listening on port 4000"; break }
-            Start-Sleep 5
-          }
-          if (-not (Test-NetConnection 127.0.0.1 -Port 4000 -WarningAction SilentlyContinue).TcpTestSucceeded) { "NoMachine is not listening"; exit 1 }
 
       - name: MeshCentral test server (install, pinned)
         if: inputs.test_server
@@ -179,9 +155,6 @@ jobs:
           }
           "Windows test desktop is ready."
           "  Remote Desktop:  $env:TAILSCALE_NAME  (user runneradmin, the WINDOWS_RDP_PASSWORD secret)"
-          if ($env:NOMACHINE -eq "true") {
-            "  NoMachine:       $env:TAILSCALE_NAME port 4000, protocol NX (same user and password)"
-          }
           if ($env:TEST_SERVER -eq "true") {
             "  Test server:     https://127.0.0.1:8443 on that machine (user admin, the same password)"
           }

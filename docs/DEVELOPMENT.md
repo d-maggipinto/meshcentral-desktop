@@ -155,7 +155,8 @@ The `Windows test desktop` workflow (Actions tab, Run workflow) gives a fresh Gi
 machine for testing by hand, for 1 to 6 hours: the app installed (latest release or the newest build from
 main), optionally a throwaway MeshCentral server on the machine with the machine's own Windows agent (the app
 opens on it; its root certificate is trusted on the machine, so TLS is really checked), and Remote Desktop
-and NoMachine (NX, port 4000, same account) reachable over Tailscale only. Cancelling the run deletes the machine.
+reachable over Tailscale only. (NoMachine cannot be used there for free: its free edition refuses Windows
+Server and the public Enterprise Desktop installer carries no evaluation subscription.) Cancelling the run deletes the machine.
 
 It needs two repository secrets: `TAILSCALE_AUTHKEY` (an ephemeral, reusable key of your Tailscale network)
 and `WINDOWS_RDP_PASSWORD` (Remote Desktop as `runneradmin`, also the test server's `admin` password). The
