@@ -55,6 +55,90 @@ class _MsgPanel(Gtk.Box):
             self._listening = False
 
 
+# psinfo fields the web UI shows, in its order (agents use camelCase, PascalCase or snake_case)
+_PSINFO = [("processName", "Process name", None), ("machineName", "Machine name", None),
+           ("cmd", "Command line", None), ("mainWindowTitle", "Window title", None),
+           ("processUser", "User", None), ("processDomain", "Domain", None), ("startTime", "Start time", None),
+           ("priorityBoostEnabled", "Priority boost", "bool"), ("sessionId", "Session ID", None),
+           ("handleCount", "Handle count", None),
+           ("privilegedProcessorTime", "Privileged processor time", "s"),
+           ("totalProcessorTime", "Total processor time", "s"), ("userProcessorTime", "User processor time", "s"),
+           ("nonpagedSystemMemorySize", "Non-paged memory", "b"), ("pagedMemorySize", "Paged memory", "b"),
+           ("privateMemorySize", "Private memory", "b"), ("virtualMemorySize", "Virtual memory", "b"),
+           ("workingSet", "Working set", "b"), ("peakWorkingSet", "Peak working set", "b"),
+           ("peakPagedMemorySize", "Peak paged memory", "b"), ("peakVirtualMemorySize", "Peak virtual memory", "b")]
+
+
+def process_details(value, cmd=""):
+    """psinfo value -> [(label, text)] like the web UI's Process Details dialog."""
+    if not isinstance(value, dict) or not value:
+        return []
+    if {"PPid", "State", "Tgid", "VmRSS"} & set(value):
+        return _linux_details(value)
+    norm = {}
+    for k, v in value.items():                    # web UI: jsonToCamel
+        key = str(k).replace("_", "")
+        norm[key[:1].lower() + key[1:]] = v
+    low = {k.lower(): v for k, v in norm.items()}
+    if not low.get("cmd") and low.get("path"):
+        norm["cmd"] = low["path"]
+    user = low.get("username") or ""
+    if not low.get("processuser") and "\\" in str(user):
+        norm["processDomain"], norm["processUser"] = str(user).split("\\", 1)
+    low = {k.lower(): v for k, v in norm.items()}
+    out = []
+    for key, label, kind in _PSINFO:
+        v = low.get(key.lower())
+        if v in (None, "", [], {}):
+            continue
+        if kind == "bool":
+            v = "Enabled" if v else "Disabled"
+        elif kind == "s":
+            v = f"{v} seconds"
+        elif kind == "b":
+            try:
+                v = ui.fmt_size(float(v))
+            except (TypeError, ValueError):
+                pass
+        out.append((label, str(v)))
+    # Windows agents send PowerShell Get-Process fields: the ones the web UI does not show, in plain words
+    windows = [("description", "Description", None), ("company", "Company", None), ("product", "Product", None),
+               ("fileversion", "File version", None), ("cpu", "Processor time", "s"), ("si", "Session ID", None),
+               ("basepriority", "Base priority", None), ("ws", "Working set", "b"), ("pm", "Private memory", "b"),
+               ("npm", "Non-paged memory", "b"), ("vm", "Virtual memory", "b")]
+    shown = {label for label, _v in out}
+    for key, label, kind in windows:
+        v = low.get(key)
+        if v in (None, "", [], {}) or label in shown:
+            continue
+        if kind == "s":
+            v = f"{v} seconds"
+        elif kind == "b":
+            try:
+                v = ui.fmt_size(float(v))
+            except (TypeError, ValueError):
+                pass
+        out.append((label, str(v)))
+    if low.get("name") and "Process name" not in shown:
+        out.insert(0, ("Process name", str(low["name"])))
+    return out
+
+
+def _linux_details(value):
+    """Linux agents send /proc/<pid>/status as is: the useful lines first, in plain words, then the rest."""
+    out = []
+    linux = [("Name", "Process name"), ("State", "State"), ("Pid", "Process ID"), ("PPid", "Parent process ID"),
+             ("Uid", "User ID (real, effective, saved, fs)"), ("Gid", "Group ID (real, effective, saved, fs)"),
+             ("Threads", "Threads"), ("VmRSS", "Memory in use (RSS)"), ("VmSize", "Virtual memory"),
+             ("VmPeak", "Peak virtual memory"), ("VmHWM", "Peak memory in use"), ("VmSwap", "Swapped out")]
+    raw = {str(k): v for k, v in value.items()}
+    for key, label in linux:
+        if raw.get(key) not in (None, ""):
+            out.append((label, str(raw.pop(key)).replace("\t", "  ")))
+    out += [(k, str(v).replace("\t", "  ")) for k, v in sorted(raw.items())]
+    return out
+
+
 class ProcessesPanel(_MsgPanel):
     def __init__(self, app, node):
         super().__init__(app, node)
@@ -70,6 +154,12 @@ class ProcessesPanel(_MsgPanel):
                                    always_show_image=True)
         self.kill_btn.get_style_context().add_class("destructive-action")
         self.kill_btn.connect("clicked", lambda *_: self.kill_selected())
+        details = Gtk.Button(label="Details",
+                             image=Gtk.Image.new_from_icon_name("dialog-information-symbolic", Gtk.IconSize.BUTTON),
+                             always_show_image=True)
+        details.set_tooltip_text("Process details (also: double-click a process)")
+        details.connect("clicked", lambda *_: self.details_selected())
+        bar.pack_start(details, False, False, 0)
         bar.pack_start(self.kill_btn, False, False, 0)
         self.count = Gtk.Label(xalign=1)
         self.count.get_style_context().add_class("dim-label")
@@ -82,7 +172,9 @@ class ProcessesPanel(_MsgPanel):
         for title, col, expand in (("PID", 1, False), ("User", 2, False), ("Command", 3, True)):
             self.tree.append_column(ui.text_column(title, col, expand, sort_col=0 if col == 1 else col))
         ui.row_tooltip(self.tree, 3)
-        self.tree.connect("row-activated", lambda *_: self.kill_selected())
+        # double-click = details, like the web UI (it used to ask to kill the process)
+        self.tree.connect("row-activated", lambda *_: self.details_selected())
+        self._details = {}                       # pid -> (dialog, content box) waiting for psinfo
         self.pack_start(ui.scrolled(self.tree), True, True, 0)
 
     def _first_load(self):
@@ -93,6 +185,9 @@ class ProcessesPanel(_MsgPanel):
         self.app.ctrl.send_node_msg(self.nodeid, "ps")
 
     def _handle_msg(self, message):
+        if message.get("type") == "psinfo":
+            self._show_details(message)
+            return
         if message.get("type") != "ps":
             return
         try:
@@ -109,6 +204,70 @@ class ProcessesPanel(_MsgPanel):
                 continue
             self.store.append([ipid, str(ipid), info.get("user") or "", info.get("cmd") or ""])
         self.count.set_text(f"{len(self.store)} processes")
+
+    def details_selected(self):
+        model, it = self.tree.get_selection().get_selected()
+        if it:
+            self.show_details(model[it][0], model[it][3])
+
+    def show_details(self, pid, cmd=""):
+        """Web UI "Process Details": psinfo request, answered with a {name: value} object (Windows agents
+        report much more than Linux ones)."""
+        if pid in self._details:
+            self._details[pid][0].present()
+            return
+        d = Gtk.Dialog(title=f"Process details, #{pid}", transient_for=self.get_toplevel(), modal=False)
+        d.set_default_size(520, 420)
+        d.add_button("Close", Gtk.ResponseType.CLOSE)
+        d.connect("response", lambda *_: d.destroy())
+        d.connect("destroy", lambda *_: self._details.pop(pid, None))
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=6, margin=12)
+        box.pack_start(Gtk.Label(label="Requesting process details…", xalign=0), False, False, 0)
+        d.get_content_area().pack_start(ui.scrolled(box), True, True, 0)
+        self._details[pid] = (d, box, cmd)
+        self._details_retries = getattr(self, "_details_retries", {})
+        self._details_retries[pid] = 2
+        d.show_all()
+        self.app.ctrl.send_node_msg(self.nodeid, "psinfo", pid=pid)
+        # Windows agents run PowerShell for this: it can take a while on a busy machine
+        GLib.timeout_add_seconds(45, lambda: (self._details_timeout(pid), False)[1])
+
+    def _details_timeout(self, pid):
+        if pid in self._details and len(self._details[pid][1].get_children()) == 1:
+            self._fill_details(pid, None)           # a late answer still fills the dialog
+
+    def _show_details(self, message):
+        try:
+            pid = int(message.get("pid"))
+        except (TypeError, ValueError):
+            return
+        if pid in self._details:
+            value = message.get("value")
+            # a busy Windows agent sometimes answers with an empty object: ask again before giving up
+            if not value and self._details_retries.get(pid, 0) > 0:
+                self._details_retries[pid] -= 1
+                GLib.timeout_add(2000, lambda: (pid in self._details and
+                                                self.app.ctrl.send_node_msg(self.nodeid, "psinfo", pid=pid), False)[1])
+                return
+            self._fill_details(pid, value)
+
+    def _fill_details(self, pid, value):
+        _d, box, cmd = self._details[pid]
+        for c in box.get_children():
+            box.remove(c)
+        rows = process_details(value, cmd)
+        if not rows:
+            box.pack_start(Gtk.Label(label="No information provided by the agent.", xalign=0), False, False, 0)
+        grid = Gtk.Grid(row_spacing=6, column_spacing=14)
+        for i, (k, v) in enumerate(rows):
+            kl = Gtk.Label(label=k, xalign=0, yalign=0)
+            kl.get_style_context().add_class("dim-label")
+            vl = Gtk.Label(label=v, xalign=0, selectable=True, wrap=True, wrap_mode=Pango.WrapMode.CHAR,
+                           max_width_chars=60)
+            grid.attach(kl, 0, i, 1, 1)
+            grid.attach(vl, 1, i, 1, 1)
+        box.pack_start(grid, False, False, 0)
+        box.show_all()
 
     def kill_selected(self):
         model, it = self.tree.get_selection().get_selected()

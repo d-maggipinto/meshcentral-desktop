@@ -28,6 +28,8 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `mainwindow.py` | Window shell: navigation rail + page stack, device tree, grouped device pages (rights-gated, lazily built), fullscreen, window shortcuts, notification cards, node-update fan-out |
 | `general_actions.py` | Device action bar, power / more menus, context menu, *Run command* dialog, Notes dialog |
 | `desktop_panel.py` | Remote desktop: embedded viewer, native toolbar, connection state machine, keyboard, clipboard sync |
+| `desktop_tools.py` | Remote desktop tools dialogs: notification, open a web address, the Tools window (processes, services) |
+| `desktop_fsbar.py` | Auto-hiding fullscreen toolbar (overlay on Linux, topmost popup windows on Windows) |
 | `terminal_panel.py` | VTE terminal over relay protocols 1 / 6 / 8 / 9 (shell choices like the web UI: `shell_options`) |
 | `files_panel.py` | Device file manager over relay protocol 5 |
 | `tools_panel.py` | Processes, Services, Agent Console |

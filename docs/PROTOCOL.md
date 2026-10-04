@@ -94,6 +94,9 @@ control channel), so the app keeps its own stars in `config.json`.
 | `{action:'changeDeviceMesh', nodeids, meshid}` | needs Manage Computers `4` on the target and Edit Group `1` on source and target, same group type, else silently skipped; confirmation = `event nodemeshchange` |
 | `{action:'changedevice', nodeid, tags:'a,b'}` | tags as a comma string, `''` clears; confirmation = `event changenode` |
 | `{action:'toast', nodeids, title, msg}` / `{action:'msg', type:'messagebox'\|'alertbox', nodeid, title, msg, timeout?}` | toast needs Chat & Notify `16384`; messagebox/alertbox never reply |
+| `{action:'msg', type:'openUrl', nodeid, url}` | the agent opens the page in the user's browser; the web UI only allows `http://` / `https://` |
+| `{action:'msg', type:'deskBackground', nodeid, op:1}` | toggles the remote desktop wallpaper (not on agent ids 11 and 16) |
+| `{action:'msg', type:'psinfo', nodeid, pid}` | `{action:'msg', type:'psinfo', nodeid, pid, value}`: Windows agents send PowerShell `Get-Process` fields (`Name`, `Path`, `UserName` "DOMAIN\\user", `HandleCount`, `WS`, `PM`, `CPU`, `Description`...), Linux agents `/proc/<pid>/status` as is (`Name`, `State`, `PPid`, `VmRSS`...) |
 | `{action:'runcommands', nodeids, type, runAsUser, cmds, reply:true, responseid}` | the ack/error replies carry only the responseid (no nodeid), so the app sends one request per device; output = `{action:'msg', type:'runcommands', result, responseid, nodeid}` |
 | `{action:'uninstallagent', nodeids}` | no reply at all; the device record stays |
 | `{action:'getDeviceDetails', nodeids, tz, tf, l, type:'csv'\|'json'}` | `{action:'getDeviceDetails', data, type}`, no responseid; hardware/network only with Device Details `0x100000` |

@@ -30,6 +30,14 @@ SPRITES = {
     "notify16.png": (16, 9), "notify24.png": (24, 9), "notify48.png": (48, 9),    # status badges
     "images16.png": (16, 9),                                                      # small UI (user group)
 }
+# single icons of the web UI's remote desktop toolbar (desktopButtons) -> the app's toolbar keys
+TOOLBAR = {"run": "icon-play.png", "chat": "icon-chat.png", "notify": "icon-notify.png", "lock": "icon-lock.png",
+           "url": "icon-url2.png", "background": "icon-background.png", "background-on": "icon-background-red.png",
+           "screenshot": "icon-camera.png", "record": "icon-film.png", "recording": "icon-film-red.png",
+           "clip-in": "icon-clipboard-in.png", "clip-out": "icon-clipboard-out.png", "refresh": "icon-refresh.png",
+           "inputlock": "icon-keylock.png", "inputlock-on": "icon-keylock-red.png", "share": "icon-share2.png",
+           "settings": "icon-gear.png"}
+SPRITES.update({f: (24 if f == "icon-gear.png" else 16, 1) for f in TOOLBAR.values()})
 # web UI: node.icon 1 desktop, 2 laptop, 3 phone, 4 server, 5 disk / NAS, 6 router, 7 board, 8 virtual machine
 DEVICE_TYPES = 8
 # leftbar cells (style.css .lb1 .. .lb6) -> the app's navigation pages
@@ -316,6 +324,9 @@ class ServerIcons:
             register("nav", page, cl)
             if _light(colour):
                 register("nav-dark", page, [_tinted(c, DARK_ON_LIGHT) for c in cl])
+        for key, f in TOOLBAR.items():
+            if cells[f]:
+                register("tool", key, [cells[f][0]])
         for st, cell in STATUS.items():
             register("status", st, [cells[f][cell] for f in ("notify16.png", "notify24.png", "notify48.png")
                                     if cells[f]])

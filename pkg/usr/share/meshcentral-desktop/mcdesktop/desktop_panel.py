@@ -15,11 +15,13 @@ We deliberately do NOT reimplement the KVM/screen/input protocol; the native but
 call the viewer's own JS API (desktop.m.sendcad, SendCompressionLevel, the clipboard
 functions, connectDesktop) via run_javascript.
 """
+import base64
 import json
-import urllib.parse
+import os
 import time
+import urllib.parse
 
-from . import rights, ui
+from . import rights, ui, servericons
 from .osdep import IS_WINDOWS
 from .webview import WebView, server_origin, same_origin_policy  # noqa: F401 (re-exported for callers)
 import gi
@@ -115,20 +117,56 @@ class DesktopPanel(Gtk.Box):
         clip.add(paste)
         clip.add(typeb)
         clip.add(copyr)
+        self._clip_btns = {"clip-out": (paste, "edit-paste-symbolic"), "clip-in": (copyr, "edit-copy-symbolic")}
         bar.pack_start(clip, False, False, 0)
         self._ctrl_widgets += [paste, typeb, copyr]
         self._input_widgets += [paste, typeb]
 
-        full = Gtk.Button.new_from_icon_name("view-fullscreen-symbolic", Gtk.IconSize.BUTTON)
+        full = self._full_btn = Gtk.Button.new_from_icon_name("view-fullscreen-symbolic", Gtk.IconSize.BUTTON)
         full.set_tooltip_text("Fullscreen (Ctrl+Alt+F)")
         full.connect("clicked", lambda *_: self._toggle_fullscreen())
         bar.pack_start(full, False, False, 0)
-        self.reconnect_btn = Gtk.Button.new_from_icon_name("view-refresh-symbolic", Gtk.IconSize.BUTTON)
+        self.reconnect_btn = Gtk.Button.new_from_icon_name("media-playlist-repeat-symbolic", Gtk.IconSize.BUTTON)
         self.reconnect_btn.set_tooltip_text("Reconnect")
         self.reconnect_btn.connect("clicked", lambda *_: self.start_flow())
         bar.pack_start(self.reconnect_btn, False, False, 0)
 
-        self.status = Gtk.Label(xalign=1)
+        # --- the web UI's remote desktop tools (its bottom-right bar), same rights and messages ---
+        self._tool_btns = {}
+        self._recording = False
+        self._input_locked = None        # remote user's input lock: None = unknown / not supported
+        self._bg_hidden = False
+        tools = Gtk.Box()
+        tools.get_style_context().add_class("linked")
+        for key, fallback, tip, cb in (
+                ("tools", "utilities-system-monitor-symbolic", "Tools: the computer's processes and services",
+                 self._open_tools),
+                ("run", "media-playback-start-symbolic", "Run a script on this computer", self._run_script),
+                ("chat", "user-available-symbolic", "Open a chat window to this computer", self._chat),
+                ("notify", "preferences-system-notifications-symbolic", "Display a notification on the remote "
+                 "computer", self._notify),
+                ("lock", "system-lock-screen-symbolic", "Lock the remote computer", self._lock_remote),
+                ("url", "web-browser-symbolic", "Open a web address on the remote computer", self._open_url),
+                ("background", "preferences-desktop-wallpaper-symbolic", "Toggle the remote desktop background",
+                 self._toggle_background),
+                ("screenshot", "camera-photo-symbolic", "Save a screenshot of the remote desktop", self._screenshot),
+                ("record", "media-record-symbolic", "Record the remote desktop session to a file",
+                 self._toggle_record),
+                ("refresh", "view-refresh-symbolic", "Refresh the desktop", self._refresh_desktop),
+                ("inputlock", "changes-allow-symbolic", "Lock the remote user's mouse and keyboard",
+                 self._toggle_input_lock),
+                ("share", "send-to-symbolic", "Share the device with a guest", self._share)):
+            b = Gtk.Button(tooltip_text=tip, no_show_all=True)   # shown by _update_tools (rights)
+            if key == "tools":
+                b.set_label("Tools")                              # like the web UI's text button
+            b.connect("clicked", lambda _b, f=cb: f())
+            self._tool_btns[key] = (b, fallback)
+            tools.add(b)
+        bar.pack_start(tools, False, False, 0)
+        self._tool_icons()
+        self._icons_off = servericons.listen(self._tool_icons)
+
+        self.status = Gtk.Label(xalign=1, ellipsize=3)       # never widens the toolbar (fullscreen bar)
         self.status.get_style_context().add_class("dim-label")
         bar.pack_end(self.status, True, True, 6)
         self.pack_start(bar, False, False, 0)
@@ -216,7 +254,8 @@ class DesktopPanel(Gtk.Box):
         for w in (self._cover_spinner, title, self._cover_label, self._cover_btn):
             cbox.pack_start(w, False, False, 0)
         self._cover.add(cbox)
-        overlay = Gtk.Overlay()
+        overlay = self._overlay = Gtk.Overlay()
+        self._fsbar = None                   # auto-hiding toolbar in fullscreen (desktop_fsbar)
         overlay.add(self.view)
         overlay.add_overlay(self._cover)
         self._hint = Gtk.Label()
@@ -316,6 +355,10 @@ class DesktopPanel(Gtk.Box):
         self._js(self._END_SESSION_JS, go)
 
     def teardown(self):
+        self._icons_off()
+        if self._fsbar is not None:
+            self._fsbar.destroy()
+            self._fsbar = None
         self._sync_stop()
         self._kb_ungrab()
         self._closing = True
@@ -423,6 +466,7 @@ class DesktopPanel(Gtk.Box):
     def on_node_update(self, node):
         """Called by the main window on every device refresh."""
         self.node = node
+        GLib.idle_add(lambda: (self._update_tools(), False)[1])
         online = bool((node.get("conn") or 0) & 1)
         if not online and self._want_session and not self._waiting_agent and not self._closing:
             # Agent went away (update/restart): end the dead session and wait for it.
@@ -441,9 +485,249 @@ class DesktopPanel(Gtk.Box):
     def caps(self):
         return rights.node_caps(self.app.ctrl, self.app.meshes, self.node)
 
+    # ---- the desktop tools ---------------------------------------------------------
+    def _tool_icons(self):
+        """The server's own toolbar icons (restyled servers), GTK's otherwise; state icons follow the state."""
+        state = {"record": "recording" if self._recording else "record",
+                 "inputlock": "inputlock-on" if self._input_locked else "inputlock",
+                 "background": "background-on" if self._bg_hidden else "background"}
+        for key, (b, fallback) in list(self._tool_btns.items()) + list(self._clip_btns.items()):
+            if key == "tools":
+                continue
+            b.set_image(Gtk.Image.new_from_icon_name(servericons.icon("tool", state.get(key, key), fallback),
+                                                     Gtk.IconSize.BUTTON))
+        self._tool_tips()
+
+    def _tool_tips(self):
+        tips = {"record": "Stop recording and save the file" if self._recording else
+                "Record the remote desktop session to a file",
+                "inputlock": "Unlock the remote user's mouse and keyboard" if self._input_locked else
+                "Lock the remote user's mouse and keyboard"}
+        for key, tip in tips.items():
+            self._tool_btns[key][0].set_tooltip_text(tip)
+
+    def _update_tools(self):
+        """Web UI rules: rights decide what is shown; a live session / online agent decides what works."""
+        c, n = self.caps, self.node
+        agent = n.get("agent") or {}
+        si = self.app.ctrl.serverinfo or {}
+        f2 = si.get("features2") or 0
+        online = bool((n.get("conn") or 0) & 1)
+        live = self._connected
+        windows_agent = 0 < (agent.get("id") or 0) < 5
+        r = rights.node_rights(self.app.ctrl, self.app.meshes, n)
+        share = (si.get("guestdevicesharing") is not False and (agent.get("caps") or 0) & 3
+                 and (r == rights.FULL or (r & 0x80008) == 0x80008))
+        rules = {   # key: (shown, usable)
+            "tools": (c.tools and bool(agent), online),
+            "run": (c.run_commands, online),
+            "chat": (c.chat and bool(agent), online),
+            "notify": (c.chat and bool(agent), online),
+            "lock": (c.chat and c.desktop_input and windows_agent, live),
+            "url": (c.desktop_input and bool(agent), online),
+            "background": (c.desktop_input and agent.get("id") not in (11, 16), live),
+            "screenshot": (not f2 & 0x400, live),
+            "record": (not f2 & 0x400, live),
+            "refresh": (True, live),
+            "inputlock": (c.desktop_input, live and self._input_locked is not None),
+            "share": (bool(share), online),
+        }
+        for key, (b, _f) in self._tool_btns.items():
+            shown, usable = rules[key]
+            b.set_visible(bool(shown))
+            b.set_sensitive(bool(shown and usable) or (key == "record" and self._recording))
+
+    def _parent_window(self):
+        top = self.get_toplevel()
+        return top if isinstance(top, Gtk.Window) else self.app.main_win
+
+    def _open_tools(self):
+        from .desktop_tools import ToolsWindow
+        ToolsWindow.show_for(self.app, self.node, self._parent_window())
+
+    def _run_script(self):
+        from . import device_list as dl
+        dl.GroupActions(self._parent_window(), single=True).op_run([self.node])
+
+    def _chat(self):
+        from .device_general import open_chat
+        open_chat(self.app, self.node)
+
+    def _notify(self):
+        from .desktop_tools import notify_dialog
+        notify_dialog(self._parent_window(), self.app.ctrl, self.node)
+
+    def _open_url(self):
+        from .desktop_tools import open_url_dialog
+        open_url_dialog(self._parent_window(), self.app.ctrl, self.node)
+
+    def _share(self):
+        from .device_general import DeviceContext, ShareDialog
+        ShareDialog(DeviceContext(self.app, self.node, self._parent_window()))
+
+    def _lock_remote(self):
+        if not ui.confirm(self._parent_window(), "Lock the remote computer?",
+                          "The remote user's session is locked (Windows lock screen).", "Lock"):
+            return
+        # the viewer's control channel, exactly like the web UI's deviceLockFunction
+        self._js("(function(){try{if(!desktop||desktop.State!==3)return 'notready';"
+                 "desktop.sendCtrlMsg(JSON.stringify({ctrlChannel:'102938',type:'lock'}));return 'ok';}"
+                 "catch(e){return 'err';}})()",
+                 lambda r: self._flash_status("Lock sent" if r == "ok" else "Connect the desktop first"))
+
+    def _toggle_background(self):
+        self.app.ctrl.send_node_msg(self.node["_id"], "deskBackground", op=1)      # toggle, like the web UI
+        self._bg_hidden = not self._bg_hidden
+        self._tool_icons()
+        self._flash_status("Desktop background " + ("hidden" if self._bg_hidden else "shown"))
+
+    def _refresh_desktop(self):
+        self._call("desktop.m.SendRefresh")
+        self._flash_status("Refreshing the screen")
+
+    def _read_input_lock(self, tries=6):
+        """Whether the remote input is locked (None when this agent / session does not support it). The agent
+        reports it shortly after the session starts: asked again a few times until it is known."""
+        def got(v):
+            self._input_locked = {"1": True, "0": False}.get(v)
+            self._tool_icons()
+            self._update_tools()
+            if self._input_locked is None and tries > 0 and self._connected:
+                GLib.timeout_add(1500, lambda: (self._read_input_lock(tries - 1), False)[1])
+        self._js("(function(){try{if(!desktop||!desktop.m||typeof desktop.m.SendRemoteInputLock!=='function')"
+                 "return '';var s=desktop.m.RemoteInputLock;return s===true?'1':(s===false?'0':'');}"
+                 "catch(e){return '';}})()", got)
+
+    def _toggle_input_lock(self):
+        lock = not self._input_locked
+        if not ui.confirm(self._parent_window(),
+                          "Lock the remote user's mouse and keyboard?" if lock else
+                          "Unlock the remote user's mouse and keyboard?", "", "Lock" if lock else "Unlock"):
+            return
+        self._js("(function(){try{desktop.m.SendRemoteInputLock(%d);return 'ok';}catch(e){return 'err';}})()"
+                 % (1 if lock else 0), lambda _r: GLib.timeout_add(700, lambda: (self._read_input_lock(), False)[1]))
+
+    def _save_dialog(self, title, name, kind):
+        ch = Gtk.FileChooserNative.new(title, self._parent_window(), Gtk.FileChooserAction.SAVE, "_Save", "_Cancel")
+        ch.set_current_name(ui.safe_filename(name))
+        ch.set_do_overwrite_confirmation(True)
+        folder = GLib.get_user_special_dir(GLib.UserDirectory.DIRECTORY_PICTURES if kind == "png" else
+                                           GLib.UserDirectory.DIRECTORY_VIDEOS)
+        if folder and os.path.isdir(folder):
+            ch.set_current_folder(folder)
+        path = ch.get_filename() if ch.run() == Gtk.ResponseType.ACCEPT else None
+        ch.destroy()
+        return path
+
+    def _file_name(self, prefix, ext):
+        return "%s-%s-%s.%s" % (prefix, self.node.get("name") or "device", time.strftime("%Y-%m-%d-%H-%M-%S"), ext)
+
+    @staticmethod
+    def _write_file(path, data):
+        tmp = path + ".part"
+        with open(tmp, "wb") as f:
+            f.write(data)
+        os.replace(tmp, path)
+
+    def _screenshot(self):
+        """The remote screen at its full resolution (the viewer's canvas), saved as PNG like the web UI."""
+        def got(url):
+            prefix = "data:image/png;base64,"
+            if not url.startswith(prefix):
+                self._flash_status("No remote screen to save yet")
+                return
+            path = self._save_dialog("Save screenshot", self._file_name("Desktop", "png"), "png")
+            if path:
+                try:
+                    self._write_file(path, base64.b64decode(url[len(prefix):]))
+                    self._flash_status("Screenshot saved: " + os.path.basename(path))
+                except (OSError, ValueError) as ex:
+                    ui.message(self._parent_window(), "Could not save the screenshot", str(ex))
+        self._js("(function(){try{var c=document.getElementById('Desk');"
+                 "if(!c||typeof desktop==='undefined'||!desktop||desktop.State!==3)return '';"
+                 "return c.toDataURL('image/png');}catch(e){return '';}})()", got)
+
+    # Recording: the viewer's own recorder (MeshCentral session recording format .mcrec, plays in the
+    # server's player page). The data is moved out of the page in base64 slices.
+    # StartRecording first encodes a full-screen PNG key frame (async): the recording exists only after that
+    _REC_START_JS = ("(function(){try{if(!desktop||desktop.State!==3||typeof desktop.m.StartRecording!=='function')"
+                     "return 'no';desktop.m.StartRecording();return 'ok';}catch(e){return 'err';}})()")
+    _REC_ON_JS = "(function(){try{return desktop.m.recordedData!=null?'1':'0';}catch(e){return '0';}})()"
+    _REC_STOP_JS = ("(function(){try{if(!desktop||!desktop.m||desktop.m.recordedData==null)return 'none';"
+                    "var s=desktop.m.StopRecording().join(''),out=[],C=49152;"
+                    "for(var i=0;i<s.length;i+=C){var c=s.substring(i,i+C),b=[];"
+                    "for(var j=0;j<c.length;j++)b.push(String.fromCharCode(c.charCodeAt(j)&255));"
+                    "out.push(btoa(b.join('')));}window.__mcdRec=out;return 'n'+out.length;}"
+                    "catch(e){return 'err';}})()")
+
+    def _toggle_record(self, then=None):
+        if not self._recording:
+            def running(v, tries):
+                if v == "1":
+                    self._recording = True
+                    self._tool_icons()
+                    self._update_tools()
+                    self._flash_status("Recording the session…")
+                elif tries > 0:
+                    GLib.timeout_add(300, lambda: (self._js(self._REC_ON_JS, lambda x: running(x, tries - 1)),
+                                                   False)[1])
+                else:
+                    self._flash_status("Recording could not start")
+
+            def started(r):
+                if r == "ok":
+                    running("0", 30)
+                else:
+                    self._flash_status("Recording is not available")
+            self._js(self._REC_START_JS, started)
+            return
+        self._recording = False
+        self._tool_icons()
+        self._update_tools()
+
+        def stopped(r):
+            if not r.startswith("n"):
+                if then:
+                    then()
+                return
+            path = self._save_dialog("Save session recording", self._file_name("DesktopSession", "mcrec"), "mcrec")
+            if not path:
+                self._js("window.__mcdRec=null;")
+                if then:
+                    then()
+                return
+            self._fetch_recording(path, int(r[1:]), then)
+        self._js(self._REC_STOP_JS, stopped)
+
+    def _fetch_recording(self, path, count, then=None, start=0, parts=None):
+        parts = [] if parts is None else parts
+        if start >= count:
+            self._js("window.__mcdRec=null;")
+            try:
+                self._write_file(path, b"".join(parts))
+                self._flash_status("Recording saved: " + os.path.basename(path))
+            except OSError as ex:
+                ui.message(self._parent_window(), "Could not save the recording", str(ex))
+            if then:
+                then()
+            return
+
+        def got(text):
+            try:
+                parts.extend(base64.b64decode(p) for p in text.split("|") if p)
+            except ValueError:
+                ui.message(self._parent_window(), "Could not save the recording", "The recording data is damaged.")
+                return
+            self._fetch_recording(path, count, then, start + 40, parts)
+        self._js("(function(){try{return window.__mcdRec.slice(%d,%d).join('|');}catch(e){return '';}})()"
+                 % (start, start + 40), got)
+
     def _set_controls_enabled(self, on):
         for w in self._ctrl_widgets:
             w.set_sensitive(on)
+        self._update_tools()
+        if on:
+            self._read_input_lock()
         if on and not self.caps.desktop_input:
             # View-only account: the agent ignores our input anyway; say so instead.
             for w in self._input_widgets:
@@ -533,6 +817,9 @@ class DesktopPanel(Gtk.Box):
         self._js("(function(){return String(window.__mcdFmt);})()", got)
 
     def _toggle_connect(self, *_):
+        if self._recording and self._phase == "connected":
+            self._toggle_record(then=self._toggle_connect)      # save the recording before the session ends
+            return
         if self._phase != "idle" or self._waiting_agent:
             # Disconnect when connected, Cancel while loading/connecting/waiting.
             self._want_session = False
@@ -579,10 +866,28 @@ class DesktopPanel(Gtk.Box):
             GLib.timeout_add(delay, self._refit_canvas)
 
     def set_chrome_visible(self, visible):
-        # Hide/show this panel's own toolbars (used by true fullscreen).
-        for w in (getattr(self, "_toolbar", None), getattr(self, "_qbar", None)):
-            if w is not None:
-                w.set_visible(visible)
+        """True fullscreen (main window): the toolbars move into the auto-hiding bar at the top of the screen,
+        and back when it ends."""
+        if not visible:
+            if self._fsbar is None:
+                from .desktop_fsbar import FullscreenBar
+                self._fsbar = FullscreenBar(self, self._overlay, self._toolbar, self._qbar, self.node.get("name", ""))
+            self._fsbar.enter(self.node.get("name", ""))
+            self._full_btn.hide()                      # the bar has its own Exit fullscreen
+            self._hint_rev.set_margin_top(84)          # below the bar
+        elif self._fsbar is not None:
+            self._fsbar.leave()
+            self._full_btn.show()
+            self._hint_rev.set_margin_top(24)
+
+    def exit_fullscreen(self):
+        mw = getattr(self.app, "main_win", None)
+        if mw is not None and getattr(mw, "_desk_fs", False):
+            self._toggle_fullscreen()
+
+    def focus_remote(self):
+        if self._connected:
+            self.web.grab_focus()
 
     def _on_view_resize(self, _widget, _alloc):
         # Refit whenever the panel/WebView is resized (window resize, fullscreen, pane
@@ -1226,6 +1531,8 @@ class DesktopPanel(Gtk.Box):
             self._apply_compression(force=True)
             self._wait_first_frame(0, 0, self._gen)
         elif not now_connected and self._phase == "connected":
+            if self._recording:
+                self._toggle_record()              # the recorded part is still in the page: offer to save it
             self._set_phase("idle")
             self._cover_show("The remote session ended.", busy=False, button="Retry")
         if self._connected:

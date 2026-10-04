@@ -856,25 +856,54 @@ class GeneralPanel(Gtk.Box):
         d.destroy()
 
     def chat(self):
-        node, me = self.node, self.ctrl.userinfo or {}
-        si = self.ctrl.serverinfo or {}
-
-        def got(cookie, _rcookie):
-            q = urllib.parse.quote
-            path = "/messenger?id=meshmessenger/" + q(node["_id"], safe="") + "/" + q(me.get("_id", ""), safe="")
-            path += "&title=" + q(node.get("name", ""), safe="")
-            if si.get("domainsuffix"):
-                path = "/" + si["domainsuffix"] + path
-            if cookie:
-                path += "&auth=" + q(cookie, safe="")
-            if node.get("pmt") == 1 and (si.get("features2") or 0) & 2:
-                path += "&pmt=1"
-            ChatWindow(self.app, f"Chat - {node.get('name', '')}", self.ctrl.server.url.rstrip("/") + path)
-            self.ctrl.send({"action": "meshmessenger", "nodeid": node["_id"]})
-        self.ctrl.get_auth_cookie(got)              # callbacks already run on the GTK loop
+        open_chat(self.app, self.node)
 
     def share(self):
         ShareDialog(self)
+
+
+def open_chat(app, node):
+    """Web UI chat with the device's user: the server's /messenger page in a window, then the agent is
+    told to open its side (meshmessenger)."""
+    ctrl = app.ctrl
+    me, si = ctrl.userinfo or {}, ctrl.serverinfo or {}
+
+    def got(cookie, _rcookie):
+        q = urllib.parse.quote
+        path = "/messenger?id=meshmessenger/" + q(node["_id"], safe="") + "/" + q(me.get("_id", ""), safe="")
+        path += "&title=" + q(node.get("name", ""), safe="")
+        if si.get("domainsuffix"):
+            path = "/" + si["domainsuffix"] + path
+        if cookie:
+            path += "&auth=" + q(cookie, safe="")
+        if node.get("pmt") == 1 and (si.get("features2") or 0) & 2:
+            path += "&pmt=1"
+        ChatWindow(app, f"Chat - {node.get('name', '')}", ctrl.server.url.rstrip("/") + path)
+        ctrl.send({"action": "meshmessenger", "nodeid": node["_id"]})
+    ctrl.get_auth_cookie(got)                   # callbacks already run on the GTK loop
+
+
+class DeviceContext:
+    """What ShareDialog (and other device dialogs) need from the General page, for use elsewhere (the
+    remote desktop toolbar): app, node, rights, a parent window."""
+
+    def __init__(self, app, node, parent=None):
+        self.app, self.node, self._parent_win = app, node, parent
+        self._share_rid = None
+
+    @property
+    def ctrl(self):
+        return self.app.ctrl
+
+    def _meshes(self):
+        win = getattr(self.app, "main_win", None)
+        return getattr(self.app, "meshes", None) or getattr(win, "meshes", None) or {}
+
+    def _rights(self):
+        return rights.node_rights(self.ctrl, self._meshes(), self.node)
+
+    def _parent(self):
+        return self._parent_win or getattr(self.app, "main_win", None)
 
 
 def _add_tag(entry, tag):

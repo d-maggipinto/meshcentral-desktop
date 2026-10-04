@@ -132,6 +132,7 @@ class NodeCaps:
         self.notes = full or bool(r & SETNOTES)
         self.manage = full or bool(r & MANAGECOMPUTERS)
         self.messages = full or bool(r & REMOTECONTROL)             # message box / toast
+        self.chat = full or bool(r & CHATNOTIFY)                    # desktop bar: chat, notification, lock
 
 
 def node_caps(ctrl, meshes, node):

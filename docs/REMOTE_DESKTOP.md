@@ -149,6 +149,37 @@ Paste to remote (`setclip`), Type clipboard (keystrokes), Copy from remote (`get
 `eval` read that uses the same display discovery and reports the agent's actual error instead of
 timing out silently).
 
+## Desktop tools (the web UI's desktop bar)
+
+| Button | How |
+|---|---|
+| Tools | window with the device's processes (`ps`, double-click = `psinfo` details) and services |
+| Run a script, Chat, Share | the same dialogs as the device's General page (`op_run`, `/messenger`, `createDeviceShareLink`) |
+| Notification | toast, message box (2/10/30/60 minutes or until dismissed) or alert box, as in the web UI |
+| Lock the computer | the viewer's control channel: `desktop.sendCtrlMsg('{"ctrlChannel":"102938","type":"lock"}')` (Windows agents) |
+| Web address | `openUrl` (http / https only) |
+| Background | `deskBackground` op 1 (toggle); the icon shows the state |
+| Screenshot | the viewer's canvas `#Desk` at the remote resolution, `toDataURL('image/png')`, saved as `Desktop-<device>-<date>.png` |
+| Record | the viewer's own recorder: `desktop.m.StartRecording()` (asynchronous: it first stores a PNG key frame), `StopRecording()` returns the `.mcrec` data, moved out of the page in base64 slices and saved as `DesktopSession-<device>-<date>.mcrec`; a recording running when the session ends is offered for saving first |
+| Refresh | `desktop.m.SendRefresh()` |
+| Input lock | `desktop.m.SendRemoteInputLock(1|0)`, state from `desktop.m.RemoteInputLock` (reported by the agent shortly after the session starts) |
+
+Visibility follows the web UI: Chat, Notification and Lock need Chat & Notify `16384`, Run needs `131072`,
+input-related tools need remote-control input, screenshot and recording are hidden when the server disables
+them (`features2 & 0x400`). The icons are the server's own (`icon-play.png`, `icon-camera.png`... through
+`servericons`), so a restyled server looks the same in the app.
+
+## Fullscreen toolbar
+
+In fullscreen the panel's toolbar moves into an auto-hiding bar at the top of the screen (`desktop_fsbar.py`),
+with the image settings in a popover, a pin and Exit fullscreen; it moves back when fullscreen ends, so there
+is one set of buttons. The bar is shown for 3 seconds, then hides; a thin handle at the top edge brings it back
+on hover and it hides again shortly after the pointer leaves it (not while pinned or while a menu is open).
+On Linux it is a revealer in the panel's overlay above the WebKit view. On Windows the remote screen is a
+native WebView2 window GTK cannot draw over, so the bar and the handle are small popup windows at the top of
+the monitor, made topmost through `SetWindowPos(HWND_TOPMOST)`; on screens narrower than 1500 px the long
+labels are dropped.
+
 ## Permissions
 
 The panel reads the account's rights (`rights.py`): without remote-control input rights the session is

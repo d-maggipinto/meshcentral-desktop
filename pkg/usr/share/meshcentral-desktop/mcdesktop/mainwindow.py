@@ -680,7 +680,7 @@ class MainWindow(Gtk.ApplicationWindow):
             panel.set_chrome_visible(False)
         self.fullscreen()
         if hasattr(panel, "show_hint"):
-            panel.show_hint("Press Ctrl+Alt+F to exit fullscreen")
+            panel.show_hint("Toolbar: move the pointer to the top edge. Ctrl+Alt+F exits fullscreen.", 4)
         if hasattr(panel, "refit_soon"):
             panel.refit_soon()
 

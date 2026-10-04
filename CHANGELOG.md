@@ -7,6 +7,22 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Added
+- **Remote desktop tools** like the web interface's desktop bar: Tools (processes with details, and
+  services), run a script, chat, display a notification (toast, message box or alert box), lock the remote
+  computer, open a web address on it, toggle its desktop background, save a full-resolution screenshot,
+  record the session to a file (`.mcrec`, plays in MeshCentral's player), refresh the screen, lock the
+  remote user's mouse and keyboard, share the device with a guest. Same rights as the web interface, with
+  the server's own toolbar icons.
+- **Fullscreen toolbar**: in fullscreen all the remote desktop controls are in a bar at the top of the
+  screen that hides by itself and comes back when the pointer reaches the top edge, with a pin, the image
+  settings and an Exit fullscreen button (Linux and Windows).
+- **Process details**: double-click a process (Tools tab or the desktop's Tools window) for its details,
+  including the fields Windows and Linux agents send that the web interface does not show.
+### Changed
+- Double-clicking a process no longer asks to kill it (it shows the details); Kill process is its own button.
+
 ## [2.29.1] - 2026-10-03
 Security review of the Linux and Windows code (five reviewers, static analysis, every finding validated).
 Nothing critical or high was found; everything confirmed is fixed here.

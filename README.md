@@ -75,7 +75,15 @@ Current version: **2.29.1**, see the [changelog](CHANGELOG.md).
 ### Remote desktop
 - Uses **MeshCentral's own desktop viewer**, embedded in the app and wrapped in native controls.
   The web sign-in page and the "connecting" steps are never shown, only the remote screen.
-- Real fullscreen (**Ctrl+Alt+F**), fit to window, display picker for multi-monitor computers.
+- Real fullscreen (**Ctrl+Alt+F**) with an **auto-hiding toolbar** at the top of the screen: every desktop
+  control and tool, the image settings, a pin and **Exit fullscreen**; it slides away and comes back when the
+  pointer reaches the top edge. Fit to window, display picker for multi-monitor computers.
+- The web interface's **desktop tools**: Tools (the computer's processes with details, and its services),
+  run a script, chat, display a notification (toast, message box or alert box), lock the remote computer,
+  open a web address on it, toggle its desktop background, save a screenshot (PNG, full resolution),
+  **record the session** to a file (`.mcrec`, plays in MeshCentral's player), refresh the screen, lock the
+  remote user's mouse and keyboard, and share the device with a guest. Same rights as the web interface,
+  with the server's own toolbar icons.
 - **Send hotkeys**: Super, Alt+Tab, Alt+F4 and similar shortcuts go to the remote computer while its
   screen has focus.
 - Correct characters on non-US keyboard layouts (AltGr combinations such as `@ # [ ] { } €`).
