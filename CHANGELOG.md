@@ -7,7 +7,7 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [3.0.1] - 2026-10-04
 ### Added
 - **Fullscreen toolbar position**: top, bottom, left or right (vertical), chosen in the bar's settings and
   remembered.
