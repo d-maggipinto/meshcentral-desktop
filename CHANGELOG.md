@@ -7,7 +7,10 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [3.0.0] - 2026-10-04
+MeshCentral Desktop 3: the complete remote desktop of the web interface in a native app, on Linux and on
+Windows (since 2.26.0: installers, Windows 11 look, in-app updates; 2.29.0: the server's own icons; 2.29.1:
+security review). This release adds the remaining remote desktop tools and the fullscreen toolbar.
 ### Added
 - **Remote desktop tools** like the web interface's desktop bar: Tools (processes with details, and
   services), run a script, chat, display a notification (toast, message box or alert box), lock the remote
