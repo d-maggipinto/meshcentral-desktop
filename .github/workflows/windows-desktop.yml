@@ -1,0 +1,164 @@
+# A Windows desktop for testing MeshCentral Desktop by hand, on demand: a fresh GitHub Windows Server 2025
+# machine with the app installed (latest release or the newest build from main), optionally a throwaway
+# MeshCentral server and a real Windows agent on the same machine, reachable with Remote Desktop over
+# Tailscale only (nothing is opened to the internet). The machine is deleted when the time is up or the run is
+# cancelled.
+#
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   TAILSCALE_AUTHKEY     an ephemeral, reusable auth key of your Tailscale network
+#   WINDOWS_RDP_PASSWORD  the password for Remote Desktop (user "runneradmin") and for the test server's
+#                         "admin" account
+# The secrets never appear in the logs; only the repository's owners and maintainers can start this workflow.
+name: Windows test desktop
+
+on:
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: "How long to keep the machine (check-only = set up, verify, stop)"
+        type: choice
+        options: ["1", "2", "3", "4", "5", "6", "check-only"]
+        default: "2"
+      build:
+        description: "Which app to install"
+        type: choice
+        options: ["latest release", "newest build from main"]
+        default: "latest release"
+      test_server:
+        description: "Also run a throwaway MeshCentral server with this machine's agent"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+  actions: read           # download the newest build from the CI workflow
+
+concurrency:
+  group: windows-test-desktop
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    runs-on: windows-2025
+    timeout-minutes: 380
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RDP_PASSWORD: ${{ secrets.WINDOWS_RDP_PASSWORD }}
+      TS_AUTHKEY: ${{ secrets.TAILSCALE_AUTHKEY }}
+      HOURS: ${{ inputs.hours }}
+      BUILD: ${{ inputs.build }}
+      TEST_SERVER: ${{ inputs.test_server }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - name: Secrets present
+        run: |
+          if (-not $env:RDP_PASSWORD) { "WINDOWS_RDP_PASSWORD is not set (repository secret)"; exit 1 }
+          if ($env:RDP_PASSWORD.Length -lt 12) { "WINDOWS_RDP_PASSWORD must have at least 12 characters"; exit 1 }
+          if (-not $env:TS_AUTHKEY -and $env:HOURS -ne "check-only") { "TAILSCALE_AUTHKEY is not set (repository secret)"; exit 1 }
+          "ok"
+
+      - name: Install MeshCentral Desktop
+        run: |
+          New-Item -ItemType Directory -Force inst | Out-Null
+          if ($env:BUILD -eq "latest release") {
+            gh release download -R $env:GITHUB_REPOSITORY --pattern "*.msi" --dir inst
+          } else {
+            $run = gh run list -R $env:GITHUB_REPOSITORY --workflow ci.yml --branch main --status success -L 1 --json databaseId --jq ".[0].databaseId"
+            gh run download $run -R $env:GITHUB_REPOSITORY -n windows-installers -D inst
+          }
+          $msi = (Get-ChildItem inst\*.msi | Select-Object -First 1).FullName
+          "installing $msi"
+          $p = Start-Process msiexec -ArgumentList "/i", "`"$msi`"", "/qn", "/l*v", "inst\install.log" -Wait -PassThru
+          if ($p.ExitCode) { "msiexec exit code $($p.ExitCode)"; exit 1 }
+          $exe = "$env:ProgramFiles\MeshCentral Desktop\MeshCentralDesktop.exe"
+          Copy-Item "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\MeshCentral Desktop.lnk" "$env:PUBLIC\Desktop\" -ErrorAction SilentlyContinue
+          $p = Start-Process $exe -ArgumentList "--selftest", "$PWD\inst\selftest.json" -Wait -PassThru
+          "self-test exit code $($p.ExitCode)"
+          (Get-Content inst\selftest.json -Raw | ConvertFrom-Json).PSObject.Properties | Where-Object { $_.Name -ne "modules" } |
+            ForEach-Object { "{0}: {1}" -f $_.Name, ($_.Value | ConvertTo-Json -Compress -Depth 3) }
+
+      - name: Remote Desktop (user runneradmin)
+        run: |
+          Set-ItemProperty "HKLM:\System\CurrentControlSet\Control\Terminal Server" -Name fDenyTSConnections -Value 0
+          Enable-NetFirewallRule -DisplayGroup "Remote Desktop"
+          net user runneradmin "$env:RDP_PASSWORD" | Out-Null
+          if ($LASTEXITCODE) { "could not set the password"; exit 1 }
+          "Remote Desktop enabled"
+
+      - name: MeshCentral test server (install, pinned)
+        if: inputs.test_server
+        run: |
+          New-Item -ItemType Directory -Force mc | Out-Null
+          Copy-Item scripts\windows\ci-server\package.json, scripts\windows\ci-server\package-lock.json mc\
+          Set-Location mc
+          npm ci --ignore-scripts --no-audit --no-fund | Out-Null
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          node node_modules/meshcentral/meshcentral --cert 127.0.0.1 --createaccount admin --pass "$env:RDP_PASSWORD" | Out-Null
+          node node_modules/meshcentral/meshcentral --adminaccount admin | Out-Null
+          "test server installed (account admin)"
+
+      - name: Tailscale
+        if: inputs.hours != 'check-only'
+        run: |
+          Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-latest-amd64.msi -OutFile ts.msi
+          $p = Start-Process msiexec -ArgumentList "/i", "ts.msi", "/qn" -Wait -PassThru
+          if ($p.ExitCode) { "Tailscale install failed: $($p.ExitCode)"; exit 1 }
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $name = "mcd-win-$env:GITHUB_RUN_NUMBER"
+          & $ts up --authkey "$env:TS_AUTHKEY" --hostname $name --unattended
+          if ($LASTEXITCODE) { "tailscale up failed"; exit 1 }
+          "TAILSCALE_NAME=$name" >> $env:GITHUB_ENV
+
+      - name: Ready (the machine stays up until the time is over or the run is cancelled)
+        run: |
+          $ErrorActionPreference = "Continue"
+          if ($env:TEST_SERVER -eq "true") {
+            # background processes end with the step that started them: server and agent start here
+            Set-Location mc
+            Start-Process node -ArgumentList "node_modules/meshcentral/meshcentral", "--cert", "127.0.0.1", "--port", "8443",
+              "--redirport", "8080", "--exactports" -RedirectStandardOutput server.log -RedirectStandardError server.err -WindowStyle Hidden
+            foreach ($i in 1..90) {
+              try { Invoke-WebRequest https://127.0.0.1:8443/ -SkipCertificateCheck -UseBasicParsing | Out-Null; "server up"; break } catch { Start-Sleep 2 }
+            }
+            # the app checks certificates: trust this test server's own root certificate on this machine
+            Import-Certificate -FilePath meshcentral-data\root-cert-public.crt -CertStoreLocation Cert:\LocalMachine\Root | Out-Null
+            $ctl = "node_modules/meshcentral/meshctrl.js"
+            $login = @("--url", "wss://127.0.0.1:8443", "--loginuser", "admin", "--loginpass", "$env:RDP_PASSWORD")
+            node $ctl adddevicegroup --name "Test machines" @login | Out-Null
+            $mesh = (node $ctl listdevicegroups --json @login | ConvertFrom-Json | Where-Object { $_.name -eq "Test machines" })._id
+            $id = $mesh.Substring(6)
+            Invoke-WebRequest "https://127.0.0.1:8443/meshagents?id=4" -SkipCertificateCheck -OutFile meshagent.exe
+            Invoke-WebRequest "https://127.0.0.1:8443/meshsettings?id=$([uri]::EscapeDataString($id))" -SkipCertificateCheck -OutFile meshagent.msh
+            Start-Process .\meshagent.exe -ArgumentList "-fullinstall" -Wait
+            Copy-Item meshagent.msh "$env:ProgramFiles\Mesh Agent\MeshAgent.msh" -Force
+            Restart-Service "Mesh Agent"
+            Start-Sleep 15
+            $online = (node $ctl listdevices --json @login | ConvertFrom-Json | Where-Object { $_.conn -band 1 }).Count
+            "devices online on the test server: $online"
+            # the app opens on the test server for runneradmin
+            $cfg = "C:\Users\runneradmin\AppData\Local\meshcentral-desktop"
+            New-Item -ItemType Directory -Force $cfg | Out-Null
+            '{"server": "https://127.0.0.1:8443", "username": "admin"}' | Set-Content "$cfg\config.json" -Encoding utf8
+            Set-Location ..
+          }
+          ""
+          "============================================================"
+          if ($env:HOURS -eq "check-only") {
+            "check-only: everything is set up and verified, the machine stops now"
+            exit 0
+          }
+          "Windows test desktop is ready."
+          "  Remote Desktop:  $env:TAILSCALE_NAME  (user runneradmin, the WINDOWS_RDP_PASSWORD secret)"
+          if ($env:TEST_SERVER -eq "true") {
+            "  Test server:     https://127.0.0.1:8443 on that machine (user admin, the same password)"
+          }
+          "  Ends in $env:HOURS hour(s), or cancel this run to end it now."
+          "============================================================"
+          $end = (Get-Date).AddHours([int]$env:HOURS)
+          while ((Get-Date) -lt $end) { Start-Sleep 60 }

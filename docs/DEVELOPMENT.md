@@ -148,3 +148,15 @@ The MeshCentral source (`npm pack meshcentral`) is the protocol reference:
    the matching `CHANGELOG.md` section.
 5. Upgrade note for users: quit the running app (`pkill -f meshcentral-desktop`) before installing
    the new package, because the app is single instance.
+
+## Windows test desktop (manual testing)
+
+The `Windows test desktop` workflow (Actions tab, Run workflow) gives a fresh GitHub Windows Server 2025
+machine for testing by hand, for 1 to 6 hours: the app installed (latest release or the newest build from
+main), optionally a throwaway MeshCentral server on the machine with the machine's own Windows agent (the app
+opens on it; its root certificate is trusted on the machine, so TLS is really checked), and Remote Desktop
+reachable over Tailscale only. Cancelling the run deletes the machine.
+
+It needs two repository secrets: `TAILSCALE_AUTHKEY` (an ephemeral, reusable key of your Tailscale network)
+and `WINDOWS_RDP_PASSWORD` (Remote Desktop as `runneradmin`, also the test server's `admin` password). The
+secrets never appear in the logs. `check-only` sets everything up, verifies it and stops (no Tailscale needed).
