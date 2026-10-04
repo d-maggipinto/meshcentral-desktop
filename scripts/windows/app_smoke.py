@@ -252,6 +252,56 @@ class A(appmod.App):
 
     def desk_shot(self):
         shot(self.main_win, "app_desktop.png")
+        self.main_win.toggle_desktop_fullscreen(self.desk)
+        GLib.timeout_add(2000, self.fs_bar)
+        return False
+
+    # ---- fullscreen toolbar (popup windows on Windows) -----------------------------------------
+    def fs_bar(self):
+        import ctypes
+        bar = self.desk._fsbar
+        sw, sh = ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
+        self.screen = (sw, sh)
+        (x, y), (w, h) = bar.bar_win.get_position(), bar.bar_win.get_size()
+        check("fullscreen bar: shown at the top, fits the screen", bar.bar_win.get_visible() and y <= 1 and w <= sw,
+              ((x, y), (w, h), (sw, sh)))
+        bar.pin.set_active(True)
+        bar.settings.set_active(True)                      # the gear
+        GLib.timeout_add(800, self.fs_settings)
+        return False
+
+    def fs_settings(self):
+        bar = self.desk._fsbar
+        sw, sh = self.screen
+        (bx, by), (bw, bh) = bar.bar_win.get_position(), bar.bar_win.get_size()
+        (x, y), (w, h) = bar.settings_win.get_position(), bar.settings_win.get_size()
+        check("fullscreen bar: settings panel opens below the bar, whole and on screen",
+              bar.settings_win.get_mapped() and y >= by + bh and h > 60 and x >= 0 and x + w <= sw and y + h <= sh,
+              ((x, y), (w, h)))
+        bar.pos_btns["bottom"].set_active(True)
+        GLib.timeout_add(1200, self.fs_bottom)
+        return False
+
+    def fs_bottom(self):
+        bar = self.desk._fsbar
+        sw, sh = self.screen
+        (bx, by), (bw, bh) = bar.bar_win.get_position(), bar.bar_win.get_size()
+        (x, y), (w, h) = bar.settings_win.get_position(), bar.settings_win.get_size()
+        check("fullscreen bar: moved to the bottom edge, settings panel above it",
+              by + bh >= sh - 1 and y + h <= by and bar.settings_win.get_mapped(), ((bx, by), (x, y, w, h)))
+        shot(self.main_win, "app_fullscreen_bar.png")
+        bar.settings.set_active(False)
+        bar.pos_btns["top"].set_active(True)
+        bar.pin.set_active(False)
+        bar.exit_btn.clicked()
+        GLib.timeout_add(1500, self.fs_done)
+        return False
+
+    def fs_done(self):
+        p = self.desk
+        bar = p._fsbar
+        check("fullscreen bar: exit restores the window and its toolbar",
+              not bar.bar_win.get_visible() and not bar.settings_win.get_visible() and p.get_children()[0] is p._toolbar)
         self.desk._toggle_connect()
         GLib.timeout_add(1500, self.notify)
         return False

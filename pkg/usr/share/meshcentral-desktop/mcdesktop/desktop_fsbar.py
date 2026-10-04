@@ -41,6 +41,9 @@ CSS = b"""
 .mcd-fs-bar button:disabled, .mcd-fs-bar button:disabled label { color: rgba(236, 238, 241, 0.35); }
 .mcd-fs-bar button.suggested-action { background-color: #2f6fd6; border-color: #2f6fd6; }
 .mcd-fs-bar button image { color: #eceef1; }
+.mcd-fs-panel { background-color: rgba(30, 33, 38, 0.98); border: 1px solid rgba(255, 255, 255, 0.22);
+                border-radius: 8px; }
+.mcd-fs-panel label { color: #eceef1; }
 .mcd-fs-handle { background-color: rgba(76, 139, 245, 0.85); border-radius: 3px; }
 .mcd-fs-handle-area { background-color: transparent; }
 """
@@ -100,9 +103,11 @@ class FullscreenBar:
         self.content.pack_start(self.dot, False, False, 0)
         self.slot = Gtk.Box()
         self.content.pack_start(self.slot, True, True, 0)
-        self.settings = Gtk.MenuButton(tooltip_text="Image quality, display, clipboard, hotkeys and toolbar position")
+        tip = "Image quality, display, clipboard, hotkeys and toolbar position"
+        # Windows: the bar is a small popup window and GTK 3 draws a popover INSIDE its window there (clipped to
+        # the 42 px bar, so nothing appears): the settings get their own popup window next to the bar instead
+        self.settings = Gtk.ToggleButton(tooltip_text=tip) if IS_WINDOWS else Gtk.MenuButton(tooltip_text=tip)
         self.settings.set_image(Gtk.Image.new_from_icon_name("emblem-system-symbolic", Gtk.IconSize.BUTTON))
-        pop = Gtk.Popover()
         pbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=10, margin=8)
         prow = Gtk.Box(spacing=8)
         prow.pack_start(Gtk.Label(label="Toolbar position:"), False, False, 0)
@@ -124,10 +129,21 @@ class FullscreenBar:
         pbox.pack_start(prow, False, False, 0)
         self.pop_box = Gtk.Box()
         pbox.pack_start(self.pop_box, False, False, 0)
-        pop.add(pbox)
         pbox.show_all()
-        self.settings.set_popover(pop)
-        pop.connect("closed", lambda *_: self._schedule_hide())
+        if IS_WINDOWS:
+            self.settings_win = Gtk.Window(type=Gtk.WindowType.POPUP)
+            panel_box = Gtk.EventBox()
+            panel_box.get_style_context().add_class("mcd-fs-panel")
+            panel_box.add(pbox)
+            self.settings_win.add(panel_box)
+            self.settings_win.set_keep_above(True)
+            panel_box.connect("enter-notify-event", lambda *_: self._cancel_hide())
+            self.settings.connect("toggled", self._on_settings_toggled)
+        else:
+            pop = Gtk.Popover()
+            pop.add(pbox)
+            self.settings.set_popover(pop)
+            pop.connect("closed", lambda *_: self._schedule_hide())
         self.content.pack_start(self.settings, False, False, 0)
         self.pin = Gtk.ToggleButton(tooltip_text="Keep the toolbar shown")
         self.pin.set_image(Gtk.Image.new_from_icon_name("view-pin-symbolic", Gtk.IconSize.BUTTON))
@@ -214,6 +230,8 @@ class FullscreenBar:
             self.handle_win.resize(1, 1)
         if self.active:
             self.show(hold=self.settings.get_active())
+            if IS_WINDOWS and self.settings.get_active():
+                GLib.idle_add(lambda: (self._on_settings_toggled(self.settings), False)[1])   # follow the bar
 
     def _place(self, win):
         """Windows: a popup window centred on the bar's edge of the monitor."""
@@ -292,6 +310,7 @@ class FullscreenBar:
         if IS_WINDOWS:
             self.bar_win.hide()
             self.handle_win.hide()
+            self.settings_win.hide()
         else:
             self.rev.set_reveal_child(False)
             self.rev.hide()
@@ -305,6 +324,7 @@ class FullscreenBar:
         if IS_WINDOWS:
             self.bar_win.destroy()
             self.handle_win.destroy()
+            self.settings_win.destroy()
 
     # ---- show / hide ----------------------------------------------------------------------------------
     def _monitor_geometry(self):
@@ -392,6 +412,27 @@ class FullscreenBar:
         if ev.detail != Gdk.NotifyType.INFERIOR:            # not just moving onto a button inside the bar
             self._schedule_hide()
         return False
+
+    def _on_settings_toggled(self, btn):
+        """Windows: show / hide the settings panel next to the bar (on its inner side)."""
+        if not btn.get_active():
+            self.settings_win.hide()
+            self._schedule_hide()
+            return
+        self._cancel_hide()
+        self.settings_win.show_all()
+        nat = self.settings_win.get_child().get_preferred_size()[1]
+        self.settings_win.resize(nat.width, nat.height)
+        g = self._monitor_geometry()
+        (bx, by), (bw, bh) = self.bar_win.get_position(), self.bar_win.get_size()
+        w, h = nat.width, nat.height
+        x, y = {"top": (bx + bw - w, by + bh + 4), "bottom": (bx + bw - w, by - h - 4),
+                "left": (bx + bw + 4, by + bh - h), "right": (bx - w - 4, by + bh - h)}[self.position]
+        if g:
+            x = min(max(g.x, x), g.x + g.width - w)
+            y = min(max(g.y, y), g.y + g.height - h)
+        self.settings_win.move(x, y)
+        _topmost(self.settings_win)
 
     def _on_pin(self, btn):
         self.pinned = btn.get_active()
