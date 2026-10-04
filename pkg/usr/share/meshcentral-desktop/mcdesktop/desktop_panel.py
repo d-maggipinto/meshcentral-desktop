@@ -827,10 +827,13 @@ class DesktopPanel(Gtk.Box):
         "if(typeof MediaRecorder==='undefined'||!c.captureStream)return 'unsupported';"
         "var T=%s,t='';"
         "for(var i=0;i<T.length;i++){if(MediaRecorder.isTypeSupported(T[i])){t=T[i];break;}}"
-        "if(!t)return 'unsupported';var s=c.captureStream(15);"
+        # frames on a steady clock (requestFrame): a quiet remote screen would otherwise give no frames at all
+        "if(!t)return 'unsupported';var s=c.captureStream(0),k=s.getVideoTracks()[0],tm=null;"
+        "if(k&&typeof k.requestFrame==='function'){tm=setInterval(function(){try{k.requestFrame();}catch(e){}},66);}"
+        "else{s=c.captureStream(15);}"
         "var r=new MediaRecorder(s,{mimeType:t,videoBitsPerSecond:6000000}),ch=[];"
         "r.ondataavailable=function(e){if(e.data&&e.data.size)ch.push(e.data);};r.start(1000);"
-        "window.__mcdVid={r:r,ch:ch,t:t,s:s};window.__mcdVidState='rec';return 'ok:'+t;}"
+        "window.__mcdVid={r:r,ch:ch,t:t,s:s,tm:tm};window.__mcdVidState='rec';return 'ok:'+t;}"
         "catch(e){return 'err:'+e;}})()")
     _VID_STOP_JS = (
         "(function(){try{var v=window.__mcdVid;if(!v)return 'none';window.__mcdVid=null;window.__mcdVidState='busy';"
@@ -839,7 +842,8 @@ class DesktopPanel(Gtk.Box):
         "for(var j=0;j<p.length;j+=8192){x+=String.fromCharCode.apply(null,p.subarray(j,j+8192));}"
         "out.push(btoa(x));}window.__mcdRec=out;window.__mcdVidState='n'+out.length;})"
         "['catch'](function(){window.__mcdVidState='err';});};"
-        "v.r.stop();v.s.getTracks().forEach(function(k){k.stop();});return 'ok:'+v.t;}catch(e){return 'err';}})()")
+        "if(v.tm)clearInterval(v.tm);v.r.stop();v.s.getTracks().forEach(function(k){k.stop();});return 'ok:'+v.t;}"
+        "catch(e){return 'err';}})()")
 
     _VID_TYPES = "['video/mp4;codecs=avc1','video/mp4','video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']"
     _WEBM_TYPES = "['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm']"
@@ -847,7 +851,8 @@ class DesktopPanel(Gtk.Box):
     # the Media Foundation H.264 encoder, e.g. Windows Server): then the recording restarts as WebM
     _VID_SIZE_JS = ("(function(){try{var v=window.__mcdVid;if(!v)return 'x|0';var n=0;"
                     "for(var i=0;i<v.ch.length;i++)n+=v.ch[i].size;return v.t+'|'+n;}catch(e){return 'x|0';}})()")
-    _VID_DROP_JS = ("(function(){try{var v=window.__mcdVid;window.__mcdVid=null;if(v){v.r.ondataavailable=null;"
+    _VID_DROP_JS = ("(function(){try{var v=window.__mcdVid;window.__mcdVid=null;if(v){if(v.tm)clearInterval(v.tm);"
+                    "v.r.ondataavailable=null;"
                     "v.r.stop();v.s.getTracks().forEach(function(k){k.stop();});}}catch(e){}return 'ok';})()")
 
     def _check_video(self):

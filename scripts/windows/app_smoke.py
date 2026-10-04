@@ -264,6 +264,7 @@ class A(appmod.App):
 
     def vid_stop(self):
         p = self.desk
+        p._js(p._VID_SIZE_JS, lambda r: print("video data so far (type|bytes): " + r, flush=True))
         check("video recording: running in WebView2 (MP4, or WebM where Windows has no H.264 encoder)",
               p._recording and p._rec_kind in ("mp4", "webm"), p._rec_kind)
         p._refresh_desktop()
@@ -273,6 +274,7 @@ class A(appmod.App):
         return False
 
     def vid_done(self):
+        print("video status line: %r" % self.desk.status.get_text(), flush=True)
         files = [f for f in os.listdir(self.vid_dir) if f.endswith((".mp4", ".webm"))]
         data = open(os.path.join(self.vid_dir, files[0]), "rb").read() if files else b""
         check("video recording: real video file (MP4 ftyp / WebM EBML)",
