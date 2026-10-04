@@ -907,6 +907,9 @@ class DesktopPanel(Gtk.Box):
         orient = Gtk.Orientation.VERTICAL if vertical else Gtk.Orientation.HORIZONTAL
         for box in (self._toolbar, self._clip_box, self._tools_box):
             box.set_orientation(orient)
+        for child in self._toolbar.get_children():          # vertical bar: groups centred, same width
+            if child is not self.status:
+                child.set_halign(Gtk.Align.CENTER if vertical else Gtk.Align.FILL)
         self._toolbar.set_spacing(4 if on else 6)
         self._toolbar.set_margin_top(0 if on else 6)
         self._toolbar.set_margin_bottom(0 if on else 6)
@@ -1142,8 +1145,9 @@ class DesktopPanel(Gtk.Box):
         return False
 
     def show_hint(self, text, secs=3):
-        if IS_WINDOWS:                        # the floating hint cannot be drawn over the native page
-            self._flash_status(text, secs)
+        if IS_WINDOWS:                        # GTK cannot draw over the native WebView2 page: an overlay
+            self._flash_status(text, secs)     # there stays as an empty white box, so status line only
+            return
         self._hint.set_text(text)
         self._hint.show()
         self._hint_rev.show()

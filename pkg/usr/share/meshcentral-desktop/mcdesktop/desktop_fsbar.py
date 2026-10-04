@@ -28,11 +28,18 @@ CSS = b"""
 .mcd-fs-bar.bottom { border-bottom-width: 0; border-radius: 10px 10px 0 0; border-top: 2px solid #4c8bf5; }
 .mcd-fs-bar.left { border-left-width: 0; border-radius: 0 10px 10px 0; border-right: 2px solid #4c8bf5; }
 .mcd-fs-bar.right { border-right-width: 0; border-radius: 10px 0 0 10px; border-left: 2px solid #4c8bf5; }
+.mcd-fs-bar.win-popup { border-radius: 0; border-width: 0; }
+.mcd-fs-bar.win-popup.top { border-bottom: 2px solid #4c8bf5; }
+.mcd-fs-bar.win-popup.bottom { border-top: 2px solid #4c8bf5; }
+.mcd-fs-bar.win-popup.left { border-right: 2px solid #4c8bf5; }
+.mcd-fs-bar.win-popup.right { border-left: 2px solid #4c8bf5; }
+.mcd-fs-panel.win-popup { border-radius: 0; }
 .mcd-fs-bar label { color: #eceef1; }
 .mcd-fs-bar .mcd-fs-title { font-weight: bold; margin: 0 6px 0 4px; }
 .mcd-fs-bar .mcd-fs-dot { font-size: 14pt; margin: 0 4px; }
 .mcd-fs-bar .mcd-fs-dot.on { color: #2ecc71; }
 .mcd-fs-bar .mcd-fs-dot.off { color: #8a8f98; }
+.mcd-fs-bar.left button, .mcd-fs-bar.right button { min-width: 30px; padding: 3px; }
 .mcd-fs-bar button { background-color: rgba(255, 255, 255, 0.07); background-image: none; color: #eceef1;
                      border: 1px solid rgba(255, 255, 255, 0.10); box-shadow: none; text-shadow: none;
                      min-width: 26px; min-height: 26px; padding: 2px 4px; }
@@ -76,6 +83,11 @@ def _topmost(win):
         if hwnd:
             ctypes.windll.user32.SetWindowPos(ctypes.c_void_p(hwnd), ctypes.c_void_p(-1), 0, 0, 0, 0,
                                               0x0001 | 0x0002 | 0x0010)    # NOSIZE | NOMOVE | NOACTIVATE
+            # rounded corners, border and shadow drawn by Windows (11 / Server 2025): GTK paints a popup
+            # window's corners solid, so the style sheet's border-radius cannot show there
+            pref = ctypes.c_int(2)                                            # DWMWCP_ROUND
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(hwnd), 33, ctypes.byref(pref),
+                                                       ctypes.sizeof(pref))   # DWMWA_WINDOW_CORNER_PREFERENCE
     except Exception:
         pass
 
@@ -95,6 +107,8 @@ class FullscreenBar:
 
         self.content = Gtk.Box(spacing=4)
         self.content.get_style_context().add_class("mcd-fs-bar")
+        if IS_WINDOWS:
+            self.content.get_style_context().add_class("win-popup")
         self.title = Gtk.Label(label=title, max_width_chars=16, ellipsize=3)
         self.title.get_style_context().add_class("mcd-fs-title")
         self.content.pack_start(self.title, False, False, 0)
@@ -134,6 +148,7 @@ class FullscreenBar:
             self.settings_win = Gtk.Window(type=Gtk.WindowType.POPUP)
             panel_box = Gtk.EventBox()
             panel_box.get_style_context().add_class("mcd-fs-panel")
+            panel_box.get_style_context().add_class("win-popup")
             panel_box.add(pbox)
             self.settings_win.add(panel_box)
             self.settings_win.set_keep_above(True)
@@ -201,6 +216,8 @@ class FullscreenBar:
         style.add_class(self.position)
         self.title.set_visible(not vertical)
         self.title.set_no_show_all(vertical)
+        for w in (self.settings, self.pin, self.exit_btn, self.dot):
+            w.set_halign(Gtk.Align.CENTER if vertical else Gtk.Align.FILL)
         long_, thick = HANDLE_LONG, HANDLE_THICK
         self.handle_line.set_size_request(thick if vertical else long_, long_ if vertical else thick)
         self.handle.set_size_request(14 if vertical else 260, 260 if vertical else 14)

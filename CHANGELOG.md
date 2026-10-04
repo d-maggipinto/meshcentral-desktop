@@ -7,6 +7,13 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Fixed
+- Windows: an empty white box stayed under the fullscreen toolbar (the start hint, which cannot be drawn over
+  the remote screen there; it is in the status line).
+- Windows: the fullscreen toolbar and its settings panel have rounded corners, a border and a shadow drawn by
+  Windows; the vertical toolbar's buttons all have the same width.
+
 ## [3.0.2] - 2026-10-04
 ### Fixed
 - Windows: the fullscreen toolbar's settings (image quality, toolbar position...) did not open; they now open

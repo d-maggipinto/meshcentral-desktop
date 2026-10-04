@@ -265,6 +265,13 @@ class A(appmod.App):
         (x, y), (w, h) = bar.bar_win.get_position(), bar.bar_win.get_size()
         check("fullscreen bar: shown at the top, fits the screen", bar.bar_win.get_visible() and y <= 1 and w <= sw,
               ((x, y), (w, h), (sw, sh)))
+        check("fullscreen: no GTK hint over the native page (it showed as a white box)",
+              not self.desk._hint_rev.get_visible())
+        from mcdesktop.osdep import window_handle
+        pref = ctypes.c_int(0)
+        ctypes.windll.dwmapi.DwmGetWindowAttribute(ctypes.c_void_p(window_handle(bar.bar_win)), 33,
+                                                   ctypes.byref(pref), ctypes.sizeof(pref))
+        check("fullscreen bar: rounded corners requested from Windows (DWMWCP_ROUND)", pref.value == 2, pref.value)
         bar.pin.set_active(True)
         bar.settings.set_active(True)                      # the gear
         GLib.timeout_add(800, self.fs_settings)
