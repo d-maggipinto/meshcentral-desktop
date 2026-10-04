@@ -13,6 +13,7 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
   the remote screen there; it is in the status line).
 - Windows: the fullscreen toolbar and its settings panel have rounded corners, a border and a shadow drawn by
   Windows; the vertical toolbar's buttons all have the same width.
+- Windows: a white box around the fullscreen toolbar's edge handle (the handle window is now just the blue line).
 
 ## [3.0.2] - 2026-10-04
 ### Fixed

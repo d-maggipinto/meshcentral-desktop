@@ -53,6 +53,9 @@ CSS = b"""
 .mcd-fs-panel label { color: #eceef1; }
 .mcd-fs-handle { background-color: rgba(76, 139, 245, 0.85); border-radius: 3px; }
 .mcd-fs-handle-area { background-color: transparent; }
+window.mcd-fs-handle-win { background-color: #4c8bf5; }
+.mcd-fs-handle-area.win-popup, .mcd-fs-handle-area.win-popup .mcd-fs-handle { background-color: #4c8bf5;
+                                                                           border-radius: 0; }
 """
 _css_done = False
 HIDE_MS = 900
@@ -181,6 +184,8 @@ class FullscreenBar:
         self.handle.get_style_context().add_class("mcd-fs-handle-area")
         self.handle.add(self.handle_line)
         self.handle.set_tooltip_text("Toolbar")
+        if IS_WINDOWS:
+            self.handle.get_style_context().add_class("win-popup")
         self.handle.connect("enter-notify-event", lambda *_: self.show(hold=True))
         self.handle.connect("button-press-event", lambda *_: self.show(hold=True))
 
@@ -188,6 +193,7 @@ class FullscreenBar:
             self.bar_win = Gtk.Window(type=Gtk.WindowType.POPUP)
             self.bar_win.add(self.frame)
             self.handle_win = Gtk.Window(type=Gtk.WindowType.POPUP)
+            self.handle_win.get_style_context().add_class("mcd-fs-handle-win")
             self.handle_win.add(self.handle)
             for w in (self.bar_win, self.handle_win):
                 w.set_keep_above(True)
@@ -220,7 +226,12 @@ class FullscreenBar:
             w.set_halign(Gtk.Align.CENTER if vertical else Gtk.Align.FILL)
         long_, thick = HANDLE_LONG, HANDLE_THICK
         self.handle_line.set_size_request(thick if vertical else long_, long_ if vertical else thick)
-        self.handle.set_size_request(14 if vertical else 260, 260 if vertical else 14)
+        if IS_WINDOWS:
+            # a popup window cannot be see-through here: the transparent hover area around the line showed as
+            # a white box, so the window is exactly the line (the edge polling still brings the bar back)
+            self.handle.set_size_request(thick if vertical else long_, long_ if vertical else thick)
+        else:
+            self.handle.set_size_request(14 if vertical else 260, 260 if vertical else 14)
         align = {"top": (Gtk.Align.CENTER, Gtk.Align.START), "bottom": (Gtk.Align.CENTER, Gtk.Align.END),
                  "left": (Gtk.Align.START, Gtk.Align.CENTER), "right": (Gtk.Align.END, Gtk.Align.CENTER)}
         h, v = align[self.position]
