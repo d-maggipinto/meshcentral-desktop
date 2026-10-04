@@ -960,6 +960,7 @@ class DesktopPanel(Gtk.Box):
         def running(v, tries):
             if v == "1":
                 self._recording = True
+                self._rec_kind = "mcrec"
                 self._tool_icons()
                 self._update_tools()
                 self._flash_status("Recording the session…")
