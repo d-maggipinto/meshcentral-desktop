@@ -161,4 +161,13 @@ jobs:
           "  Ends in $env:HOURS hour(s), or cancel this run to end it now."
           "============================================================"
           $end = (Get-Date).AddHours([int]$env:HOURS)
-          while ((Get-Date) -lt $end) { Start-Sleep 60 }
+          $ts = "$env:ProgramFiles\Tailscale\tailscale.exe"
+          $last = ""
+          while ((Get-Date) -lt $end) {
+            # heartbeat: sessions + Tailscale state, logged when they change (shows what happens at an RDP sign-in)
+            $sessions = (query user 2>&1 | Out-String).Trim() -replace "\s+", " "
+            $state = try { (& $ts status --json --peers=false | ConvertFrom-Json).BackendState } catch { "?" }
+            $now = "sessions: $sessions | tailscale: $state"
+            if ($now -ne $last) { "{0:HH:mm:ss} {1}" -f (Get-Date), $now; $last = $now }
+            Start-Sleep 5
+          }
