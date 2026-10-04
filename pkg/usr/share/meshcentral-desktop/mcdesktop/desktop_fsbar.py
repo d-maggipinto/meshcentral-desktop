@@ -352,9 +352,6 @@ class FullscreenBar:
         if not self.active:
             self._edge_timer = None
             return False
-        if self.shown or self.pinned:
-            self._edge_hits = 0
-            return True
         g = self._monitor_geometry()
         top = self.panel.get_toplevel()
         gdkwin = top.get_window() if top else None
@@ -368,7 +365,10 @@ class FullscreenBar:
         at_edge = inside and {"top": y <= EDGE_PX, "bottom": y >= g.height - 1 - EDGE_PX,
                               "left": x <= EDGE_PX, "right": x >= g.width - 1 - EDGE_PX}[self.position]
         if not at_edge:
-            self._edge_armed = True
+            self._edge_armed = True               # also while the bar is shown: leaving the edge re-arms it
+        if self.shown or self.pinned:
+            self._edge_hits = 0
+            return True
         self._edge_hits = self._edge_hits + 1 if at_edge and self._edge_armed else 0
         if self._edge_hits >= EDGE_DWELL:
             self._edge_hits = 0
