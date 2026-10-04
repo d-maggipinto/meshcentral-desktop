@@ -7,7 +7,7 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [3.0.2] - 2026-10-04
 ### Fixed
 - Windows: the fullscreen toolbar's settings (image quality, toolbar position...) did not open; they now open
   in their own panel next to the bar.
