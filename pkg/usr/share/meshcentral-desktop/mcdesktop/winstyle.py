@@ -302,6 +302,7 @@ infobar, infobar > revealer > box { background-color: %(layer)s; border: 1px sol
 .mcd-pages { background-color: %(layer)s; border-top: 1px solid %(layer_border)s; border-left: 1px solid %(layer_border)s;
     border-radius: 8px 0 0 0; }
 window.maximized .mcd-pages, window.fullscreen .mcd-pages { border-radius: 0; }
+window.fullscreen .mcd-pages { border-width: 0; }     /* remote desktop fullscreen: no light line top / left */
 .mcd-rail { background-color: transparent; padding: 0 4px 4px 4px; }
 .mcd-rail-sep { opacity: 0; min-width: 0; background: none; }
 .mcd-rail-btn { border-radius: 6px; padding: 6px 2px; color: %(fg)s; box-shadow: none; }

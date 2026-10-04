@@ -14,6 +14,11 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
 - Windows: the fullscreen toolbar and its settings panel have rounded corners, a border and a shadow drawn by
   Windows; the vertical toolbar's buttons all have the same width.
 - Windows: a white box around the fullscreen toolbar's edge handle (the handle window is now just the blue line).
+- Windows: a thin light line on the top and left edges of the screen in remote desktop fullscreen.
+- Remote desktop tools: "Open a web address" and "Toggle background" now report what the agent did (the web
+  UI shows nothing). On Linux devices the agent can only change the background on GNOME desktops, and opening a
+  web address or the chat needs its xdg-open to reach the user's desktop session; the app now says so instead of
+  appearing to do nothing.
 
 ## [3.0.2] - 2026-10-04
 ### Fixed

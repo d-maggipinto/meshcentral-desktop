@@ -555,6 +555,11 @@ class DesktopPanel(Gtk.Box):
     def _chat(self):
         from .device_general import open_chat
         open_chat(self.app, self.node)
+        if not ui.is_windows(self.node):
+            # the agent opens its side with xdg-open, which often cannot reach the desktop session of a Linux
+            # computer (the same in the web UI); the agent does not report it
+            self._flash_status("Chat: the agent opens it in the remote user's web browser (on Linux this can fail "
+                               "silently)", 8)
 
     def _notify(self):
         from .desktop_tools import notify_dialog
@@ -562,7 +567,8 @@ class DesktopPanel(Gtk.Box):
 
     def _open_url(self):
         from .desktop_tools import open_url_dialog
-        open_url_dialog(self._parent_window(), self.app.ctrl, self.node)
+        open_url_dialog(self._parent_window(), self.app.ctrl, self.node,
+                        lambda text: self._flash_status(text, 8))
 
     def _share(self):
         from .device_general import DeviceContext, ShareDialog
@@ -579,10 +585,34 @@ class DesktopPanel(Gtk.Box):
                  lambda r: self._flash_status("Lock sent" if r == "ok" else "Connect the desktop first"))
 
     def _toggle_background(self):
-        self.app.ctrl.send_node_msg(self.node["_id"], "deskBackground", op=1)      # toggle, like the web UI
-        self._bg_hidden = not self._bg_hidden
-        self._tool_icons()
-        self._flash_status("Desktop background " + ("hidden" if self._bg_hidden else "shown"))
+        """Toggle like the web UI; the agent answers with the new state ("" = background removed). It does not
+        answer when it cannot change it (on Linux it only knows GNOME's settings)."""
+        ctrl = self.app.ctrl
+        state = {"done": False}
+
+        def reply(msg):
+            if msg.get("type") != "deskBackground" or state["done"]:
+                return
+            finish()
+            self._bg_hidden = not msg.get("data")
+            self._tool_icons()
+            self._flash_status("Desktop background " + ("hidden" if self._bg_hidden else "shown"))
+
+        def finish():
+            state["done"] = True
+            ctrl.off("msg", reply)
+
+        def timeout():
+            if not state["done"]:
+                finish()
+                self._flash_status("The agent did not change the background" +
+                                   ("" if ui.is_windows(self.node) else
+                                    " (on Linux it can only do it on a GNOME desktop)"), 8)
+            return False
+        ctrl.on("msg", reply)
+        ctrl.send_node_msg(self.node["_id"], "deskBackground", op=1)
+        self._flash_status("Changing the desktop background...")
+        GLib.timeout_add_seconds(10, timeout)
 
     def _refresh_desktop(self):
         self._call("desktop.m.SendRefresh")

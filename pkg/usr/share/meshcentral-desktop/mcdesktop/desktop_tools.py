@@ -6,9 +6,9 @@
 Messages (same as the web UI): toast {action:'toast', nodeids, title, msg}; message box {action:'msg',
 type:'messagebox', nodeid, title, msg, timeout ms}; alert box {type:'alertbox'}; web address {type:'openUrl', url}.
 """
-from gi.repository import Gtk
+from gi.repository import Gtk, GLib
 
-from . import device_list as dl
+from . import device_list as dl, ui
 from .tools_panel import ProcessesPanel, ServicesPanel
 
 
@@ -47,7 +47,7 @@ def valid_url(text):
     return (x.startswith("http://") and len(x) > 7) or (x.startswith("https://") and len(x) > 8)
 
 
-def open_url_dialog(parent, ctrl, node):
+def open_url_dialog(parent, ctrl, node, on_result=None):
     """Web UI deviceUrlFunction: the agent opens the page in the remote user's browser."""
     d, area, ok = dl._dialog(parent, "Open a web address on the remote computer", "Open", 480)
     entry = Gtk.Entry(placeholder_text="https://example.com", activates_default=True)
@@ -55,8 +55,37 @@ def open_url_dialog(parent, ctrl, node):
     ok.set_sensitive(False)
     entry.connect("changed", lambda *_: ok.set_sensitive(valid_url(entry.get_text())))
     if dl._run(d) and valid_url(entry.get_text()):
+        if on_result:
+            _watch_open_url(ctrl, node, on_result)
         ctrl.send({"action": "msg", "type": "openUrl", "nodeid": node["_id"], "url": entry.get_text().strip()})
     d.destroy()
+
+
+def _watch_open_url(ctrl, node, on_result):
+    """The agent answers {type:'openUrl', success}: report it (the web UI ignores it)."""
+    state = {"done": False}
+
+    def reply(msg):
+        if msg.get("type") != "openUrl" or state["done"]:
+            return
+        state["done"] = True
+        ctrl.off("msg", reply)
+        if msg.get("success"):
+            on_result("The web address was opened on the remote computer")
+        else:
+            on_result("The remote computer could not open the web address" +
+                      ("" if ui.is_windows(node) else
+                       " (on Linux the agent's xdg-open must reach the user's desktop session)"))
+
+    def timeout():
+        if not state["done"]:
+            state["done"] = True
+            ctrl.off("msg", reply)
+            on_result("No answer from the agent about the web address")
+        return False
+    ctrl.on("msg", reply)
+    on_result("Opening the web address on the remote computer...")
+    GLib.timeout_add_seconds(20, timeout)
 
 
 class ToolsWindow(Gtk.Window):
