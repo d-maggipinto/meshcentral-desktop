@@ -272,7 +272,8 @@ class A(appmod.App):
         ctypes.windll.dwmapi.DwmGetWindowAttribute(ctypes.c_void_p(window_handle(bar.bar_win)), 33,
                                                    ctypes.byref(pref), ctypes.sizeof(pref))
         check("fullscreen bar: rounded corners requested from Windows (DWMWCP_ROUND)", pref.value == 2, pref.value)
-        hw, hh = bar.handle_win.get_size()
+        nat = bar.handle_win.get_child().get_preferred_size()[1]     # the size _place gives it when shown
+        hw, hh = nat.width, nat.height
         check("fullscreen bar: edge handle window is only the blue line (no white box around it)",
               hw <= 170 and hh <= 8, (hw, hh))
         bar.pin.set_active(True)
