@@ -139,6 +139,7 @@ class DesktopPanel(Gtk.Box):
         self._input_locked = None        # remote user's input lock: None = unknown / not supported
         self._bg_hidden = False
         self._rec_kind = None                # 'mp4' / 'webm' (video) or 'mcrec' while recording
+        self._vid_diag = None                # last empty-video probe "type|bytes|state|error" (diagnostics)
         tools = self._tools_box = Gtk.Box()
         tools.get_style_context().add_class("linked")
         self._compact = False                # icons only (fullscreen bar)
@@ -832,7 +833,9 @@ class DesktopPanel(Gtk.Box):
         "if(k&&typeof k.requestFrame==='function'){tm=setInterval(function(){try{k.requestFrame();}catch(e){}},66);}"
         "else{s=c.captureStream(15);}"
         "var r=new MediaRecorder(s,{mimeType:t,videoBitsPerSecond:6000000}),ch=[];"
-        "r.ondataavailable=function(e){if(e.data&&e.data.size)ch.push(e.data);};r.start(1000);"
+        "r.ondataavailable=function(e){if(e.data&&e.data.size)ch.push(e.data);};"
+        "r.onerror=function(e){window.__mcdVidErr=String((e&&e.error&&(e.error.name+' '+e.error.message))||e);};"
+        "window.__mcdVidErr='';r.start(1000);"
         "window.__mcdVid={r:r,ch:ch,t:t,s:s,tm:tm};window.__mcdVidState='rec';return 'ok:'+t;}"
         "catch(e){return 'err:'+e;}})()")
     _VID_STOP_JS = (
@@ -850,30 +853,43 @@ class DesktopPanel(Gtk.Box):
     # bytes recorded so far ("type|bytes"): an engine can claim MP4 and still produce nothing (Windows without
     # the Media Foundation H.264 encoder, e.g. Windows Server): then the recording restarts as WebM
     _VID_SIZE_JS = ("(function(){try{var v=window.__mcdVid;if(!v)return 'x|0';var n=0;"
-                    "for(var i=0;i<v.ch.length;i++)n+=v.ch[i].size;return v.t+'|'+n;}catch(e){return 'x|0';}})()")
+                    "for(var i=0;i<v.ch.length;i++)n+=v.ch[i].size;"
+                    "return v.t+'|'+n+'|'+v.r.state+'|'+(window.__mcdVidErr||'');}catch(e){return 'x|0';}})()")
     _VID_DROP_JS = ("(function(){try{var v=window.__mcdVid;window.__mcdVid=null;if(v){if(v.tm)clearInterval(v.tm);"
                     "v.r.ondataavailable=null;"
                     "v.r.stop();v.s.getTracks().forEach(function(k){k.stop();});}}catch(e){}return 'ok';})()")
 
     def _check_video(self):
-        if not self._recording or self._rec_kind != "mp4":
+        """No video data a few seconds after the start: MP4 -> WebM -> MeshCentral session file, so a
+        recording always happens (some engines accept a format and never encode, e.g. without a GPU)."""
+        if not self._recording or self._rec_kind not in ("mp4", "webm"):
             return False
+        kind = self._rec_kind
 
         def got(r):
-            t, _s, n = r.partition("|")
-            if self._recording and self._rec_kind == "mp4" and "mp4" in t and n == "0":
+            parts = r.split("|")
+            if not self._recording or self._rec_kind != kind or len(parts) < 2 or parts[1] != "0":
+                return
+            self._vid_diag = r
+            if kind == "mp4":
                 self._js(self._VID_DROP_JS, lambda _r: self._js(self._VID_START_JS % self._WEBM_TYPES, restarted))
+            else:
+                self._js(self._VID_DROP_JS, lambda _r: to_mcrec())
 
         def restarted(r):
             if r.startswith("ok:"):
                 self._rec_kind = "webm"
                 self._flash_status("MP4 is not available on this computer: recording as WebM video", 6)
+                GLib.timeout_add(3000, self._check_video)
             else:
-                self._recording = False
-                self._rec_kind = None
-                self._tool_icons()
-                self._update_tools()
-                self._flash_status("Video recording is not available here")
+                to_mcrec()
+
+        def to_mcrec():
+            self._recording = False
+            self._rec_kind = None
+            self._flash_status("Video recording does not work on this computer: recording a MeshCentral "
+                               "session file instead", 8)
+            self._start_mcrec()
         self._js(self._VID_SIZE_JS, got)
         return False
 

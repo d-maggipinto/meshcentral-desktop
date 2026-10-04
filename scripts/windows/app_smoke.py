@@ -259,28 +259,33 @@ class A(appmod.App):
         p._save_dialog = lambda title, name, kind: os.path.join(self.vid_dir, name)
         p.rec_format.set_active(0)
         p._toggle_record()
-        GLib.timeout_add(4000, self.vid_stop)
+        GLib.timeout_add(9000, self.vid_stop)   # MP4 -> WebM -> .mcrec fallbacks happen by ~7 s
         return False
 
     def vid_stop(self):
         p = self.desk
-        p._js(p._VID_SIZE_JS, lambda r: print("video data so far (type|bytes): " + r, flush=True))
-        check("video recording: running in WebView2 (MP4, or WebM where Windows has no H.264 encoder)",
-              p._recording and p._rec_kind in ("mp4", "webm"), p._rec_kind)
+        p._js(p._VID_SIZE_JS, lambda r: print("video data so far (type|bytes|state|error): " + r, flush=True))
+        print("video: recording kind %r, empty-video probe %r" % (p._rec_kind, p._vid_diag), flush=True)
+        check("recording running (video, or the .mcrec fallback when the engine does not encode)",
+              p._recording and p._rec_kind in ("mp4", "webm", "mcrec"), p._rec_kind)
+        self.vid_kind = p._rec_kind
         p._refresh_desktop()
         GLib.timeout_add(1500, lambda: (p._toggle_record(), False)[1])
-        self.wait(lambda: any(f.endswith((".mp4", ".webm")) for f in os.listdir(self.vid_dir)), self.vid_done, 40,
+        self.wait(lambda: any(f.endswith((".mp4", ".webm", ".mcrec")) for f in os.listdir(self.vid_dir)), self.vid_done, 40,
                   "video recording: file saved")
         return False
 
     def vid_done(self):
         print("video status line: %r" % self.desk.status.get_text(), flush=True)
-        files = [f for f in os.listdir(self.vid_dir) if f.endswith((".mp4", ".webm"))]
+        files = [f for f in os.listdir(self.vid_dir) if f.endswith((".mp4", ".webm", ".mcrec"))]
         data = open(os.path.join(self.vid_dir, files[0]), "rb").read() if files else b""
-        check("video recording: real video file (MP4 ftyp / WebM EBML)",
+        check("recording saved: real file (MP4 ftyp / WebM EBML / MeshCentral session)",
               files and len(data) > 2000 and ((files[0].endswith(".mp4") and data[4:8] == b"ftyp") or
-                                               (files[0].endswith(".webm") and data[:4] == b"\x1aE\xdf\xa3")),
+                                               (files[0].endswith(".webm") and data[:4] == b"\x1aE\xdf\xa3") or
+                                               (files[0].endswith(".mcrec") and b"MeshCentralRelaySession" in data[:400])),
               (files, len(data)))
+        if files and files[0].endswith(".mcrec"):
+            print("INFO video recording does not encode in this WebView2 (fallback .mcrec used)", flush=True)
         self.main_win.toggle_desktop_fullscreen(self.desk)
         GLib.timeout_add(2000, self.fs_bar)
         return False
