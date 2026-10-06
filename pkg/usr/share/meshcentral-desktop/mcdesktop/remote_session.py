@@ -27,23 +27,31 @@ LINUX_ENV_JS = (
     "var q=kv.indexOf('=');if(q>0){e[kv.substring(0,q)]=kv.substring(q+1);}}st=k+1;}}"
     "if(!e.DISPLAY&&!e.WAYLAND_DISPLAY)continue;var r={},K=['DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS',"
     "'HOME','USER','LOGNAME','XDG_RUNTIME_DIR','WAYLAND_DISPLAY','PATH','LANG','XDG_CURRENT_DESKTOP',"
-    "'XDG_SESSION_TYPE'];for(var m=0;m<K.length;m++){if(e[K[m]]){r[K[m]]=e[K[m]];}}"
+    "'XDG_SESSION_TYPE','XDG_DATA_DIRS','XDG_CONFIG_DIRS','XDG_SESSION_DESKTOP','DESKTOP_SESSION'];for(var m=0;m<K.length;m++){if(e[K[m]]){r[K[m]]=e[K[m]];}}"
     "if(r.DBUS_SESSION_BUS_ADDRESS){return r;}if(!fb){fb=r;}}catch(x){}}return fb;}"
     "var E=senv(),root=false;try{root=require('user-sessions').isRoot();}catch(x){}"
-    "var O=root?{uid:uid,env:E}:{env:E};")
+    "var O=root?{uid:uid,env:E}:{env:E};"
+    # a root agent only calls setuid() for a child (group stays root, no supplementary groups): browsers then
+    # misbehave (file dialogs did not open). runuser sets the user's group and groups; env passes the session.
+    "var RU=null,UN=E?(E.USER||E.LOGNAME):null;if(root){var RP=['/usr/sbin/runuser','/sbin/runuser',"
+    "'/usr/bin/runuser'];for(var i=0;i<RP.length;i++){if(fs.existsSync(RP[i])){RU=RP[i];break;}}"
+    "if(!UN){try{UN=require('user-sessions').getUsername(uid);}catch(x){}}}"
+    "function X(p,a){var cp=require('child_process');if(RU&&UN){var ev=[];for(var k in E){ev.push(k+'='+E[k]);}"
+    "return cp.execFile(RU,['runuser','-u',UN,'--','/usr/bin/env'].concat(ev).concat([p]).concat(a.slice(1)),"
+    "{env:{PATH:'/usr/sbin:/usr/bin:/sbin:/bin'}});}return cp.execFile(p,a,O);}")
 URL_JS = (
     "(function(){try{" + LINUX_ENV_JS +
     "if(!E){return 'MCDURL:nodisplay';}var url=Buffer.from('%s','base64').toString();"
     "if(url.indexOf('http://')!=0&&url.indexOf('https://')!=0){return 'MCDURL:bad';}"
     "var x='/usr/bin/xdg-open';if(!fs.existsSync(x)){return 'MCDURL:noxdg';}"
-    "var c=require('child_process').execFile(x,['xdg-open',url],O);"
+    "var c=X(x,['xdg-open',url]);"
     "c.stdout.on('data',function(){});c.stderr.on('data',function(){});return 'MCDURL:ok';}"
     "catch(z){return 'MCDURL:err';}})()")
 BG_JS = (
     "(function(){try{" + LINUX_ENV_JS +
     "var q='/usr/bin/xfconf-query';if(!E||!fs.existsSync(q)||"
     "(E.XDG_CURRENT_DESKTOP||'').toUpperCase().indexOf('XFCE')<0){return 'MCDBG:other';}"
-    "function run(a){var c=require('child_process').execFile(q,['xfconf-query','-c','xfce4-desktop'].concat(a),O);"
+    "function run(a){var c=X(q,['xfconf-query','-c','xfce4-desktop'].concat(a));"
     "c.stdout.str='';c.stdout.on('data',function(d){this.str+=d.toString();});c.stderr.on('data',function(){});"
     "c.waitExit();return c.stdout.str;}var A=require('MeshAgent');"
     "if(A.__mcdBg){var s=A.__mcdBg;for(var p in s){run(['-p',p,'-s',s[p]]);}A.__mcdBg=null;return 'MCDBG:shown';}"
@@ -68,7 +76,7 @@ NOTIFY_JS = (
     "else if(p=f('kdialog')){a=(k=='toast')?['kdialog','--title',t,'--passivepopup',m,'10']:"
     "['kdialog','--title',t,'--msgbox',m];}"
     "else if(p=f('xmessage')){a=['xmessage','-center','-title',t,m];if(k=='msg'&&w>0){a.push('-timeout',String(w));}}"
-    "if(!a){return 'MCDNOTE:notool';}var c=require('child_process').execFile(p,a,O);"
+    "if(!a){return 'MCDNOTE:notool';}var c=X(p,a);"
     "c.stdout.on('data',function(){});c.stderr.on('data',function(){});return 'MCDNOTE:ok';}"
     "catch(z){return 'MCDNOTE:err';}})()")
 
@@ -83,7 +91,7 @@ CHAT_LINUX_JS = (
     "for(var i=0;i<B.length&&!p;i++){for(var j=0;j<D.length;j++){if(fs.existsSync(D[j]+B[i])){p=D[j]+B[i];break;}}}"
     "var r='app';if(p){a=[B[i-1],'--app='+url,'--window-size=440,640'];}"
     "else if(fs.existsSync('/usr/bin/xdg-open')){p='/usr/bin/xdg-open';a=['xdg-open',url];r='browser';}"
-    "else{return 'MCDCHAT:noapp';}var c=require('child_process').execFile(p,a,O);"
+    "else{return 'MCDCHAT:noapp';}var c=X(p,a);"
     "c.stdout.on('data',function(){});c.stderr.on('data',function(){});return 'MCDCHAT:'+r;}"
     "catch(z){return 'MCDCHAT:err';}})()")
 
