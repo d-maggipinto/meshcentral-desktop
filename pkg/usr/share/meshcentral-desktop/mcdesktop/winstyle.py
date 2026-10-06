@@ -127,7 +127,10 @@ window, window.background, .background, dialog .dialog-vbox, messagedialog .dial
 window.csd decoration { border-radius: 8px; }
 window.csd { border-radius: 0 0 8px 8px; }
 window.csd decoration { box-shadow: 0 8px 24px %(shadow)s, 0 0 0 1px %(layer_border)s; margin: 10px; }
-window.csd:backdrop decoration { box-shadow: 0 4px 12px %(shadow)s, 0 0 0 1px %(layer_border)s; }
+/* the transparent copy keeps the shadow extents of the focused window: GTK sizes the window frame from them,
+   so a smaller backdrop shadow resized the window whenever another application took the focus */
+window.csd:backdrop decoration { box-shadow: 0 8px 24px transparent, 0 4px 12px %(shadow)s,
+    0 0 0 1px %(layer_border)s; }
 window.maximized, window.maximized decoration, window.fullscreen, window.fullscreen decoration,
 window.tiled decoration { border-radius: 0; }
 window.popup decoration, window.popup { border-radius: 0; box-shadow: none; }
