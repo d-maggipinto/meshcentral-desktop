@@ -17,6 +17,13 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
 - Windows: a thin light line on the top and left edges of the screen in remote desktop fullscreen.
 - Remote desktop tools: "Open a web address" and "Toggle background" now report what the agent did (the web
   UI shows nothing).
+- Windows: the main window grew a little whenever another application's window took the focus, and shrank back
+  when it closed (the Windows look drew a smaller shadow for an inactive window, and the window frame follows
+  the shadow).
+- Linux devices: toast notifications that never appeared and message boxes that took about a minute. With agent
+  console rights the toast, message box and alert box now open straight in the console user's desktop
+  session (notify-send, zenity, kdialog or xmessage); without them, or when no such tool is found, the agent's
+  own command is used as before.
 
 ### Added
 - Session recording as video: a recording format setting, "Video (MP4)" (the default) or "MeshCentral (.mcrec)".
@@ -26,6 +33,13 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
   agent alone fails (its xdg-open cannot reach the user's desktop session, and it only changes GNOME
   backgrounds). With agent console rights the app runs them in the console user's desktop session, like the
   clipboard fix; XFCE backgrounds are toggled with xfconf-query. Other cases use the agent's own commands.
+- Native chat: the chat with the remote computer's user is now part of the app, in a panel next to the remote
+  desktop (the Chat button shows or hides it, the device's General page opens it too; its own window when the
+  remote desktop is not available to the account). Messages, a typing indicator, a note when the remote user
+  joins or leaves, messages typed early are sent when the user joins, the conversation can be saved. On the
+  remote computer the chat opens as a compact app window (Microsoft Edge on Windows, Chrome / Chromium /
+  Edge / Brave on Linux) instead of a browser tab, when the account has agent console rights; otherwise the
+  agent opens it in the browser as before.
 - Fullscreen toolbar settings panel redesigned: labelled sections (toolbar position, remote image, recording,
   while connected) in a dark panel matching the toolbar.
 

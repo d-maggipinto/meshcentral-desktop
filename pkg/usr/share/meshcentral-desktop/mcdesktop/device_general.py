@@ -11,8 +11,7 @@ Ground truth (MeshCentral 1.2.5 default.handlebars / meshuser.js):
   locally); bits 2/4/8 web page, 16/32/64 email, 128/256/512 messaging.
 - setDeviceEvent {nodeid, msg: encodeURIComponent(text)}: adds a 'manual' event, no reply.
 - msg messagebox {title, msg, timeout ms}; pushmessage for push-capable mobile devices (pmt 1).
-- Chat: {server}/messenger?id=meshmessenger/<enc nodeid>/<enc userid>&title=..&auth=<authcookie>
-  plus {action:'meshmessenger', nodeid} (asks the agent to open its chat window).
+- Chat: the native chat (chat.py) in the Desktop tab's side panel, else in its own window.
 - createDeviceShareLink {nodeid, guestname, p, expire|start+end|start+expire+recurring, consent,
   viewOnly}: with a responseid the reply is the command echoed with url and result 'OK', or
   {result:<error>}.
@@ -32,6 +31,7 @@ from datetime import datetime
 from gi.repository import Gtk, GLib, Pango, PangoCairo
 
 from . import ui, rights, servericons
+from . import remote_session as rs
 from . import device_list as dl
 from .general_actions import NotesDialog
 from .info_panel import agent_description, _group_name
@@ -851,42 +851,25 @@ class GeneralPanel(Gtk.Box):
             if self.node.get("pmt") == 1:
                 self.ctrl.send({"action": "pushmessage", "nodeid": self.node["_id"], "title": title, "msg": msg})
             else:
-                self.ctrl.send({"action": "msg", "type": "messagebox", "nodeid": self.node["_id"], "title": title,
-                                "msg": msg, "timeout": int(tmo.get_active_id()) * 60000})
+                rs.notify(self.ctrl, self.node, rights.NodeCaps(self._rights()), "msg", title, msg,
+                          int(tmo.get_active_id()))
         d.destroy()
 
     def chat(self):
-        open_chat(self.app, self.node)
+        """The native chat: in the Desktop tab's side panel when the account can use the remote desktop, else in
+        its own window."""
+        from .chat import ChatWindow
+        win = getattr(self.app, "main_win", None)
+        if win is not None and rights.NodeCaps(self._rights()).desktop:
+            win.goto_device_tab("Desktop")
+            panel = win._current_desktop_panel()
+            if panel is not None and panel.node.get("_id") == self.node.get("_id"):
+                panel.open_chat()
+                return
+        ChatWindow.show_for(self.app, self.node)
 
     def share(self):
         ShareDialog(self)
-
-
-def open_chat(app, node, remote_side=None):
-    """Web UI chat with the device's user: the server's /messenger page in a window, then the agent is
-    told to open its side (meshmessenger)."""
-    ctrl = app.ctrl
-    me, si = ctrl.userinfo or {}, ctrl.serverinfo or {}
-
-    def got(cookie, _rcookie):
-        q = urllib.parse.quote
-        path = "/messenger?id=meshmessenger/" + q(node["_id"], safe="") + "/" + q(me.get("_id", ""), safe="")
-        path += "&title=" + q(node.get("name", ""), safe="")
-        if si.get("domainsuffix"):
-            path = "/" + si["domainsuffix"] + path
-        if cookie:
-            path += "&auth=" + q(cookie, safe="")
-        if node.get("pmt") == 1 and (si.get("features2") or 0) & 2:
-            path += "&pmt=1"
-        ChatWindow(app, f"Chat - {node.get('name', '')}", ctrl.server.url.rstrip("/") + path)
-        if remote_side:
-            rpath = "/messenger?id=meshmessenger/" + q(node["_id"], safe="") + "/" + q(me.get("_id", ""), safe="")
-            if si.get("domainsuffix"):
-                rpath = "/" + si["domainsuffix"] + rpath
-            remote_side(ctrl.server.url.rstrip("/") + rpath)
-        else:
-            ctrl.send({"action": "meshmessenger", "nodeid": node["_id"]})
-    ctrl.get_auth_cookie(got)                   # callbacks already run on the GTK loop
 
 
 class DeviceContext:

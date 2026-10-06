@@ -8,12 +8,13 @@ type:'messagebox', nodeid, title, msg, timeout ms}; alert box {type:'alertbox'};
 """
 from gi.repository import Gtk, GLib
 
-from . import device_list as dl, ui
+from . import device_list as dl, remote_session as rs, ui
 from .tools_panel import ProcessesPanel, ServicesPanel
 
 
-def notify_dialog(parent, ctrl, node):
-    """Web UI deviceToastFunction: toast, message box (with a time limit) or the old-style alert box."""
+def notify_dialog(parent, ctrl, node, caps=None, report=None):
+    """Web UI deviceToastFunction: toast, message box (with a time limit) or the old-style alert box. With caps
+    (rights.NodeCaps), Linux devices show it straight in the user's session (remote_session.notify)."""
     d, area, ok = dl._dialog(parent, "Display a notification", "Send", 480)
     kind = dl._combo([(2, "Toast notification"), (1, "Message box"), (3, "Alert box")])
     title = Gtk.Entry(placeholder_text="Title", max_length=256)
@@ -30,14 +31,12 @@ def notify_dialog(parent, ctrl, node):
     tv.get_buffer().connect("changed", lambda *_: ok.set_sensitive(bool(dl._buf_text(tv).strip())))
     if dl._run(d):
         msg, t = dl._buf_text(tv), title.get_text().strip() or "MeshCentral"
-        op = kind.get_active_id()
-        if op == "2":
-            ctrl.send({"action": "toast", "nodeids": [node["_id"]], "title": t, "msg": msg})
-        elif op == "1":
-            ctrl.send({"action": "msg", "type": "messagebox", "nodeid": node["_id"], "title": t, "msg": msg,
-                       "timeout": int(tmo.get_active_id()) * 60000})
+        what = {"2": "toast", "1": "msg"}.get(kind.get_active_id(), "alert")
+        minutes = int(tmo.get_active_id())
+        if caps is not None:
+            rs.notify(ctrl, node, caps, what, t, msg, minutes, report)
         else:
-            ctrl.send({"action": "msg", "type": "alertbox", "nodeid": node["_id"], "title": t, "msg": msg})
+            rs.send_stock_notification(ctrl, node, what, t, msg, minutes)
     d.destroy()
 
 

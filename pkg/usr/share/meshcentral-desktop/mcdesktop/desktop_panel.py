@@ -18,11 +18,11 @@ functions, connectDesktop) via run_javascript.
 import base64
 import json
 import os
-import re
 import time
 import urllib.parse
 
 from . import rights, ui, servericons
+from . import remote_session as rs
 from .osdep import IS_WINDOWS
 from .webview import WebView, server_origin, same_origin_policy  # noqa: F401 (re-exported for callers)
 import gi
@@ -281,7 +281,13 @@ class DesktopPanel(Gtk.Box):
         overlay.set_overlay_pass_through(self._hint_rev, True)
         # Keyboard grab follows the remote screen's focus (see "keyboard" section).
         self.web.on_focus_changed = lambda on: self._kb_update() if on else GLib.idle_add(self._kb_update)
-        self.pack_start(overlay, True, True, 0)
+        # remote screen + the chat side panel (chat.ChatPanel, built on first use)
+        body = Gtk.Box()
+        body.pack_start(overlay, True, True, 0)
+        self._chat_rev = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_LEFT, no_show_all=True)
+        body.pack_start(self._chat_rev, False, False, 0)
+        self._chat_panel = None
+        self.pack_start(body, True, True, 0)
         self.show_all()
         self._set_controls_enabled(False)
         self._cover_show("Starting…")
@@ -369,6 +375,8 @@ class DesktopPanel(Gtk.Box):
 
     def teardown(self):
         self._icons_off()
+        if self._chat_panel is not None:
+            self._chat_panel.stop()
         if self._fsbar is not None:
             self._fsbar.destroy()
             self._fsbar = None
@@ -564,76 +572,15 @@ class DesktopPanel(Gtk.Box):
         from . import device_list as dl
         dl.GroupActions(self._parent_window(), single=True).op_run([self.node])
 
-    # ---- Linux devices: open URL / chat / background in the user's desktop session ---------------------------
-    # The stock agent runs xdg-open without the desktop's DISPLAY / D-Bus (fails on many Linux desktops) and
-    # changes the background only through GNOME settings. These one-shot console evals (agent console rights,
-    # logged by the server like every console command; nothing is kept in the agent except the saved XFCE
-    # background styles) find the console user's session environment in /proc and run the tool as that user.
-    # Agent-JS rules: no double quote and no backslash.
-    _LINUX_ENV_JS = (
-        "var fs=require('fs'),NL=String.fromCharCode(10),uid=require('user-sessions').consoleUid();"
-        "function senv(){var ps=fs.readdirSync('/proc'),fb=null;for(var i=0;i<ps.length;i++){var p=ps[i];"
-        "if(!(parseInt(p)>0))continue;try{var ls=fs.readFileSync('/proc/'+p+'/status').toString().split(NL);"
-        "var u=-1;for(var j=0;j<ls.length;j++){if(ls[j].indexOf('Uid:')==0){u=parseInt(ls[j].substring(4).trim());"
-        "break;}}if(u!=uid)continue;var b=fs.readFileSync('/proc/'+p+'/environ'),e={},st=0;"
-        "for(var k=0;k<=b.length;k++){if(k==b.length||b[k]==0){if(k>st){var kv=b.slice(st,k).toString();"
-        "var q=kv.indexOf('=');if(q>0){e[kv.substring(0,q)]=kv.substring(q+1);}}st=k+1;}}"
-        "if(!e.DISPLAY&&!e.WAYLAND_DISPLAY)continue;var r={},K=['DISPLAY','XAUTHORITY','DBUS_SESSION_BUS_ADDRESS',"
-        "'HOME','USER','LOGNAME','XDG_RUNTIME_DIR','WAYLAND_DISPLAY','PATH','LANG','XDG_CURRENT_DESKTOP',"
-        "'XDG_SESSION_TYPE'];for(var m=0;m<K.length;m++){if(e[K[m]]){r[K[m]]=e[K[m]];}}"
-        "if(r.DBUS_SESSION_BUS_ADDRESS){return r;}if(!fb){fb=r;}}catch(x){}}return fb;}"
-        "var E=senv(),root=false;try{root=require('user-sessions').isRoot();}catch(x){}"
-        "var O=root?{uid:uid,env:E}:{env:E};")
-    _URL_JS = (
-        "(function(){try{" + _LINUX_ENV_JS +
-        "if(!E){return 'MCDURL:nodisplay';}var url=Buffer.from('%s','base64').toString();"
-        "if(url.indexOf('http://')!=0&&url.indexOf('https://')!=0){return 'MCDURL:bad';}"
-        "var x='/usr/bin/xdg-open';if(!fs.existsSync(x)){return 'MCDURL:noxdg';}"
-        "var c=require('child_process').execFile(x,['xdg-open',url],O);"
-        "c.stdout.on('data',function(){});c.stderr.on('data',function(){});return 'MCDURL:ok';}"
-        "catch(z){return 'MCDURL:err';}})()")
-    _BG_JS = (
-        "(function(){try{" + _LINUX_ENV_JS +
-        "var q='/usr/bin/xfconf-query';if(!E||!fs.existsSync(q)||"
-        "(E.XDG_CURRENT_DESKTOP||'').toUpperCase().indexOf('XFCE')<0){return 'MCDBG:other';}"
-        "function run(a){var c=require('child_process').execFile(q,['xfconf-query','-c','xfce4-desktop'].concat(a),O);"
-        "c.stdout.str='';c.stdout.on('data',function(d){this.str+=d.toString();});c.stderr.on('data',function(){});"
-        "c.waitExit();return c.stdout.str;}var A=require('MeshAgent');"
-        "if(A.__mcdBg){var s=A.__mcdBg;for(var p in s){run(['-p',p,'-s',s[p]]);}A.__mcdBg=null;return 'MCDBG:shown';}"
-        "var ls=run(['-l']).split(NL),sv={},n=0;for(var i=0;i<ls.length;i++){var p=ls[i].trim();"
-        "if(p.length>12&&p.substring(p.length-12)=='/image-style'){sv[p]=run(['-p',p]).trim();"
-        "run(['-p',p,'-s','0']);n++;}}if(!n){return 'MCDBG:other';}A.__mcdBg=sv;return 'MCDBG:hidden';}"
-        "catch(z){return 'MCDBG:err';}})()")
+    # ---- Linux devices: open URL / chat / background in the user's desktop session (see remote_session) --
+    _URL_JS = rs.URL_JS
+    _BG_JS = rs.BG_JS
 
     def _linux_session_tools(self):
-        """Use the evals above: a Linux agent and the right to use its console."""
-        return bool(self.node.get("agent")) and not ui.is_windows(self.node) and self.caps.console
+        return rs.linux_session(self.node, self.caps)
 
     def _agent_eval(self, js, tag, done, secs=20):
-        """One console eval; done(result after 'TAG:') or done(None) on timeout."""
-        ctrl = self.app.ctrl
-        state = {"done": False}
-
-        def reply(msg):
-            v = str(msg.get("value") or "")
-            if state["done"] or msg.get("type") != "console" or tag + ":" not in v:
-                return
-            finish()
-            m = re.search(re.escape(tag) + r":([a-z]+)", v)          # the agent quotes the value: "TAG:word"
-            done(m.group(1) if m else "")
-
-        def finish():
-            state["done"] = True
-            ctrl.off("msg", reply)
-
-        def timeout():
-            if not state["done"]:
-                finish()
-                done(None)
-            return False
-        ctrl.on("msg", reply)
-        ctrl.send_node_msg(self.node["_id"], "console", value='eval "%s"' % js)
-        GLib.timeout_add_seconds(secs, timeout)
+        rs.agent_eval(self.app.ctrl, self.node["_id"], js, tag, done, secs)
 
     def _session_open_url(self, url, what, fallback):
         """Open url in the Linux user's session; fallback() = the stock agent path."""
@@ -649,20 +596,26 @@ class DesktopPanel(Gtk.Box):
         self._agent_eval(self._URL_JS % b64, "MCDURL", done)
 
     def _chat(self):
-        from .device_general import open_chat
-        if not self._linux_session_tools():
-            open_chat(self.app, self.node)
+        """Chat button: show / hide the chat panel (hiding keeps the chat going; its close button ends it)."""
+        if self._chat_panel is not None and self._chat_rev.get_reveal_child() and self._chat_panel.active:
+            self._chat_rev.set_reveal_child(False)
             return
+        self.open_chat()
 
-        def remote_side(url):
-            # the same page the server would send the agent (meshuser.js meshmessenger), opened in the session
-            self._session_open_url(url, "Chat", lambda: self.app.ctrl.send(
-                {"action": "meshmessenger", "nodeid": self.node["_id"]}))
-        open_chat(self.app, self.node, remote_side)
+    def open_chat(self):
+        """Show the chat panel and start the chat (also used by the device's General page)."""
+        if self._chat_panel is None:
+            from .chat import ChatPanel
+            self._chat_panel = ChatPanel(self.app, self.node, on_close=lambda: self._chat_rev.set_reveal_child(False))
+            self._chat_rev.add(self._chat_panel)
+        self._chat_rev.show()
+        self._chat_rev.set_reveal_child(True)
+        self._chat_panel.start()
 
     def _notify(self):
         from .desktop_tools import notify_dialog
-        notify_dialog(self._parent_window(), self.app.ctrl, self.node)
+        notify_dialog(self._parent_window(), self.app.ctrl, self.node, self.caps,
+                      lambda text: self._flash_status(text, 8))
 
     def _open_url(self):
         from .desktop_tools import open_url_dialog

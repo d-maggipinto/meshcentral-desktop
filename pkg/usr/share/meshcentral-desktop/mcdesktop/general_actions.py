@@ -6,6 +6,7 @@ import secrets
 from gi.repository import Gtk, Gdk, GLib
 
 from . import ui, rights, servericons
+from . import remote_session as rs
 
 POWER = {"wake": 100, "off": 2, "reset": 3, "sleep": 4}
 RUN_TYPE = {"Windows Command": 0, "Windows PowerShell": 2, "Linux/macOS Shell": 3}
@@ -257,8 +258,7 @@ class DeviceActions:
         r = ui.form_dialog(self.win, "Message box", [("title", "Title:", "text", "Message"),
                                                      ("msg", "Message:", "multiline", "")], "Send")
         if r and r["msg"].strip():
-            self.ctrl.send({"action": "msg", "type": "messagebox", "nodeid": node["_id"],
-                            "title": r["title"], "msg": r["msg"]})
+            rs.notify(self.ctrl, node, self.caps(node), "msg", r["title"], r["msg"])
 
     def toast(self, *_):
         node = self._node()
@@ -267,7 +267,7 @@ class DeviceActions:
         r = ui.form_dialog(self.win, "Toast notification", [("title", "Title:", "text", "Notice"),
                                                             ("msg", "Message:", "text", "")], "Send")
         if r and r["msg"].strip():
-            self.ctrl.send({"action": "toast", "nodeids": [node["_id"]], "title": r["title"], "msg": r["msg"]})
+            rs.notify(self.ctrl, node, self.caps(node), "toast", r["title"], r["msg"])
 
     def rename_device(self, *_):
         node = self._node()

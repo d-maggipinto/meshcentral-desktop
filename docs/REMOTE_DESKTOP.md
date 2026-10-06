@@ -154,7 +154,7 @@ timing out silently).
 | Button | How |
 |---|---|
 | Tools | window with the device's processes (`ps`, double-click = `psinfo` details) and services |
-| Run a script, Chat, Share | the same dialogs as the device's General page (`op_run`, `/messenger`, `createDeviceShareLink`) |
+| Run a script, Chat, Share | Run and Share = the General page's dialogs (`op_run`, `createDeviceShareLink`); Chat = the native chat panel docked on the right of the screen (`chat.py`; the button shows / hides it, its close button ends the chat) |
 | Notification | toast, message box (2/10/30/60 minutes or until dismissed) or alert box, as in the web UI |
 | Lock the computer | the viewer's control channel: `desktop.sendCtrlMsg('{"ctrlChannel":"102938","type":"lock"}')` (Windows agents) |
 | Web address | `openUrl` (http / https only) |

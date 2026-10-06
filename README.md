@@ -80,7 +80,7 @@ Current version: **3.0.2**, see the [changelog](CHANGELOG.md).
   away and comes back when the pointer reaches that edge. Fit to window, display picker for multi-monitor
   computers.
 - The web interface's **desktop tools**: Tools (the computer's processes with details, and its services),
-  run a script, chat, display a notification (toast, message box or alert box), lock the remote computer,
+  run a script, chat (native panel next to the screen; an app window on the remote computer), display a notification (toast, message box or alert box), lock the remote computer,
   open a web address on it, toggle its desktop background, save a screenshot (PNG, full resolution),
   **record the session** to a file (`.mcrec`, plays in MeshCentral's player), refresh the screen, lock the
   remote user's mouse and keyboard, and share the device with a guest. Same rights as the web interface,

@@ -29,6 +29,8 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `general_actions.py` | Device action bar, power / more menus, context menu, *Run command* dialog, Notes dialog |
 | `desktop_panel.py` | Remote desktop: embedded viewer, native toolbar, connection state machine, keyboard, clipboard sync |
 | `desktop_tools.py` | Remote desktop tools dialogs: notification, open a web address, the Tools window (processes, services) |
+| `chat.py` | Native chat: `ChatSession` (the meshmessenger relay, same protocol as the server's chat page), `ChatPanel` (docked next to the remote desktop, or in `ChatWindow` when the desktop is not available) |
+| `remote_session.py` | One-shot agent console evals that act in the remote user's session: Linux open URL / XFCE background / toast, message box, alert box; the chat page as an app window (Edge on Windows, Chromium family on Linux); `agent_eval` |
 | `desktop_fsbar.py` | Auto-hiding fullscreen toolbar (overlay on Linux, topmost popup windows on Windows) |
 | `terminal_panel.py` | VTE terminal over relay protocols 1 / 6 / 8 / 9 (shell choices like the web UI: `shell_options`) |
 | `files_panel.py` | Device file manager over relay protocol 5 |
@@ -45,7 +47,7 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `updater.py` | update check (GitHub releases, stable / preview channel), verified download (SHA256SUMS), install per installation type (pkexec apt, Inno Setup, msiexec, portable) |
 | `update_ui.py` | "New version available" card and the Updates dialog |
 | `selftest.py` | `--selftest`: checks a bundled or installed copy (used by the Windows build) |
-| `device_general.py` | General page (web UI p10): attributes with edit dialogs (hostname, description, consent, notifications, tags), Actions / Notes / Log Event / Run / Message / Chat (`ChatWindow`, WebKit) / Share (`ShareDialog`); `PowerTimeline` (7 day power state), links (Interfaces, MeshCmd, Web-VNC / Web-RDP / Web-SSH windows with the web session cookies), Change Group, Delete Device, User Authorizations |
+| `device_general.py` | General page (web UI p10): attributes with edit dialogs (hostname, description, consent, notifications, tags), Actions / Notes / Log Event / Run / Message / Chat (native, `chat.py`) / Share (`ShareDialog`); `ChatWindow` (WebKit / WebView2) for the Web-VNC / RDP / SSH pages; `PowerTimeline` (7 day power state), links (Interfaces, MeshCmd, Web-VNC / Web-RDP / Web-SSH windows with the web session cookies), Change Group, Delete Device, User Authorizations |
 | `info_panel.py` | Hardware, Network, Events, Notes |
 | `admin_panel.py` | Users (online / offline tree with checkboxes, Select All, Group Action, filter, live session counts from `wssessioncount`; `NewAccountDialog`, export CSV/JSON, `UserImportDialog` batch import; double-click opens `user_panel.UserPage`), User Groups (+ details, broadcast), Server Events, `BroadcastDialog` |
 | `account_panel.py` | My Account: 2FA (authenticator + QR, backup codes, security keys), previous logins, notification / localization settings, password, login tokens, delete account, device groups, account image |
