@@ -20,7 +20,7 @@ the server from a desktop application instead of a browser tab.
   single-file `.exe`. Remote desktop, terminal and chat are embedded with Microsoft Edge WebView2.
   Not code-signed yet, see [Windows](#windows).
 
-Current version: **3.0.2**, see the [changelog](CHANGELOG.md).
+Current version: **3.0.3**, see the [changelog](CHANGELOG.md).
 
 ![Users list](docs/images/users.png)
 

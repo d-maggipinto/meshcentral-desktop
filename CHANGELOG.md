@@ -7,7 +7,7 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [3.0.3] - 2026-10-06
 ### Fixed
 - Windows: an empty white box stayed under the fullscreen toolbar (the start hint, which cannot be drawn over
   the remote screen there; it is in the status line).
@@ -48,6 +48,13 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
   Edge / Brave on Linux) instead of a browser tab, when the account has agent console rights; otherwise the
   agent opens it in the browser as before. Files can be sent and received in the chat (up to 100 MB), and
   the conversation can be cleared or saved.
+- Remote desktop fullscreen: the chat floats over the remote screen in a small dark window instead of taking
+  a column of it. Drag it by its header, resize it from the corner, minimise it to a bubble that counts new
+  messages; it stays above a pinned toolbar and comes back where it was left. Leaving fullscreen docks it
+  again with the same conversation.
+- Remote desktop: while connecting, the agent's own messages are shown (for example when the remote user
+  has to accept the connection); waiting for that answer no longer ends in a time-out.
+- The fullscreen toolbar's pin is remembered, like its position.
 - Fullscreen toolbar settings panel redesigned: labelled sections (toolbar position, remote image, recording,
   while connected) in a dark panel matching the toolbar.
 
