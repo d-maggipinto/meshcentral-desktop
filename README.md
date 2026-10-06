@@ -22,7 +22,7 @@ the server from a desktop application instead of a browser tab.
 
 Current version: **3.0.3**, see the [changelog](CHANGELOG.md).
 
-![Users list](docs/images/users.png)
+![MeshCentral Desktop: remote desktop, chat and fullscreen](docs/images/demo.gif)
 
 ## Contents
 
@@ -140,16 +140,38 @@ not allowed are greyed out with an explanation instead of failing silently. See
 
 ## Screenshots
 
+**Remote desktop** with the native toolbar, and the **chat** with the remote user (messages, typing
+indicator, files) docked next to the screen:
+
+![Remote desktop](docs/images/remote-desktop.png)
+
+![Chat next to the remote desktop](docs/images/chat.png)
+
+**Fullscreen**: the toolbar hides at the screen edge (pinned here) and the chat floats over the remote
+screen, which keeps its full size:
+
+![Fullscreen with the floating chat](docs/images/fullscreen-chat.png)
+
+**Windows look**: on Windows the app follows the system's light or dark mode and accent colour:
+
+| | |
+|---|---|
+| ![Devices, Windows look](docs/images/devices-windows.png) | ![Chat, Windows look](docs/images/chat-windows.png) |
+| Devices | Remote desktop and chat |
+
 | | |
 |---|---|
 | ![Sign in](docs/images/login.png) | ![Devices](docs/images/devices.png) |
 | Sign in | Devices |
+| ![Users](docs/images/users.png) | ![Server](docs/images/my-server.png) |
+| Users | Server |
 | ![User page](docs/images/user-page.png) | ![Group page](docs/images/group-page.png) |
 | User page | User group page |
-| ![Server](docs/images/my-server.png) | ![Account](docs/images/my-account.png) |
-| Server | Account |
+| ![Account](docs/images/my-account.png) | |
+| Account | |
 
-The screenshots were taken on a local test server with sample data.
+The screenshots were taken on a local test server with sample data; the remote computer is a demo
+desktop.
 
 ## Requirements
 
