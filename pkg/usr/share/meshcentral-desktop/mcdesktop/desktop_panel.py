@@ -345,8 +345,10 @@ class DesktopPanel(Gtk.Box):
         def fire():
             self._watchdog = None
             if gen == self._gen and self._phase in ("loading", "connecting"):
+                last = getattr(self, "_last_page_msg", "") or ""
                 self._fail("The remote desktop did not start in time. Check that the device is "
-                           "online and that you can reach the server, then Retry.")
+                           "online and that you can reach the server, then Retry." +
+                           ("\nLast status: " + ui.one_line(last)[:200] if last else ""))
             return False
         self._watchdog = GLib.timeout_add_seconds(self._FLOW_TIMEOUT_S, fire)
 
@@ -362,6 +364,7 @@ class DesktopPanel(Gtk.Box):
         self._want_session = True
         self._waiting_agent = False
         self._gen += 1
+        self._last_page_msg = ""
         self._logged_in = False
         self._navigated = False
         self._connect_tried = False
@@ -1865,13 +1868,20 @@ class DesktopPanel(Gtk.Box):
         if self._closing:
             self._polling = False
             return False
-        self._js("(function(){var d=document.getElementById('deskstatus');"
-                 "return d?d.innerText.trim():'';})()", self._on_status)
+        # the status line + the agent's own messages (consent prompt, denied...), which the cover hides
+        self._js("(function(){var d=document.getElementById('deskstatus'),"
+                 "m=document.getElementById('p11DeskConsoleMsg');"
+                 "return (d?d.innerText.trim():'')+String.fromCharCode(10)+"
+                 "(m&&m.style.display!='none'?m.innerText.trim():'');})()", self._on_status)
         return False
+
+    _CONSENT_WAIT = ("grant access", "waiting for user", "consent")
 
     def _on_status(self, text):
         if self._closing:
             return
+        text, _sep, agent_msg = (text or "").partition("\n")
+        self._page_msg(text, agent_msg.strip())
         now_connected = text.lower().startswith("connected")
         if self._connected and time.monotonic() >= self._status_hold:
             self._set_status(text or "")
@@ -1893,6 +1903,19 @@ class DesktopPanel(Gtk.Box):
             self._refresh_displays()
         # keep polling while the panel is alive: fast while connecting, slow after
         GLib.timeout_add(2000 if self._connected else 300, self._poll_status)
+
+    def _page_msg(self, status, agent_msg):
+        """While connecting, show what the viewer / agent says on the cover (it hides the page): e.g. the agent
+        waits for the remote user to accept (consent). That wait does not count against the time limit."""
+        if self._phase != "connecting" or not self._cover.get_visible():
+            return
+        msg = agent_msg.splitlines()[-1].strip() if agent_msg else ""
+        if msg and any(k in msg.lower() for k in self._CONSENT_WAIT):
+            self._cover_label.set_text("Waiting for the remote user to accept the connection...")
+            self._arm_watchdog()                     # a person has to answer: no time-out meanwhile
+        elif msg:
+            self._cover_label.set_text("Connecting...\nThe remote computer says: " + ui.one_line(msg)[:200])
+        self._last_page_msg = msg or status
 
     def _wait_first_frame(self, tries, hits, gen):
         # Reveal only once the viewer has drawn a frame, so the user never sees an empty,
