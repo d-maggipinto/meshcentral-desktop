@@ -291,6 +291,7 @@ class DesktopPanel(Gtk.Box):
         self._chat_box = Gtk.Box(no_show_all=True, hexpand=False)
         body.pack_start(self._chat_box, False, False, 0)
         self._chat_panel = None
+        self._chat_float = None
         self.pack_start(body, True, True, 0)
         self.show_all()
         self._set_controls_enabled(False)
@@ -381,6 +382,9 @@ class DesktopPanel(Gtk.Box):
         self._icons_off()
         if self._chat_panel is not None:
             self._chat_panel.stop()
+        if self._chat_float is not None:
+            self._chat_float.destroy()
+            self._chat_float = None
         if self._fsbar is not None:
             self._fsbar.destroy()
             self._fsbar = None
@@ -600,21 +604,54 @@ class DesktopPanel(Gtk.Box):
                 self._flash_status("The remote computer could not open the %s" % what.lower(), 8)
         self._agent_eval(self._URL_JS % b64, "MCDURL", done)
 
+    # ---- chat: docked panel next to the screen; in fullscreen a floating window (chat.FloatingChat) ------------
+    def _in_fullscreen(self):
+        return self._fsbar is not None and self._fsbar.active
+
     def _chat(self):
-        """Chat button: show / hide the chat panel (hiding keeps the chat going; its close button ends it)."""
-        if self._chat_panel is not None and self._chat_box.get_visible() and self._chat_panel.active:
-            self._chat_box.hide()
-            return
+        """Chat button: show / hide the chat (hiding keeps the chat going; its close button ends it)."""
+        if self._chat_panel is not None and self._chat_panel.active:
+            if self._in_fullscreen() and self._chat_float is not None and self._chat_float.panel is not None:
+                if self._chat_float.visible:
+                    self._chat_float.minimise()
+                else:
+                    self._chat_float.restore()
+                return
+            if not self._in_fullscreen() and self._chat_box.get_visible():
+                self._chat_box.hide()
+                return
         self.open_chat()
 
     def open_chat(self):
-        """Show the chat panel and start the chat (also used by the device's General page)."""
+        """Show the chat and start it (also used by the device's General page)."""
         if self._chat_panel is None:
             from .chat import ChatPanel
-            self._chat_panel = ChatPanel(self.app, self.node, on_close=self._chat_box.hide)
-            self._chat_box.pack_start(self._chat_panel, True, True, 0)
-        self._chat_box.show()
+            self._chat_panel = ChatPanel(self.app, self.node, on_close=self._chat_closed)
+        if self._in_fullscreen():
+            self._float_chat()
+        else:
+            self._dock_chat()
+            self._chat_box.show()
         self._chat_panel.start()
+
+    def _chat_closed(self):
+        self._chat_box.hide()
+        if self._chat_float is not None:
+            self._chat_float.hide()
+
+    def _float_chat(self):
+        if self._chat_float is None:
+            from .chat import FloatingChat
+            top = self.get_toplevel()
+            self._chat_float = FloatingChat(top if isinstance(top, Gtk.Window) else None)
+        self._chat_box.hide()
+        self._chat_float.attach(self._chat_panel)
+
+    def _dock_chat(self):
+        if self._chat_float is not None and self._chat_float.panel is not None:
+            self._chat_float.detach()
+        if self._chat_panel.get_parent() is None:
+            self._chat_box.pack_start(self._chat_panel, True, True, 0)
 
     def _notify(self):
         from .desktop_tools import notify_dialog
@@ -1131,10 +1168,17 @@ class DesktopPanel(Gtk.Box):
             self._fsbar.enter(self.node.get("name", ""))
             self._full_btn.hide()                      # the bar has its own Exit fullscreen
             self._hint_rev.set_margin_top(84)          # below the bar
+            # a docked chat would take width from the remote screen: it floats over it instead
+            if self._chat_panel is not None and self._chat_panel.active and self._chat_box.get_visible():
+                self._chat_box.hide()
+                GLib.timeout_add(600, lambda: (self._in_fullscreen() and self._float_chat(), False)[1])
         elif self._fsbar is not None:
             self._fsbar.leave()
             self._full_btn.show()
             self._hint_rev.set_margin_top(24)
+            if self._chat_float is not None and self._chat_float.panel is not None:
+                self._dock_chat()
+                self._chat_box.show()
 
     def _connect_label(self):
         text = {"idle": "Connect", "connected": "Disconnect"}.get(self._phase, "Cancel")

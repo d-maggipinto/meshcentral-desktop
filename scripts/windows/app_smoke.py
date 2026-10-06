@@ -371,6 +371,19 @@ class A(appmod.App):
         check("fullscreen with the chat: WebView2 bounds follow the screen widget",
               g["bounds"][2] == g["alloc"][2] * g["scale"] and g["hwnd_client"][0] == g["alloc"][2] * g["scale"], g)
         check("fullscreen: the remote screen starts at the top edge (no light strip above it)", g["alloc"][1] == 0, g)
+        import ctypes
+        p = self.desk
+        fl = p._chat_float
+        sw = ctypes.windll.user32.GetSystemMetrics(0)
+        check("fullscreen chat: a floating window over the screen, which keeps the full width",
+              fl is not None and fl.visible and p._chat_panel.get_parent() is fl.slot and g["alloc"][2] == sw
+              and g["bounds"][2] == sw, (g, sw, fl is not None and fl.visible))
+        fl.minimise()
+        p._chat_panel.on_incoming()
+        check("fullscreen chat: minimised to the bubble with the unread count",
+              not fl.visible and fl.bubble.get_visible() and fl.unread_lbl.get_text() == "1")
+        shot(self.main_win, "app_chat_5_bubble.png")
+        fl.restore()
         self.fs_bar()
         return False
 
@@ -430,6 +443,8 @@ class A(appmod.App):
         bar = p._fsbar
         check("fullscreen bar: exit restores the window and its toolbar",
               not bar.bar_win.get_visible() and not bar.settings_win.get_visible() and p.get_children()[0] is p._toolbar)
+        check("leaving fullscreen docks the chat again", p._chat_panel.get_parent() is p._chat_box
+              and p._chat_box.get_visible() and not p._chat_float.visible)
         p._chat_panel._close_clicked()
         GLib.timeout_add(2000, self.fs_after)
         return False

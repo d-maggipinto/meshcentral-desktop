@@ -24,6 +24,7 @@ from gi.repository import Gtk, Gdk, GLib, Pango
 
 from . import remote_session as rs, rights, ui
 from .client import CTRL, USER_AGENT, _ui
+from .osdep import IS_WINDOWS
 
 _CSS = b"""
 .mcd-chat { border-left: 1px solid alpha(@theme_fg_color, 0.12); }
@@ -38,6 +39,34 @@ _CSS = b"""
 .mcd-chat-note { font-size: smaller; }
 .mcd-chat-input { padding: 8px; border-top: 1px solid alpha(@theme_fg_color, 0.12); }
 """
+# dark look of the floating chat in fullscreen (like the fullscreen toolbar); above the Windows look's sheet
+_DARK_CSS = b"""
+.mcd-chat-float { background-color: #1e2126; border: 1px solid rgba(255, 255, 255, 0.22); }
+.mcd-chat-float, .mcd-chat-float label { color: #eceef1; }
+.mcd-chat-float .dim-label { color: #9aa0a8; }
+.mcd-chat-float .mcd-chat-head { border-bottom-color: rgba(255, 255, 255, 0.12); background-color: #262a30; }
+.mcd-chat-float .mcd-chat-input { border-top-color: rgba(255, 255, 255, 0.12); }
+.mcd-chat-float list, .mcd-chat-float row, .mcd-chat-float scrolledwindow, .mcd-chat-float viewport {
+    background-color: transparent; }
+.mcd-chat-float .mcd-chat-me, .mcd-chat-float .mcd-chat-me label { background-color: #2f6fd6; color: #ffffff; }
+.mcd-chat-float .mcd-chat-them, .mcd-chat-float .mcd-chat-them label { background-color: #353a42; color: #eceef1; }
+.mcd-chat-float .mcd-chat-me label, .mcd-chat-float .mcd-chat-them label { background-color: transparent; }
+.mcd-chat-float button { background-color: transparent; background-image: none; border: none; box-shadow: none;
+    color: #eceef1; }
+.mcd-chat-float button:hover { background-color: rgba(255, 255, 255, 0.12); }
+.mcd-chat-float button image { color: #eceef1; }
+.mcd-chat-float button.suggested-action { background-color: #2f6fd6; color: #ffffff; }
+.mcd-chat-float entry { background-color: #2b2f36; color: #eceef1; border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: none; caret-color: #eceef1; }
+.mcd-chat-float entry text { color: #eceef1; }
+.mcd-chat-bubble-btn { background-color: #2f6fd6; background-image: none; border: none; border-radius: 0;
+    min-width: 52px; min-height: 52px; padding: 0; box-shadow: none; color: #ffffff; }
+.mcd-chat-bubble-btn:hover { background-color: #3b7de8; }
+.mcd-chat-bubble-btn image, .mcd-chat-bubble-btn label { color: #ffffff; }
+.mcd-chat-bubble-btn .mcd-chat-unread { font-weight: bold; font-size: 9pt; }
+.mcd-chat-bubble-btn.flash { background-color: #e8892f; }
+window.mcd-chat-bubble-win { background-color: transparent; }
+"""
 _css_done = False
 
 
@@ -48,6 +77,10 @@ def _install_css():
         prov.load_from_data(_CSS)
         Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), prov,
                                                  Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION)
+        dark = Gtk.CssProvider()
+        dark.load_from_data(_DARK_CSS)
+        Gtk.StyleContext.add_provider_for_screen(Gdk.Screen.get_default(), dark,
+                                                 Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION + 30)
         _css_done = True
 
 
@@ -348,6 +381,9 @@ class ChatPanel(Gtk.Box):
 
         head = Gtk.Box(spacing=4)
         head.get_style_context().add_class("mcd-chat-head")
+        self.head_ev = Gtk.EventBox()               # drag handle of the floating chat (fullscreen)
+        self.head_ev.add(head)
+        self.on_minimise = self.on_incoming = None
         tbox = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
         title = Gtk.Label(label="Chat", xalign=0)
         title.get_style_context().add_class("mcd-chat-title")
@@ -367,7 +403,15 @@ class ChatPanel(Gtk.Box):
             b.set_tooltip_text(tip)
             b.connect("clicked", lambda *_a, f=cb: f())
             head.pack_start(b, False, False, 0)
-        self.pack_start(head, False, False, 0)
+            if icon == "edit-clear-all-symbolic":
+                mb = self.min_btn = Gtk.Button.new_from_icon_name("go-down-symbolic", Gtk.IconSize.BUTTON)
+                mb.set_relief(Gtk.ReliefStyle.NONE)
+                mb.set_valign(Gtk.Align.CENTER)
+                mb.set_tooltip_text("Minimise the chat to a bubble")
+                mb.set_no_show_all(True)
+                mb.connect("clicked", lambda *_: self.on_minimise and self.on_minimise())
+                head.pack_start(mb, False, False, 0)
+        self.pack_start(self.head_ev, False, False, 0)
 
         self.list = Gtk.ListBox(selection_mode=Gtk.SelectionMode.NONE)
         self.list.get_style_context().add_class("mcd-chat-list")
@@ -511,6 +555,8 @@ class ChatPanel(Gtk.Box):
         box.pack_start(lbl, False, False, 0)
         box.pack_start(stamp, False, False, 0)
         self._row(box)
+        if not mine and self.on_incoming:
+            self.on_incoming()
         if not mine:
             top = self.get_toplevel()
             if not (isinstance(top, Gtk.Window) and top.is_active()) and hasattr(self.app, "notify"):
@@ -571,6 +617,8 @@ class ChatPanel(Gtk.Box):
         f = self._files[ChatSession._key(fid)] = {"bar": bar, "info": info, "button": btn, "name": name, "size": size,
                                                   "mine": mine, "data": None, "id": fid, "busy": True}
         f["row"] = self._row(box)
+        if not mine and self.on_incoming:
+            self.on_incoming()
         if not mine:
             top = self.get_toplevel()
             if not (isinstance(top, Gtk.Window) and top.is_active()) and hasattr(self.app, "notify"):
@@ -669,3 +717,183 @@ class ChatWindow(Gtk.Window):
         self.add(self.panel)
         self.connect("destroy", lambda *_: (self.panel.stop(), ChatWindow._open.pop(node["_id"], None)))
         self.show_all()
+
+
+def _round_corners(win):
+    """Windows 11 / Server 2025: rounded corners and a border drawn by Windows (an undecorated GTK window's
+    corners are square and solid)."""
+    if not IS_WINDOWS:
+        return
+    try:
+        import ctypes
+        from .osdep import window_handle
+        hwnd = window_handle(win)
+        if hwnd:
+            pref = ctypes.c_int(2)                                            # DWMWCP_ROUND
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(ctypes.c_void_p(hwnd), 33, ctypes.byref(pref),
+                                                       ctypes.sizeof(pref))   # DWMWA_WINDOW_CORNER_PREFERENCE
+    except Exception:
+        pass
+
+
+class FloatingChat:
+    """Fullscreen: the chat panel in its own small dark window over the remote screen, which keeps its full
+    size. A real (undecorated) window, not a popup: Windows popups never get the keyboard. Drag it by its
+    header, resize it from the corner grip; minimise turns it into a round bubble with the unread count."""
+
+    W, H, GAP = 360, 480, 24
+
+    def __init__(self, parent_window):
+        _install_css()
+        self.parent = parent_window
+        self.panel = None
+        self._sigs = []
+        self.unread = 0
+        self._flash_timer = None
+        self.win = Gtk.Window(title="Chat")
+        self.win.set_decorated(False)
+        self.win.set_transient_for(parent_window)          # stays above the fullscreen window
+        self.win.set_skip_taskbar_hint(True)
+        self.win.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+        self.win.set_default_size(self.W, self.H)
+        self.win.connect("delete-event", lambda *_: (self.minimise(), True)[1])   # Alt+F4 = minimise
+        self.frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.frame.get_style_context().add_class("mcd-chat-float")
+        grip_row = Gtk.Box()
+        grip = Gtk.EventBox(halign=Gtk.Align.END)
+        grip.set_size_request(16, 8)
+        grip.set_tooltip_text("Resize")
+        grip.connect("realize", lambda w: w.get_window().set_cursor(
+            Gdk.Cursor.new_from_name(w.get_display(), "se-resize")))
+        grip.connect("button-press-event", self._resize)
+        grip_row.pack_end(grip, False, False, 0)
+        self.slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.frame.pack_start(self.slot, True, True, 0)
+        self.frame.pack_start(grip_row, False, False, 0)
+        self.win.add(self.frame)
+        self.win.connect("map", _round_corners)
+
+        self.bubble = Gtk.Window(title="Chat")
+        self.bubble.set_decorated(False)
+        self.bubble.set_transient_for(parent_window)
+        self.bubble.set_skip_taskbar_hint(True)
+        self.bubble.set_accept_focus(False)
+        self.bubble.set_type_hint(Gdk.WindowTypeHint.UTILITY)
+        self.bubble.get_style_context().add_class("mcd-chat-bubble-win")
+        self.bubble_btn = Gtk.Button(tooltip_text="Show the chat")
+        self.bubble_btn.get_style_context().add_class("mcd-chat-bubble-btn")
+        bb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        bb.pack_start(Gtk.Image.new_from_icon_name("user-available-symbolic", Gtk.IconSize.LARGE_TOOLBAR),
+                      False, False, 0)
+        self.unread_lbl = Gtk.Label(no_show_all=True)
+        self.unread_lbl.get_style_context().add_class("mcd-chat-unread")
+        bb.pack_start(self.unread_lbl, False, False, 0)
+        self.bubble_btn.add(bb)
+        self.bubble_btn.connect("clicked", lambda *_: self.restore())
+        self.bubble.add(self.bubble_btn)
+        self.bubble.connect("map", _round_corners)
+
+    @property
+    def visible(self):
+        return self.win.get_visible()
+
+    def attach(self, panel):
+        """Move the panel (with its conversation) into the floating window and show it."""
+        if self.panel is not panel:
+            old = panel.get_parent()
+            if old is not None:
+                old.remove(panel)
+            self.slot.pack_start(panel, True, True, 0)
+            self.panel = panel
+            panel.min_btn.show()
+            panel.on_minimise = self.minimise
+            panel.on_incoming = self._incoming
+            self._sigs = [(panel.head_ev, panel.head_ev.connect("button-press-event", self._drag))]
+        self.restore(place=True)
+
+    def detach(self):
+        """Give the panel back (leaving fullscreen) and hide the windows."""
+        panel, self.panel = self.panel, None
+        self.win.hide()
+        self.bubble.hide()
+        if panel is None:
+            return None
+        for w, sig in self._sigs:
+            w.disconnect(sig)
+        self._sigs = []
+        panel.min_btn.hide()
+        panel.on_minimise = panel.on_incoming = None
+        self.slot.remove(panel)
+        return panel
+
+    def hide(self):
+        self.win.hide()
+        self.bubble.hide()
+
+    def _monitor(self):
+        gw = self.parent.get_window()
+        disp = Gdk.Display.get_default()
+        mon = disp.get_monitor_at_window(gw) if gw else disp.get_primary_monitor()
+        return mon.get_geometry() if mon else None
+
+    def restore(self, place=False):
+        self.bubble.hide()
+        self.unread = 0
+        self._update_bubble()
+        first = not self.win.get_realized()
+        self.win.show_all()
+        if place or first:
+            g = self._monitor()
+            if g:
+                w, h = self.win.get_size()
+                self.win.move(g.x + g.width - w - self.GAP, g.y + g.height - h - self.GAP)
+        self.win.present()
+        if self.panel:
+            GLib.idle_add(self.panel.entry.grab_focus)
+
+    def minimise(self):
+        self.win.hide()
+        self.bubble.show_all()
+        g = self._monitor()
+        if g:
+            self.bubble.move(g.x + g.width - 52 - self.GAP, g.y + g.height - 52 - self.GAP)
+        self._update_bubble()
+
+    def _incoming(self):
+        if self.win.get_visible():
+            return
+        self.unread += 1
+        self._update_bubble()
+        ctx = self.bubble_btn.get_style_context()
+        ctx.add_class("flash")
+        if self._flash_timer:
+            GLib.source_remove(self._flash_timer)
+        self._flash_timer = GLib.timeout_add(2500, self._unflash)
+
+    def _unflash(self):
+        self._flash_timer = None
+        self.bubble_btn.get_style_context().remove_class("flash")
+        return False
+
+    def _update_bubble(self):
+        self.unread_lbl.set_text(str(self.unread) if self.unread < 100 else "99+")
+        self.unread_lbl.set_visible(self.unread > 0)
+        self.bubble_btn.set_tooltip_text("Show the chat" + (" (%d new)" % self.unread if self.unread else ""))
+
+    def _drag(self, _w, ev):
+        if ev.type == Gdk.EventType.BUTTON_PRESS and ev.button == 1:
+            self.win.begin_move_drag(ev.button, int(ev.x_root), int(ev.y_root), ev.time)
+        return False
+
+    def _resize(self, _w, ev):
+        if ev.type == Gdk.EventType.BUTTON_PRESS and ev.button == 1:
+            self.win.begin_resize_drag(Gdk.WindowEdge.SOUTH_EAST, ev.button, int(ev.x_root), int(ev.y_root),
+                                       ev.time)
+        return True
+
+    def destroy(self):
+        self.detach()
+        if self._flash_timer:
+            GLib.source_remove(self._flash_timer)
+        self.win.destroy()
+        self.bubble.destroy()
