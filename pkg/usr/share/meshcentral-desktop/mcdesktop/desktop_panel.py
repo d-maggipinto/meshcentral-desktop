@@ -643,7 +643,7 @@ class DesktopPanel(Gtk.Box):
         if self._chat_float is None:
             from .chat import FloatingChat
             top = self.get_toplevel()
-            self._chat_float = FloatingChat(top if isinstance(top, Gtk.Window) else None)
+            self._chat_float = FloatingChat(top if isinstance(top, Gtk.Window) else None, self.bar_area)
         self._chat_box.hide()
         self._chat_float.attach(self._chat_panel)
 
@@ -1211,6 +1211,23 @@ class DesktopPanel(Gtk.Box):
         self._toolbar.set_margin_bottom(0 if on else 6)
         if self._fsbar is not None:
             self._fsbar.set_status(self.status.get_text(), self._connected)
+
+    def save_bar_pinned(self, pinned):
+        self.app.config["desktop_bar_pinned"] = bool(pinned)
+        self.app.save_config()
+
+    def bar_pinned(self):
+        return bool(self.app.config.get("desktop_bar_pinned", False))
+
+    def bar_area(self):
+        """(edge, thickness px) the fullscreen toolbar takes while pinned, else None (the floating chat keeps
+        clear of it)."""
+        bar = self._fsbar
+        if bar is None or not bar.active or not bar.pinned:
+            return None
+        w = getattr(bar, "bar_win", None) or bar.frame
+        size = w.get_size() if isinstance(w, Gtk.Window) else (w.get_allocated_width(), w.get_allocated_height())
+        return bar.position, (size[0] if bar.vertical else size[1])
 
     def save_bar_position(self, position):
         self.app.config["desktop_bar_position"] = position

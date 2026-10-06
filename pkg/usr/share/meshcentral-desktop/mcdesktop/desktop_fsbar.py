@@ -409,11 +409,13 @@ class FullscreenBar:
         self.show()
         self._schedule_hide(SHOW_FIRST_MS)
         self._edge_timer = GLib.timeout_add(EDGE_POLL_MS, self._poll_edge)
+        if self.panel.bar_pinned():
+            self.pin.set_active(True)
 
     def leave(self):
         if not self.active:
             return
-        self.active = self.shown = False
+        self.active = self.shown = False              # first: the pin reset below is not saved
         self._cancel_hide()
         if self._edge_timer:
             GLib.source_remove(self._edge_timer)
@@ -550,6 +552,8 @@ class FullscreenBar:
 
     def _on_pin(self, btn):
         self.pinned = btn.get_active()
+        if self.active:
+            self.panel.save_bar_pinned(self.pinned)       # remembered for the next fullscreen
         if self.pinned:
             self._cancel_hide()
         else:

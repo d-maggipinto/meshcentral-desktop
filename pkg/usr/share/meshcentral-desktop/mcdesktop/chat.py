@@ -636,11 +636,13 @@ class ChatPanel(Gtk.Box):
         f["busy"] = False
         if data is None:
             f["info"].set_text(ui.fmt_size(f["size"]) + " - cancelled")
+            f["button"].set_no_show_all(True)
             f["button"].hide()
             return
         f["bar"].set_fraction(1.0)
         if f["mine"]:
             f["info"].set_text(ui.fmt_size(f["size"]) + " - sent")
+            f["button"].set_no_show_all(True)
             f["button"].hide()
         else:
             f["data"] = data
@@ -686,6 +688,10 @@ class ChatPanel(Gtk.Box):
         d.set_do_overwrite_confirmation(True)
         d.set_current_name(ui.safe_filename("Chat %s %s.txt" % (self.node.get("name", ""),
                                                                  time.strftime("%Y-%m-%d %H-%M"))))
+        flt = Gtk.FileFilter()
+        flt.set_name("Text file (*.txt)")
+        flt.add_pattern("*.txt")
+        d.add_filter(flt)
         if d.run() == Gtk.ResponseType.ACCEPT:
             try:
                 with open(d.get_filename(), "w", encoding="utf-8") as f:
@@ -736,6 +742,21 @@ def _round_corners(win):
         pass
 
 
+def _keep_above(win):
+    """Windows: above the fullscreen toolbar, which is a topmost window itself (pinned, it covered the chat)."""
+    if not IS_WINDOWS:
+        return
+    try:
+        import ctypes
+        from .osdep import window_handle
+        hwnd = window_handle(win)
+        if hwnd:
+            ctypes.windll.user32.SetWindowPos(ctypes.c_void_p(hwnd), ctypes.c_void_p(-1), 0, 0, 0, 0,
+                                              0x0001 | 0x0002)                # TOPMOST, NOSIZE | NOMOVE
+    except Exception:
+        pass
+
+
 class FloatingChat:
     """Fullscreen: the chat panel in its own small dark window over the remote screen, which keeps its full
     size. A real (undecorated) window, not a popup: Windows popups never get the keyboard. Drag it by its
@@ -743,9 +764,11 @@ class FloatingChat:
 
     W, H, GAP = 360, 480, 24
 
-    def __init__(self, parent_window):
+    def __init__(self, parent_window, bar_area=None):
         _install_css()
         self.parent = parent_window
+        self.bar_area = bar_area                 # () -> (edge, px) of the pinned fullscreen toolbar, or None
+        self._pos = None                         # where the user left it (restored after minimise)
         self.panel = None
         self._sigs = []
         self.unread = 0
@@ -827,6 +850,8 @@ class FloatingChat:
         return panel
 
     def hide(self):
+        if self.win.get_visible():
+            self._pos = self.win.get_position()
         self.win.hide()
         self.bubble.hide()
 
@@ -836,27 +861,46 @@ class FloatingChat:
         mon = disp.get_monitor_at_window(gw) if gw else disp.get_primary_monitor()
         return mon.get_geometry() if mon else None
 
+    def _corner(self, w, h):
+        """Bottom-right of the monitor, clear of a pinned toolbar on the right or bottom edge."""
+        g = self._monitor()
+        if not g:
+            return None
+        dx = dy = self.GAP
+        area = self.bar_area() if self.bar_area else None
+        if area and area[0] == "right":
+            dx += area[1]
+        elif area and area[0] == "bottom":
+            dy += area[1]
+        return g.x + g.width - w - dx, g.y + g.height - h - dy
+
     def restore(self, place=False):
         self.bubble.hide()
         self.unread = 0
         self._update_bubble()
-        first = not self.win.get_realized()
-        self.win.show_all()
-        if place or first:
-            g = self._monitor()
-            if g:
-                w, h = self.win.get_size()
-                self.win.move(g.x + g.width - w - self.GAP, g.y + g.height - h - self.GAP)
+        if not self.win.get_realized():
+            self.frame.show_all()
+            place = True
+        self.win.show()
+        w, h = self.win.get_size()
+        pos = None if place else self._pos
+        pos = pos or self._corner(w, h)
+        if pos:
+            self.win.move(*pos)                  # Windows re-centres a window shown again
+        _keep_above(self.win)
         self.win.present()
         if self.panel:
             GLib.idle_add(self.panel.entry.grab_focus)
 
     def minimise(self):
+        if self.win.get_visible():
+            self._pos = self.win.get_position()
         self.win.hide()
         self.bubble.show_all()
-        g = self._monitor()
-        if g:
-            self.bubble.move(g.x + g.width - 52 - self.GAP, g.y + g.height - 52 - self.GAP)
+        pos = self._corner(52, 52)
+        if pos:
+            self.bubble.move(*pos)
+        _keep_above(self.bubble)
         self._update_bubble()
 
     def _incoming(self):

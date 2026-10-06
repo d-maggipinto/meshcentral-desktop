@@ -378,12 +378,20 @@ class A(appmod.App):
         check("fullscreen chat: a floating window over the screen, which keeps the full width",
               fl is not None and fl.visible and p._chat_panel.get_parent() is fl.slot and g["alloc"][2] == sw
               and g["bounds"][2] == sw, (g, sw, fl is not None and fl.visible))
+        fl.win.move(120, 140)
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+        moved = fl.win.get_position()
         fl.minimise()
         p._chat_panel.on_incoming()
         check("fullscreen chat: minimised to the bubble with the unread count",
               not fl.visible and fl.bubble.get_visible() and fl.unread_lbl.get_text() == "1")
         shot(self.main_win, "app_chat_5_bubble.png")
         fl.restore()
+        while Gtk.events_pending():
+            Gtk.main_iteration()
+        check("fullscreen chat: restored where it was left (not centred)", fl.win.get_position() == moved,
+              (moved, fl.win.get_position()))
         self.fs_bar()
         return False
 
