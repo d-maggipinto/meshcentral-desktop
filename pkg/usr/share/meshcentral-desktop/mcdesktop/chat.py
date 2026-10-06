@@ -359,6 +359,7 @@ class ChatPanel(Gtk.Box):
         for icon, tip, cb in (("window-new-symbolic", "Open the chat again on the remote computer",
                                self.open_remote),
                               ("document-save-symbolic", "Save the conversation to a text file", self._save),
+                              ("edit-clear-all-symbolic", "Clear the conversation", self._clear),
                               ("window-close-symbolic", "End the chat", self._close_clicked)):
             b = Gtk.Button.new_from_icon_name(icon, Gtk.IconSize.BUTTON)
             b.set_relief(Gtk.ReliefStyle.NONE)
@@ -474,6 +475,16 @@ class ChatPanel(Gtk.Box):
         row.show_all()
         self.list.add(row)
         GLib.idle_add(self._scroll_end)
+        return row
+
+    def _clear(self):
+        """Like the page's Clear: empties this side's view and transcript (files still moving stay)."""
+        busy = {f["row"] for f in self._files.values() if f.get("busy")}
+        for row in self.list.get_children():
+            if row not in busy:
+                self.list.remove(row)
+        self._files = {k: f for k, f in self._files.items() if f.get("busy")}
+        self._transcript = []
 
     def _scroll_end(self):
         adj = self.scroll.get_vadjustment()
@@ -557,9 +568,9 @@ class ChatPanel(Gtk.Box):
         btn = Gtk.Button(label="Cancel", halign=Gtk.Align.START if not mine else Gtk.Align.END)
         btn.connect("clicked", lambda *_: self._file_button(fid))
         box.pack_start(btn, False, False, 0)
-        self._files[ChatSession._key(fid)] = {"bar": bar, "info": info, "button": btn, "name": name, "size": size,
-                                              "mine": mine, "data": None, "id": fid}
-        self._row(box)
+        f = self._files[ChatSession._key(fid)] = {"bar": bar, "info": info, "button": btn, "name": name, "size": size,
+                                                  "mine": mine, "data": None, "id": fid, "busy": True}
+        f["row"] = self._row(box)
         if not mine:
             top = self.get_toplevel()
             if not (isinstance(top, Gtk.Window) and top.is_active()) and hasattr(self.app, "notify"):
@@ -574,6 +585,7 @@ class ChatPanel(Gtk.Box):
         f = self._files.get(ChatSession._key(fid))
         if not f:
             return
+        f["busy"] = False
         if data is None:
             f["info"].set_text(ui.fmt_size(f["size"]) + " - cancelled")
             f["button"].hide()

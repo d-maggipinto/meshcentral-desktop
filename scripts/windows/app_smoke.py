@@ -370,6 +370,7 @@ class A(appmod.App):
         shot(self.main_win, "app_chat_3_fullscreen.png")
         check("fullscreen with the chat: WebView2 bounds follow the screen widget",
               g["bounds"][2] == g["alloc"][2] * g["scale"] and g["hwnd_client"][0] == g["alloc"][2] * g["scale"], g)
+        check("fullscreen: the remote screen starts at the top edge (no light strip above it)", g["alloc"][1] == 0, g)
         self.fs_bar()
         return False
 

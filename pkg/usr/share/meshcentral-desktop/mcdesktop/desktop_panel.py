@@ -225,8 +225,9 @@ class DesktopPanel(Gtk.Box):
             w.set_no_show_all(True)
         self.pack_start(qbar, False, False, 0)
 
-        self.info = Gtk.InfoBar(revealed=False, show_close_button=True)
-        self.info.connect("response", lambda *_: self.info.set_revealed(False))
+        # shown only while it has a message: a hidden InfoBar still took a 1 px row (fullscreen: a light line on top)
+        self.info = Gtk.InfoBar(revealed=False, show_close_button=True, no_show_all=True)
+        self.info.connect("response", lambda *_: (self.info.set_revealed(False), self.info.hide()))
         self.info_label = Gtk.Label(wrap=True, xalign=0)
         self.info.get_content_area().add(self.info_label)
         self.pack_start(self.info, False, False, 0)
@@ -464,6 +465,7 @@ class DesktopPanel(Gtk.Box):
             return
         self.info_label.set_text(text)
         self.info.set_message_type(Gtk.MessageType.WARNING)
+        self.info.show_all()
         self.info.set_revealed(True)
 
     # ---- cover -------------------------------------------------------------

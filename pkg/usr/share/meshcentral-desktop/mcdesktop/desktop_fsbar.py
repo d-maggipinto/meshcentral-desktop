@@ -402,6 +402,7 @@ class FullscreenBar:
         self.handle_line.show()
         self._move(self.toolbar, self.slot)
         self._grid_in()
+        self.settings_box.hide()                      # empty now; it kept a 1 px row above the remote screen
         self.panel.set_compact(True, self.vertical)
         if not IS_WINDOWS:
             self.rev.show()
@@ -428,6 +429,7 @@ class FullscreenBar:
             self.rev.hide()
             self.handle.hide()
         self._grid_out()
+        self.settings_box.show()
         self._move_home(self.toolbar)
         self.panel.set_compact(False, False)
 
