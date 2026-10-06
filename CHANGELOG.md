@@ -15,6 +15,13 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
   Windows; the vertical toolbar's buttons all have the same width.
 - Windows: a white box around the fullscreen toolbar's edge handle (the handle window is now just the blue line).
 - Windows: a thin light line on the top and left edges of the screen in remote desktop fullscreen.
+- Remote desktop fullscreen: a light line above the remote screen (empty rows of the hidden toolbar
+  settings and message bar still took a few pixels).
+- Windows: typing into another part of the window (the chat, the search box) after clicking the remote
+  screen sent the keys to the remote computer; the keyboard now follows the click.
+- Linux devices: programs the app starts in the remote user's session (chat window, notifications, web
+  addresses) now run with the user's own group and group memberships when the agent runs as root (the
+  chat window's file dialog did not open).
 - Remote desktop tools: "Open a web address" and "Toggle background" now report what the agent did (the web
   UI shows nothing).
 - Windows: the main window grew a little whenever another application's window took the focus, and shrank back
@@ -39,7 +46,8 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
   joins or leaves, messages typed early are sent when the user joins, the conversation can be saved. On the
   remote computer the chat opens as a compact app window (Microsoft Edge on Windows, Chrome / Chromium /
   Edge / Brave on Linux) instead of a browser tab, when the account has agent console rights; otherwise the
-  agent opens it in the browser as before.
+  agent opens it in the browser as before. Files can be sent and received in the chat (up to 100 MB), and
+  the conversation can be cleared or saved.
 - Fullscreen toolbar settings panel redesigned: labelled sections (toolbar position, remote image, recording,
   while connected) in a dark panel matching the toolbar.
 
