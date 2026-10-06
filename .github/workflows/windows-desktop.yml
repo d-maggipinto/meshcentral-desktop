@@ -59,7 +59,9 @@ jobs:
       - name: Secrets present
         run: |
           if (-not $env:RDP_PASSWORD) { "WINDOWS_RDP_PASSWORD is not set (repository secret)"; exit 1 }
-          if ($env:RDP_PASSWORD.Length -lt 12) { "WINDOWS_RDP_PASSWORD must have at least 12 characters"; exit 1 }
+          # short is accepted (owner's choice): the machine is only reachable through the owner's Tailscale network
+          # and lives at most 6 hours; Windows still needs upper + lower case + digits
+          if ($env:RDP_PASSWORD.Length -lt 7) { "WINDOWS_RDP_PASSWORD must have at least 7 characters"; exit 1 }
           if (-not $env:TS_AUTHKEY -and $env:HOURS -ne "check-only") { "TAILSCALE_AUTHKEY is not set (repository secret)"; exit 1 }
           "ok"
 
