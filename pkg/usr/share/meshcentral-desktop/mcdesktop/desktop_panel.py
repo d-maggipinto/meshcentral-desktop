@@ -286,7 +286,8 @@ class DesktopPanel(Gtk.Box):
         body.pack_start(overlay, True, True, 0)
         # a plain box, no Gtk.Revealer: its own GdkWindow and slide animation next to the native WebView2
         # window (Windows) are avoided
-        self._chat_box = Gtk.Box(no_show_all=True)
+        # hexpand False: the entry inside expands, and GTK would pass that up (the panel then took half the width)
+        self._chat_box = Gtk.Box(no_show_all=True, hexpand=False)
         body.pack_start(self._chat_box, False, False, 0)
         self._chat_panel = None
         self.pack_start(body, True, True, 0)

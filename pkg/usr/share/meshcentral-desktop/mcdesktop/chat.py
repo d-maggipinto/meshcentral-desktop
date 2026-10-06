@@ -341,6 +341,7 @@ class ChatPanel(Gtk.Box):
         self.app, self.node, self.on_close = app, node, on_close
         self.get_style_context().add_class("mcd-chat")
         self.set_size_request(self.WIDTH, -1)
+        self.set_hexpand(False)          # the entry's hexpand must not spread to the panel
         self._transcript = []
         self._typing_sent = False
         self._last_day = None
@@ -408,6 +409,11 @@ class ChatPanel(Gtk.Box):
         self._files = {}                 # key(id) -> {bar, label, button, name, size, mine, data}
         self._on_state(0)
         self.show_all()
+
+    def do_get_preferred_width(self):
+        # a fixed width: the natural width of the long notes / messages (wrapping labels) would otherwise make
+        # the panel take half of the remote screen (verified on Windows CI: 704 px instead of 330)
+        return self.WIDTH, self.WIDTH
 
     # ---- session ---------------------------------------------------------------------------------------------
     @property
