@@ -198,6 +198,8 @@ class WebView2Widget(Gtk.DrawingArea):
         self.devtools = devtools
         self.allow_insecure_tls = allow_insecure_tls   # local test servers only
         self.controller = self.webview = None
+        self._page_focused = False   # WebView2 holds the Win32 keyboard focus
+        self._top_focus_sig = None
         self._pending = []
         self._handlers = []          # keep COM handler objects alive
         self._closed = False
@@ -215,6 +217,9 @@ class WebView2Widget(Gtk.DrawingArea):
         win = self.get_window()
         win.ensure_native()
         self._hwnd = _hwnd_of(win)
+        top = self.get_toplevel()
+        if isinstance(top, Gtk.Window) and self._top_focus_sig is None:
+            self._top_focus_sig = (top, top.connect("set-focus", self._on_top_focus))
         _ensure_environment(self.user_data_dir, self._got_env)
 
     def _got_env(self, env, err):
@@ -358,6 +363,19 @@ class WebView2Widget(Gtk.DrawingArea):
                 pass
         return False
 
+    def _on_top_focus(self, top, widget):
+        """GTK moved the focus to another widget (chat entry, search box...): the Win32 keyboard focus is
+        still inside WebView2's own window, so the keys would keep going to the page. Give it to the GTK
+        window (WebView2 then reports LostFocus)."""
+        if widget is None or widget is self or not self._page_focused:
+            return
+        try:
+            hwnd = _hwnd_of(top.get_window())
+            if hwnd:
+                ctypes.windll.user32.SetFocus(ctypes.c_void_p(hwnd))
+        except Exception:
+            traceback.print_exc()
+
     def set_page_visible(self, on):
         """Hide the page without unmapping the widget (a GTK overlay cannot cover a native window)."""
         self._set_visible(on and self.get_mapped())
@@ -427,6 +445,11 @@ class WebView2Widget(Gtk.DrawingArea):
     def _focus(self, focused, sender, args):
         _ref(sender)
         _ref(args)
+        self._page_focused = focused
+        if focused and not self.has_focus():
+            # GTK must know too: a later click on another widget (even the one GTK still thinks is focused)
+            # then changes the GTK focus, and _on_top_focus takes the Win32 focus back from the page
+            self.grab_focus()
         if self.on_focus_changed:
             self.on_focus_changed(focused)
 

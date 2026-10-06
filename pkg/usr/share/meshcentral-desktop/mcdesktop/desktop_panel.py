@@ -284,8 +284,10 @@ class DesktopPanel(Gtk.Box):
         # remote screen + the chat side panel (chat.ChatPanel, built on first use)
         body = Gtk.Box()
         body.pack_start(overlay, True, True, 0)
-        self._chat_rev = Gtk.Revealer(transition_type=Gtk.RevealerTransitionType.SLIDE_LEFT, no_show_all=True)
-        body.pack_start(self._chat_rev, False, False, 0)
+        # a plain box, no Gtk.Revealer: its own GdkWindow and slide animation next to the native WebView2
+        # window (Windows) are avoided
+        self._chat_box = Gtk.Box(no_show_all=True)
+        body.pack_start(self._chat_box, False, False, 0)
         self._chat_panel = None
         self.pack_start(body, True, True, 0)
         self.show_all()
@@ -597,8 +599,8 @@ class DesktopPanel(Gtk.Box):
 
     def _chat(self):
         """Chat button: show / hide the chat panel (hiding keeps the chat going; its close button ends it)."""
-        if self._chat_panel is not None and self._chat_rev.get_reveal_child() and self._chat_panel.active:
-            self._chat_rev.set_reveal_child(False)
+        if self._chat_panel is not None and self._chat_box.get_visible() and self._chat_panel.active:
+            self._chat_box.hide()
             return
         self.open_chat()
 
@@ -606,10 +608,9 @@ class DesktopPanel(Gtk.Box):
         """Show the chat panel and start the chat (also used by the device's General page)."""
         if self._chat_panel is None:
             from .chat import ChatPanel
-            self._chat_panel = ChatPanel(self.app, self.node, on_close=lambda: self._chat_rev.set_reveal_child(False))
-            self._chat_rev.add(self._chat_panel)
-        self._chat_rev.show()
-        self._chat_rev.set_reveal_child(True)
+            self._chat_panel = ChatPanel(self.app, self.node, on_close=self._chat_box.hide)
+            self._chat_box.pack_start(self._chat_panel, True, True, 0)
+        self._chat_box.show()
         self._chat_panel.start()
 
     def _notify(self):

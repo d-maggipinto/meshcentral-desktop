@@ -288,8 +288,89 @@ class A(appmod.App):
               (files, len(data)))
         if files and files[0].endswith(".mcrec"):
             print("INFO video recording does not encode in this WebView2 (fallback .mcrec used)", flush=True)
+        GLib.timeout_add(500, self.chat_open)
+        return False
+
+    # ---- chat panel next to the WebView2 screen ------------------------------------------------
+    def geometry(self, tag):
+        """GTK allocation of the screen widget vs its native window, the WebView2 bounds and the page's view."""
+        import ctypes
+        from ctypes import wintypes
+        p = self.desk
+        wv = p.web.widget
+        a = wv.get_allocation()
+        rc = wintypes.RECT()
+        ctypes.windll.user32.GetClientRect(ctypes.c_void_p(wv._hwnd), ctypes.byref(rc))
+        try:
+            b = wv.controller.Bounds
+            bounds = (b.left, b.top, b.right, b.bottom)
+        except Exception as ex:
+            bounds = repr(ex)
+        g = {"alloc": (a.x, a.y, a.width, a.height), "hwnd_client": (rc.right, rc.bottom), "bounds": bounds,
+             "scale": wv.get_scale_factor()}
+        print("geometry %s: %r" % (tag, g), flush=True)
+        p._js("(function(){var c=document.getElementById('Desk');return [window.innerWidth,window.innerHeight,"
+              "window.devicePixelRatio,c?c.clientWidth:-1,c?c.clientHeight:-1].join(',');})()",
+              lambda v: print("page %s: inner w,h, dpr, canvas w,h = %s" % (tag, v), flush=True))
+        return g
+
+    def chat_open(self):
+        self.g0 = self.geometry("before chat")
+        shot(self.main_win, "app_chat_0_before.png")
+        self.desk.open_chat()
+        GLib.timeout_add(2500, self.chat_shown)
+        return False
+
+    def chat_shown(self):
+        p = self.desk
+        g = self.geometry("chat open")
+        shot(self.main_win, "app_chat_1_open.png")
+        panel = p._chat_panel
+        ca = panel.get_allocation()
+        check("chat: panel shown on the right of the screen, the screen fills the rest",
+              p._chat_box.get_visible() and g["alloc"][2] + ca.width >= self.g0["alloc"][2] - 2
+              and g["hwnd_client"][0] == g["alloc"][2] * g["scale"] and g["bounds"][2] == g["alloc"][2] * g["scale"],
+              (g, ca.width))
+        # keyboard: page focused -> the chat entry takes the Win32 focus back
+        p.web.widget.focus_page()
+        GLib.timeout_add(800, self.chat_focus)
+        return False
+
+    def chat_focus(self):
+        import ctypes
+        from mcdesktop import winweb
+        p = self.desk
+        page_had = p.web.has_focus()
+        p._chat_panel.entry.grab_focus()
+        top = winweb._hwnd_of(self.main_win.get_window())
+
+        def later():
+            fg = ctypes.windll.user32.GetFocus()
+            check("chat: clicking the entry takes the keyboard from the page", not p.web.has_focus() and
+                  p._kb_seat is None, (page_had, p.web.has_focus(), fg, top))
+            p._chat_panel._close_clicked()
+            GLib.timeout_add(2000, self.chat_closed)
+            return False
+        GLib.timeout_add(800, later)
+        return False
+
+    def chat_closed(self):
+        g = self.geometry("chat closed")
+        shot(self.main_win, "app_chat_2_closed.png")
+        check("chat closed: the screen is as wide as before", not self.desk._chat_box.get_visible()
+              and g["alloc"][2] == self.g0["alloc"][2] and g["bounds"] == self.g0["bounds"]
+              and g["hwnd_client"] == self.g0["hwnd_client"], (self.g0, g))
+        self.desk.open_chat()                       # fullscreen with the chat open, like the user did
         self.main_win.toggle_desktop_fullscreen(self.desk)
-        GLib.timeout_add(2000, self.fs_bar)
+        GLib.timeout_add(2500, self.fs_chat)
+        return False
+
+    def fs_chat(self):
+        g = self.geometry("fullscreen, chat open")
+        shot(self.main_win, "app_chat_3_fullscreen.png")
+        check("fullscreen with the chat: WebView2 bounds follow the screen widget",
+              g["bounds"][2] == g["alloc"][2] * g["scale"] and g["hwnd_client"][0] == g["alloc"][2] * g["scale"], g)
+        self.fs_bar()
         return False
 
     # ---- fullscreen toolbar (popup windows on Windows) -----------------------------------------
@@ -348,6 +429,15 @@ class A(appmod.App):
         bar = p._fsbar
         check("fullscreen bar: exit restores the window and its toolbar",
               not bar.bar_win.get_visible() and not bar.settings_win.get_visible() and p.get_children()[0] is p._toolbar)
+        p._chat_panel._close_clicked()
+        GLib.timeout_add(2000, self.fs_after)
+        return False
+
+    def fs_after(self):
+        g = self.geometry("after fullscreen, chat closed")
+        shot(self.main_win, "app_chat_4_after_fullscreen.png")
+        check("after fullscreen and closing the chat: the screen is as wide as before",
+              g["alloc"][2] == self.g0["alloc"][2] and g["bounds"] == self.g0["bounds"], (self.g0, g))
         self.desk._toggle_connect()
         GLib.timeout_add(1500, self.notify)
         return False

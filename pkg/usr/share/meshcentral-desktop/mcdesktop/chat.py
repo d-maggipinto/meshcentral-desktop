@@ -6,10 +6,15 @@ Same protocol as the web UI's chat page (views/messenger.handlebars): both sides
 meshrelay.ashx?id=meshmessenger/<nodeid>/<userid>; the server pairs them and sends "c" ("cr" when it records
 the session). Then JSON text frames: {action:'chat', msg}, {action:'outtext', value:bool} (typing),
 {action:'random', random} (the larger random starts WebRTC: we send 1 so the remote page never does and
-everything stays on the relay), ctrlChannel '102938' ping -> pong. The remote side is the server's own chat
+everything stays on the relay), ctrlChannel '102938' ping -> pong. Files, as the page does: the sender sends
+{action:'file', id, name, size, type} and {action:'fileUploadStart', ...}, then {action:'fileData', id, data}
+blocks of 4000 bytes as a "binary string" (one character per byte) and {action:'fileUploadEnd'}, each sent on a
+{action:'fileUploadAck', id} from the receiver (which acks fileUploadStart twice); either side can send
+{action:'fileUploadCancel', id}. The remote side is the server's own chat
 page, opened by the agent (remote_session.open_chat_page: an app window when the console right allows it).
 """
 import json
+import os
 import threading
 import time
 import urllib.parse
@@ -63,13 +68,20 @@ def remote_page_url(ctrl, node):
 class ChatSession:
     """Our end of the relay. State 0 closed, 1 connecting, 2 waiting for the remote user, 3 connected.
     Callbacks on the GTK loop: on_state(s), on_chat(text), on_typing(bool), on_note(text).
-    Reconnects by itself (like the web page) until stop()."""
+    File callbacks: on_file_in(fid, name, size), on_file_progress(fid, done, size), on_file_done(fid, data or
+    None when cancelled). Reconnects by itself (like the web page) until stop()."""
+
+    BLOCK = 4000
+    MAX_IN = 100 * 1024 * 1024           # the page keeps a whole file in memory too
 
     def __init__(self, ctrl, node):
         self.ctrl, self.node = ctrl, node
         self.state = 0
         self.recorded = False
         self.on_state = self.on_chat = self.on_typing = self.on_note = None
+        self.on_file_in = self.on_file_progress = self.on_file_done = None
+        self._uploads = []               # [{id, name, size, data, ptr, started}], first = current
+        self._downloads = {}             # key(id) -> {id, name, size, parts, got}
         self._ws = None
         self._stopped = True
         self._gen = 0
@@ -130,6 +142,7 @@ class ChatSession:
         was = self.state
         self._ws = None
         self._set_state(1)
+        self._cancel_all()
         if was == 3 and self.on_typing:
             self.on_typing(False)
         if was == 3 and self.on_note:
@@ -174,12 +187,125 @@ class ChatSession:
                 self.on_chat(j["msg"])
         elif a == "outtext" and self.on_typing:
             self.on_typing(bool(j.get("value")))
-        elif a == "file":
-            # file transfer is not offered here: tell the remote page so its upload does not hang
-            self._send({"action": "fileUploadCancel", "id": j.get("id")})
-            if self.on_note:
-                self.on_note("The remote user tried to send a file (%s). Files cannot be received in this chat; "
-                             "use the Files tab." % ui.one_line(str(j.get("name") or "?"))[:80])
+        elif a in ("file", "fileUploadStart", "fileData", "fileUploadEnd", "fileUploadAck", "fileUploadCancel"):
+            self._file_message(a, j)
+
+    # ---- files ------------------------------------------------------------------------------------------------
+    @staticmethod
+    def _key(fid):
+        return json.dumps(fid)
+
+    def send_file(self, name, data):
+        """Queue a file (bytes) for the remote user; returns its id. Only while connected."""
+        if self.state != 3:
+            return None
+        fid = int.from_bytes(os.urandom(6), "big")
+        self._uploads.append({"id": fid, "name": name, "size": len(data), "data": data.decode("latin-1"),
+                              "ptr": 0, "started": False})
+        self._send({"action": "file", "size": len(data), "id": fid, "type": "", "name": name})
+        if len(self._uploads) == 1:
+            self._next_upload()
+        return fid
+
+    def cancel_file(self, fid):
+        k = self._key(fid)
+        if any(self._key(u["id"]) == k for u in self._uploads):
+            self._uploads = [u for u in self._uploads if self._key(u["id"]) != k]
+            self._send({"action": "fileUploadCancel", "id": fid})
+            if self._uploads and not self._uploads[0]["started"]:
+                self._next_upload()
+        elif k in self._downloads:
+            del self._downloads[k]
+            self._send({"action": "fileUploadCancel", "id": fid})
+        else:
+            return
+        if self.on_file_done:
+            self.on_file_done(fid, None)
+
+    def _cancel_all(self):
+        for u in list(self._uploads):
+            if self.on_file_done:
+                self.on_file_done(u["id"], None)
+        for d in list(self._downloads.values()):
+            if self.on_file_done:
+                self.on_file_done(d["id"], None)
+        self._uploads, self._downloads = [], {}
+
+    def _next_upload(self):
+        """Send the next step of the current upload (on each ack from the receiver)."""
+        if not self._uploads:
+            return
+        u = self._uploads[0]
+        if not u["started"]:
+            u["started"] = True
+            self._send({"action": "fileUploadStart", "size": u["size"], "id": u["id"], "type": "", "name": u["name"]})
+        elif u["ptr"] >= u["size"]:
+            self._send({"action": "fileUploadEnd", "size": u["size"], "id": u["id"], "type": "", "name": u["name"]})
+            self._uploads.pop(0)
+            if self.on_file_done:
+                self.on_file_done(u["id"], b"")
+            self._next_upload()
+        else:
+            block = u["data"][u["ptr"]:u["ptr"] + self.BLOCK]
+            self._send({"action": "fileData", "id": u["id"], "data": block})
+            u["ptr"] += len(block)
+            if self.on_file_progress:
+                self.on_file_progress(u["id"], u["ptr"], u["size"])
+
+    def _file_message(self, a, j):
+        fid = j.get("id")
+        k = self._key(fid)
+        if a == "fileUploadAck":
+            if self._uploads and self._key(self._uploads[0]["id"]) == k:
+                self._next_upload()
+            elif self._uploads and not self._uploads[0]["started"]:
+                self._next_upload()              # the ack of the previous file's end
+            return
+        if a == "fileUploadCancel":
+            if any(self._key(u["id"]) == k for u in self._uploads):
+                self._uploads = [u for u in self._uploads if self._key(u["id"]) != k]
+                if self._uploads and not self._uploads[0]["started"]:
+                    self._next_upload()
+            elif k in self._downloads:
+                del self._downloads[k]
+            else:
+                return
+            if self.on_file_done:
+                self.on_file_done(fid, None)
+            return
+        if a == "file":
+            name, size = str(j.get("name") or "file"), j.get("size")
+            if not isinstance(size, int) or size < 0 or size > self.MAX_IN:
+                self._send({"action": "fileUploadCancel", "id": fid})
+                if self.on_note:
+                    self.on_note("The remote user sent a file that is too large for the chat (%s). Use the Files tab."
+                                 % ui.one_line(name)[:80])
+                return
+            self._downloads[k] = {"id": fid, "name": name, "size": size, "parts": [], "got": 0}
+            if self.on_file_in:
+                self.on_file_in(fid, name, size)
+            return
+        d = self._downloads.get(k)
+        if d is None:
+            return
+        if a == "fileUploadStart":
+            self._send({"action": "fileUploadAck", "id": fid})       # twice, like the page: two blocks in flight
+            self._send({"action": "fileUploadAck", "id": fid})
+        elif a == "fileData" and isinstance(j.get("data"), str):
+            part = j["data"].encode("latin-1", "replace")
+            d["parts"].append(part)
+            d["got"] += len(part)
+            if d["got"] > d["size"]:
+                self.cancel_file(fid)
+                return
+            self._send({"action": "fileUploadAck", "id": fid})
+            if self.on_file_progress:
+                self.on_file_progress(fid, d["got"], d["size"])
+        elif a == "fileUploadEnd":
+            del self._downloads[k]
+            self._send({"action": "fileUploadAck", "id": fid})
+            if self.on_file_done:
+                self.on_file_done(fid, b"".join(d["parts"]))
 
     def _send(self, obj):
         ws = self._ws
@@ -262,6 +388,11 @@ class ChatPanel(Gtk.Box):
         send.set_tooltip_text("Send (Enter)")
         send.get_style_context().add_class("suggested-action")
         send.connect("clicked", lambda *_: self._send())
+        attach = Gtk.Button.new_from_icon_name("mail-attachment-symbolic", Gtk.IconSize.BUTTON)
+        attach.set_tooltip_text("Send a file to the remote user")
+        attach.connect("clicked", lambda *_: self._pick_files())
+        self.attach_btn = attach
+        inp.pack_start(attach, False, False, 0)
         inp.pack_start(self.entry, True, True, 0)
         inp.pack_start(send, False, False, 0)
         self.pack_start(inp, False, False, 0)
@@ -271,6 +402,10 @@ class ChatPanel(Gtk.Box):
         self.session.on_chat = lambda text: self._add(text, mine=False)
         self.session.on_typing = lambda on: self.typing_lbl.set_visible(on)
         self.session.on_note = self._note
+        self.session.on_file_in = lambda fid, name, size: self._file_row(fid, name, size, mine=False)
+        self.session.on_file_progress = self._file_progress
+        self.session.on_file_done = self._file_done
+        self._files = {}                 # key(id) -> {bar, label, button, name, size, mine, data}
         self._on_state(0)
         self.show_all()
 
@@ -299,6 +434,7 @@ class ChatPanel(Gtk.Box):
                           lambda text: self._note(text))
 
     def _on_state(self, s):
+        self.attach_btn.set_sensitive(s == 3)
         self.status.set_text({0: "Not connected", 1: "Connecting...",
                               2: "Waiting for the remote user",
                               3: "Connected" + (" (recorded)" if self.session.recorded else "")}[s])
@@ -362,6 +498,113 @@ class ChatPanel(Gtk.Box):
             top = self.get_toplevel()
             if not (isinstance(top, Gtk.Window) and top.is_active()) and hasattr(self.app, "notify"):
                 self.app.notify("Chat - %s" % ui.one_line(self.node.get("name", "")), text[:200])
+
+    # ---- files ----------------------------------------------------------------------------------------------
+    def _pick_files(self):
+        if self.session.state != 3:
+            self._note("Files can be sent once the remote user has joined the chat.")
+            return
+        top = self.get_toplevel()
+        d = Gtk.FileChooserNative.new("Send files to the remote user", top if isinstance(top, Gtk.Window) else None,
+                                      Gtk.FileChooserAction.OPEN, "Send", "Cancel")
+        d.set_select_multiple(True)
+        paths = d.get_filenames() if d.run() == Gtk.ResponseType.ACCEPT else []
+        d.destroy()
+        for path in paths:
+            self.send_path(path)
+
+    def send_path(self, path):
+        name = os.path.basename(path)
+        try:
+            if os.path.getsize(path) > ChatSession.MAX_IN:
+                self._note("%s is too large for the chat (100 MB at most). Use the Files tab." % ui.one_line(name))
+                return
+            with open(path, "rb") as f:
+                data = f.read()
+        except OSError as e:
+            self._note("%s: %s" % (ui.one_line(name), e))
+            return
+        fid = self.session.send_file(name, data)
+        if fid is not None:
+            self._transcript.append("%s Me> file %s (%d bytes)" % (time.strftime("%H:%M:%S"), name, len(data)))
+            self._file_row(fid, name, len(data), mine=True)
+
+    def _file_row(self, fid, name, size, mine):
+        if not mine:
+            self._transcript.append("%s Remote> file %s (%d bytes)" % (time.strftime("%H:%M:%S"), name, size))
+        box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=4, margin_start=12 if not mine else 48,
+                      margin_end=12 if mine else 48, margin_top=4, margin_bottom=2,
+                      halign=Gtk.Align.END if mine else Gtk.Align.START)
+        box.get_style_context().add_class("mcd-chat-bubble")
+        box.get_style_context().add_class("mcd-chat-me" if mine else "mcd-chat-them")
+        head = Gtk.Box(spacing=6)
+        head.pack_start(Gtk.Image.new_from_icon_name("text-x-generic-symbolic", Gtk.IconSize.BUTTON), False, False, 0)
+        lbl = Gtk.Label(label=name, xalign=0, ellipsize=Pango.EllipsizeMode.MIDDLE, max_width_chars=24)
+        lbl.set_tooltip_text(name)
+        head.pack_start(lbl, True, True, 0)
+        box.pack_start(head, False, False, 0)
+        info = Gtk.Label(label=ui.fmt_size(size), xalign=0)
+        info.get_style_context().add_class("mcd-chat-time")
+        box.pack_start(info, False, False, 0)
+        bar = Gtk.ProgressBar(fraction=0.0)
+        box.pack_start(bar, False, False, 0)
+        btn = Gtk.Button(label="Cancel", halign=Gtk.Align.START if not mine else Gtk.Align.END)
+        btn.connect("clicked", lambda *_: self._file_button(fid))
+        box.pack_start(btn, False, False, 0)
+        self._files[ChatSession._key(fid)] = {"bar": bar, "info": info, "button": btn, "name": name, "size": size,
+                                              "mine": mine, "data": None, "id": fid}
+        self._row(box)
+        if not mine:
+            top = self.get_toplevel()
+            if not (isinstance(top, Gtk.Window) and top.is_active()) and hasattr(self.app, "notify"):
+                self.app.notify("Chat - %s" % ui.one_line(self.node.get("name", "")), "File: " + name[:120])
+
+    def _file_progress(self, fid, done, size):
+        f = self._files.get(ChatSession._key(fid))
+        if f:
+            f["bar"].set_fraction(min(1.0, done / size) if size else 1.0)
+
+    def _file_done(self, fid, data):
+        f = self._files.get(ChatSession._key(fid))
+        if not f:
+            return
+        if data is None:
+            f["info"].set_text(ui.fmt_size(f["size"]) + " - cancelled")
+            f["button"].hide()
+            return
+        f["bar"].set_fraction(1.0)
+        if f["mine"]:
+            f["info"].set_text(ui.fmt_size(f["size"]) + " - sent")
+            f["button"].hide()
+        else:
+            f["data"] = data
+            f["info"].set_text(ui.fmt_size(f["size"]) + " - received")
+            f["button"].set_label("Save...")
+            f["button"].get_style_context().add_class("suggested-action")
+
+    def _file_button(self, fid):
+        f = self._files.get(ChatSession._key(fid))
+        if not f:
+            return
+        if f["data"] is None:
+            self.session.cancel_file(fid)
+            return
+        top = self.get_toplevel()
+        d = Gtk.FileChooserNative.new("Save the file", top if isinstance(top, Gtk.Window) else None,
+                                      Gtk.FileChooserAction.SAVE, "Save", "Cancel")
+        d.set_do_overwrite_confirmation(True)
+        d.set_current_name(ui.safe_filename(f["name"]))
+        if d.run() == Gtk.ResponseType.ACCEPT:
+            path = d.get_filename()
+            try:
+                tmp = path + ".part"
+                with open(tmp, "wb") as out:
+                    out.write(f["data"])
+                os.replace(tmp, path)
+                f["info"].set_text(ui.fmt_size(f["size"]) + " - saved")
+            except OSError as e:
+                ui.message(top, "Save the file", str(e))
+        d.destroy()
 
     def _note(self, text):
         self._transcript.append("%s -- %s" % (time.strftime("%H:%M:%S"), text))
