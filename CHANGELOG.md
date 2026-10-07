@@ -7,11 +7,14 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [3.0.4] - 2026-10-07
 ### Fixed
 - Chat: on the remote computer the chat window opened at the browser's own (large) window size when the
   browser was already running. It now uses its own small browser profile, so it opens as a compact
-  440 x 640 chat window (Microsoft Edge on Windows, Chrome / Chromium / Edge / Brave on Linux).
+  360 x 520 chat window (Microsoft Edge on Windows, Chrome / Chromium / Edge / Brave on Linux).
+- Remote desktop fullscreen: the floating chat and its minimised bubble opened in the centre of the screen
+  instead of the bottom-right corner. On Linux they are now drawn inside the fullscreen window (Wayland lets
+  the desktop, not the app, place a separate window); on Windows they are placed before they are shown.
 
 ## [3.0.3] - 2026-10-06
 ### Fixed
