@@ -89,7 +89,7 @@ CHAT_LINUX_JS = (
     "var B=['google-chrome','google-chrome-stable','chromium','chromium-browser','microsoft-edge',"
     "'microsoft-edge-stable','brave-browser','vivaldi'],D=['/usr/bin/','/usr/local/bin/','/snap/bin/'],p=null,a=null;"
     "for(var i=0;i<B.length&&!p;i++){for(var j=0;j<D.length;j++){if(fs.existsSync(D[j]+B[i])){p=D[j]+B[i];break;}}}"
-    "var r='app';if(p){a=[B[i-1],'--app='+url,'--window-size=440,640','--user-data-dir='+E.HOME+"
+    "var r='app';if(p){a=[B[i-1],'--app='+url,'--window-size=360,520','--user-data-dir='+E.HOME+"
     "'/.cache/meshcentral-chat','--no-first-run','--no-default-browser-check'];}"
     "else if(fs.existsSync('/usr/bin/xdg-open')){p='/usr/bin/xdg-open';a=['xdg-open',url];r='browser';}"
     "else{return 'MCDCHAT:noapp';}var c=X(p,a);"
@@ -112,7 +112,7 @@ CHAT_WINDOWS_JS = (
     "var url=Buffer.from('@U@','base64').toString();if(url.indexOf('https://')!=0){return 'MCDCHAT:bad';}"
     "var Q=String.fromCharCode(34),pub=process.env['PUBLIC']||((process.env['SystemDrive']||'C:')+B+'Users'+B+'Public'),"
     "dir=pub+B+'MeshCentralChat'+B+String(u).replace(/[^A-Za-z0-9._-]/g,'_'),t=require('win-tasks'),n='MeshChatTask';"
-    "t.addTask({name:n,user:u,domain:d,execPath:e,arguments:['--app='+url,'--window-size=440,640',"
+    "t.addTask({name:n,user:u,domain:d,execPath:e,arguments:['--app='+url,'--window-size=360,520',"
     "'--user-data-dir='+Q+dir+Q,'--no-first-run','--no-default-browser-check']});"
     "t.getTask({name:n}).run();t.deleteTask(n);"
     "return 'MCDCHAT:app';}catch(z){return 'MCDCHAT:err';}})()")

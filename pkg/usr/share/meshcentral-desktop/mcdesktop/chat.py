@@ -757,6 +757,175 @@ def _keep_above(win):
         pass
 
 
+class OverlayChat:
+    """Linux: the floating chat drawn INSIDE the fullscreen window, in the remote screen's Gtk.Overlay (WebKitGTK
+    is a GTK widget). A separate window cannot be placed there: on Wayland the compositor decides where a window
+    goes (GNOME centred the chat and its bubble). Same interface as FloatingChat; drag by the header, resize from
+    the corner grip, minimise to a bubble in the bottom-right corner."""
+
+    W, H, GAP = 360, 480, 24
+
+    def __init__(self, overlay, bar_area=None):
+        _install_css()
+        self.overlay = overlay
+        self.bar_area = bar_area
+        self.panel = None
+        self._sigs = []
+        self.unread = 0
+        self._flash_timer = None
+        self._off = None                         # (right, bottom) distance the user dragged it to
+        self._size = [self.W, self.H]
+        self._drag_from = None
+        self.win = self.frame = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, halign=Gtk.Align.END,
+                                        valign=Gtk.Align.END, no_show_all=True)
+        self.frame.get_style_context().add_class("mcd-chat-float")
+        self.frame.set_size_request(*self._size)
+        grip_row = Gtk.Box()
+        grip = Gtk.EventBox(halign=Gtk.Align.END)
+        grip.set_size_request(16, 8)
+        grip.set_tooltip_text("Resize")
+        grip.add_events(Gdk.EventMask.BUTTON_MOTION_MASK)
+        grip.connect("realize", lambda w: w.get_window().set_cursor(
+            Gdk.Cursor.new_from_name(w.get_display(), "nw-resize")))
+        grip.connect("button-press-event", self._resize_start)
+        grip.connect("motion-notify-event", self._resize_move)
+        grip_row.pack_end(grip, False, False, 0)
+        self.slot = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        self.frame.pack_start(self.slot, True, True, 0)
+        self.frame.pack_start(grip_row, False, False, 0)
+        overlay.add_overlay(self.frame)
+
+        self.bubble = Gtk.Box(halign=Gtk.Align.END, valign=Gtk.Align.END, no_show_all=True)
+        self.bubble_btn = Gtk.Button(tooltip_text="Show the chat")
+        self.bubble_btn.get_style_context().add_class("mcd-chat-bubble-btn")
+        bb = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, valign=Gtk.Align.CENTER)
+        bb.pack_start(Gtk.Image.new_from_icon_name("user-available-symbolic", Gtk.IconSize.LARGE_TOOLBAR),
+                      False, False, 0)
+        self.unread_lbl = Gtk.Label(no_show_all=True)
+        self.unread_lbl.get_style_context().add_class("mcd-chat-unread")
+        bb.pack_start(self.unread_lbl, False, False, 0)
+        self.bubble_btn.add(bb)
+        self.bubble_btn.connect("clicked", lambda *_: self.restore())
+        self.bubble.add(self.bubble_btn)
+        overlay.add_overlay(self.bubble)
+
+    @property
+    def visible(self):
+        return self.frame.get_visible()
+
+    def attach(self, panel):
+        if self.panel is not panel:
+            old = panel.get_parent()
+            if old is not None:
+                old.remove(panel)
+            self.slot.pack_start(panel, True, True, 0)
+            self.panel = panel
+            panel.min_btn.show()
+            panel.on_minimise = self.minimise
+            panel.on_incoming = self._incoming
+            panel.head_ev.add_events(Gdk.EventMask.BUTTON_MOTION_MASK)
+            self._sigs = [(panel.head_ev, panel.head_ev.connect("button-press-event", self._drag_start)),
+                          (panel.head_ev, panel.head_ev.connect("motion-notify-event", self._drag_move))]
+        self.restore(place=True)
+
+    def detach(self):
+        panel, self.panel = self.panel, None
+        self.frame.hide()
+        self.bubble.hide()
+        if panel is None:
+            return None
+        for w, sig in self._sigs:
+            w.disconnect(sig)
+        self._sigs = []
+        panel.min_btn.hide()
+        panel.on_minimise = panel.on_incoming = None
+        self.slot.remove(panel)
+        return panel
+
+    def hide(self):
+        self.frame.hide()
+        self.bubble.hide()
+
+    def _corner(self):
+        """Distance from the right and bottom edges: clear of a pinned toolbar on the right or bottom."""
+        dx = dy = self.GAP
+        area = self.bar_area() if self.bar_area else None
+        if area and area[0] == "right":
+            dx += area[1]
+        elif area and area[0] == "bottom":
+            dy += area[1]
+        return dx, dy
+
+    def _place(self, widget, off):
+        widget.set_margin_end(max(0, int(off[0])))
+        widget.set_margin_bottom(max(0, int(off[1])))
+
+    def restore(self, place=False):
+        self.bubble.hide()
+        self.unread = 0
+        self._update_bubble()
+        if place or self._off is None:
+            self._off = self._corner()
+        self._place(self.frame, self._off)
+        for c in self.frame.get_children():      # no_show_all: the frame's own show_all() does nothing
+            c.show_all()
+        self.frame.show()
+        if self.panel:
+            GLib.idle_add(self.panel.entry.grab_focus)
+
+    def minimise(self):
+        self.frame.hide()
+        self._place(self.bubble, self._corner())
+        self.bubble_btn.show_all()
+        self.bubble.show()
+        self._update_bubble()
+
+    def _drag_start(self, _w, ev):
+        if ev.type == Gdk.EventType.BUTTON_PRESS and ev.button == 1:
+            self._drag_from = (ev.x_root, ev.y_root, self._off[0], self._off[1])
+        return False
+
+    def _drag_move(self, _w, ev):
+        if not self._drag_from or not (ev.state & Gdk.ModifierType.BUTTON1_MASK):
+            return False
+        x0, y0, r0, b0 = self._drag_from
+        ow, oh = self.overlay.get_allocated_width(), self.overlay.get_allocated_height()
+        fw, fh = self.frame.get_allocated_width(), self.frame.get_allocated_height()
+        r = min(max(0, r0 - (ev.x_root - x0)), max(0, ow - fw))
+        b = min(max(0, b0 - (ev.y_root - y0)), max(0, oh - fh))
+        self._off = (r, b)
+        self._place(self.frame, self._off)
+        return True
+
+    def _resize_start(self, _w, ev):
+        if ev.type == Gdk.EventType.BUTTON_PRESS and ev.button == 1:
+            self._drag_from = (ev.x_root, ev.y_root, self._size[0], self._size[1], self._off[0], self._off[1])
+        return True
+
+    def _resize_move(self, _w, ev):
+        d = self._drag_from
+        if not d or len(d) != 6 or not (ev.state & Gdk.ModifierType.BUTTON1_MASK):
+            return False
+        # the grip is at the bottom-right: grow right/down by shrinking the right/bottom distance
+        dx, dy = ev.x_root - d[0], ev.y_root - d[1]
+        dx = min(dx, d[4])
+        dy = min(dy, d[5])
+        self._size = [max(280, int(d[2] + dx)), max(320, int(d[3] + dy))]
+        self.frame.set_size_request(*self._size)
+        self._off = (d[4] - (self._size[0] - d[2]), d[5] - (self._size[1] - d[3]))
+        self._place(self.frame, self._off)
+        return True
+
+    def destroy(self):
+        self.detach()
+        if self._flash_timer:
+            GLib.source_remove(self._flash_timer)
+        for w in (self.frame, self.bubble):
+            if w.get_parent() is not None:
+                w.get_parent().remove(w)
+            w.destroy()
+
+
 class FloatingChat:
     """Fullscreen: the chat panel in its own small dark window over the remote screen, which keeps its full
     size. A real (undecorated) window, not a popup: Windows popups never get the keyboard. Drag it by its
@@ -881,12 +1050,16 @@ class FloatingChat:
         if not self.win.get_realized():
             self.frame.show_all()
             place = True
-        self.win.show()
         w, h = self.win.get_size()
         pos = None if place else self._pos
         pos = pos or self._corner(w, h)
+        # Position BEFORE showing: GTK then marks it as user-placed. Otherwise GDK on Windows centres a
+        # transient window on its (fullscreen) parent at every map, and a move after the show lost.
         if pos:
-            self.win.move(*pos)                  # Windows re-centres a window shown again
+            self.win.move(*pos)
+        self.win.show()
+        if pos:
+            self.win.move(*pos)
         _keep_above(self.win)
         self.win.present()
         if self.panel:
@@ -896,8 +1069,10 @@ class FloatingChat:
         if self.win.get_visible():
             self._pos = self.win.get_position()
         self.win.hide()
-        self.bubble.show_all()
         pos = self._corner(52, 52)
+        if pos:
+            self.bubble.move(*pos)               # before the show, see restore()
+        self.bubble.show_all()
         if pos:
             self.bubble.move(*pos)
         _keep_above(self.bubble)
@@ -941,3 +1116,9 @@ class FloatingChat:
             GLib.source_remove(self._flash_timer)
         self.win.destroy()
         self.bubble.destroy()
+
+
+# the unread count / flash of the bubble work the same in both
+OverlayChat._incoming = FloatingChat._incoming
+OverlayChat._unflash = FloatingChat._unflash
+OverlayChat._update_bubble = FloatingChat._update_bubble

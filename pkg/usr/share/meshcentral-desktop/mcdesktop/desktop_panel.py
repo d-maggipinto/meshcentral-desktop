@@ -644,9 +644,12 @@ class DesktopPanel(Gtk.Box):
 
     def _float_chat(self):
         if self._chat_float is None:
-            from .chat import FloatingChat
-            top = self.get_toplevel()
-            self._chat_float = FloatingChat(top if isinstance(top, Gtk.Window) else None, self.bar_area)
+            from .chat import FloatingChat, OverlayChat
+            if IS_WINDOWS:                       # a GTK overlay cannot be drawn over the WebView2 window
+                top = self.get_toplevel()
+                self._chat_float = FloatingChat(top if isinstance(top, Gtk.Window) else None, self.bar_area)
+            else:                                # Wayland places windows itself: draw it inside ours
+                self._chat_float = OverlayChat(self._overlay, self.bar_area)
         self._chat_box.hide()
         self._chat_float.attach(self._chat_panel)
 
