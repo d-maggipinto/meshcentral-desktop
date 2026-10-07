@@ -80,8 +80,8 @@ NOTIFY_JS = (
     "c.stdout.on('data',function(){});c.stderr.on('data',function(){});return 'MCDNOTE:ok';}"
     "catch(z){return 'MCDNOTE:err';}})()")
 
-# Linux: the chat page as an app window (Chromium-family --app: no tabs, no address bar), else the default
-# browser through xdg-open. Answers MCDCHAT:app | browser | nodisplay | noapp | bad | err.
+# Linux: the chat page as an app window (Chromium-family --app: no tabs, no address bar, own small profile in
+# ~/.cache/meshcentral-chat so the window size applies), else the default browser through xdg-open. Answers MCDCHAT:app | browser | nodisplay | noapp | bad | err.
 CHAT_LINUX_JS = (
     "(function(){try{" + LINUX_ENV_JS +
     "if(!E){return 'MCDCHAT:nodisplay';}var url=Buffer.from('@U@','base64').toString();"
@@ -89,14 +89,17 @@ CHAT_LINUX_JS = (
     "var B=['google-chrome','google-chrome-stable','chromium','chromium-browser','microsoft-edge',"
     "'microsoft-edge-stable','brave-browser','vivaldi'],D=['/usr/bin/','/usr/local/bin/','/snap/bin/'],p=null,a=null;"
     "for(var i=0;i<B.length&&!p;i++){for(var j=0;j<D.length;j++){if(fs.existsSync(D[j]+B[i])){p=D[j]+B[i];break;}}}"
-    "var r='app';if(p){a=[B[i-1],'--app='+url,'--window-size=440,640'];}"
+    "var r='app';if(p){a=[B[i-1],'--app='+url,'--window-size=440,640','--user-data-dir='+E.HOME+"
+    "'/.cache/meshcentral-chat','--no-first-run','--no-default-browser-check'];}"
     "else if(fs.existsSync('/usr/bin/xdg-open')){p='/usr/bin/xdg-open';a=['xdg-open',url];r='browser';}"
     "else{return 'MCDCHAT:noapp';}var c=X(p,a);"
     "c.stdout.on('data',function(){});c.stderr.on('data',function(){});return 'MCDCHAT:'+r;}"
     "catch(z){return 'MCDCHAT:err';}})()")
 
 # Windows: the chat page as a Microsoft Edge app window, started like the agent's own openUrl (a one-shot
-# scheduled task as the signed-in user, win-tasks). The user is the console session's, else the first active
+# scheduled task as the signed-in user, win-tasks). Its own small profile (Public\MeshCentralChat\<user>, writable by
+# every user; the page keeps nothing secret): Edge applies --window-size only when it starts a new browser process,
+# and the user's Edge is usually running already (the window then opened at Edge's own, large size). The user is the console session's, else the first active
 # session's (a user signed in through Remote Desktop).
 CHAT_WINDOWS_JS = (
     "(function(){try{var B=String.fromCharCode(92),us=require('user-sessions'),fs=require('fs'),u='',d='';"
@@ -107,8 +110,11 @@ CHAT_WINDOWS_JS = (
     "for(var i=0;i<P.length;i++){if(!P[i]){continue;}var p=P[i]+B+'Microsoft'+B+'Edge'+B+'Application'+B+'msedge.exe';"
     "if(fs.existsSync(p)){e=p;break;}}if(!e){return 'MCDCHAT:noapp';}"
     "var url=Buffer.from('@U@','base64').toString();if(url.indexOf('https://')!=0){return 'MCDCHAT:bad';}"
-    "var t=require('win-tasks'),n='MeshChatTask';t.addTask({name:n,user:u,domain:d,execPath:e,"
-    "arguments:['--app='+url,'--window-size=440,640']});t.getTask({name:n}).run();t.deleteTask(n);"
+    "var Q=String.fromCharCode(34),pub=process.env['PUBLIC']||((process.env['SystemDrive']||'C:')+B+'Users'+B+'Public'),"
+    "dir=pub+B+'MeshCentralChat'+B+String(u).replace(/[^A-Za-z0-9._-]/g,'_'),t=require('win-tasks'),n='MeshChatTask';"
+    "t.addTask({name:n,user:u,domain:d,execPath:e,arguments:['--app='+url,'--window-size=440,640',"
+    "'--user-data-dir='+Q+dir+Q,'--no-first-run','--no-default-browser-check']});"
+    "t.getTask({name:n}).run();t.deleteTask(n);"
     "return 'MCDCHAT:app';}catch(z){return 'MCDCHAT:err';}})()")
 
 

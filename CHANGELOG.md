@@ -7,6 +7,12 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Fixed
+- Chat: on the remote computer the chat window opened at the browser's own (large) window size when the
+  browser was already running. It now uses its own small browser profile, so it opens as a compact
+  440 x 640 chat window (Microsoft Edge on Windows, Chrome / Chromium / Edge / Brave on Linux).
+
 ## [3.0.3] - 2026-10-06
 ### Fixed
 - Windows: an empty white box stayed under the fullscreen toolbar (the start hint, which cannot be drawn over
