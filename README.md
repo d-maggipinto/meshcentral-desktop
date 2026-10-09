@@ -31,6 +31,7 @@ Current version: **3.0.4**, see the [changelog](CHANGELOG.md).
 - [Requirements](#requirements)
 - [Install](#install)
 - [Windows](#windows)
+- [Android](#android)
 - [Usage](#usage)
 - [Security notes](#security-notes)
 - [Known limitations](#known-limitations)
@@ -244,6 +245,15 @@ desktop with Send hotkeys and clipboard sync, terminal, files, Registry, chat an
 My Files, server charts, account settings, updates). It is a preview because the files are not
 code-signed yet. Please report problems on the issue tracker.
 
+## Android
+
+An Android app is in development in [`android/`](android): a native Kotlin / Jetpack Compose app with
+the same pages as the desktop app: devices, remote desktop (always fitted to the phone, touchpad cursor or direct
+touch, full keyboard), terminal, files, chat with file transfer, device tools, group actions, users, user groups,
+server, events, My Files and account. It reconnects by itself, can stay connected in the background and can be
+locked with fingerprint, face or screen lock. It uses the same version numbers as the desktop app. A signed APK
+will be attached to the releases once it is ready. Details and the build: [docs/ANDROID.md](docs/ANDROID.md).
+
 ## Usage
 
 1. Start **MeshCentral Desktop** from the application menu.
@@ -354,6 +364,7 @@ security improvements such as signed releases. See [ROADMAP.md](ROADMAP.md).
 | [docs/PERMISSIONS.md](docs/PERMISSIONS.md) | how MeshCentral rights map to app features |
 | [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | build, tests and release |
 | [docs/WINDOWS.md](docs/WINDOWS.md) | the Windows version: differences, installers, build, tests |
+| [docs/ANDROID.md](docs/ANDROID.md) | the Android app: features, gestures, security, build |
 | [ROADMAP.md](ROADMAP.md) | planned features |
 | [CHANGELOG.md](CHANGELOG.md) | release history |
 

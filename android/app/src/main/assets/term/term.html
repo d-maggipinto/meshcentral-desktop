@@ -1,0 +1,122 @@
+<!doctype html>
+<!-- SPDX-License-Identifier: Apache-2.0 -->
+<!-- Copyright 2026 CYVELION LTD. Terminal page (xterm.js), talks to the app through the "mcd" message port. -->
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="stylesheet" href="../xterm/xterm.css">
+<style>
+html,body{margin:0;height:100%;background:#1e1e1e;overflow:hidden}
+#t{position:absolute;left:2px;top:2px;right:2px;bottom:2px}
+</style>
+<script src="../xterm/xterm.js"></script>
+<script src="../xterm/addon-fit.js"></script>
+</head><body><div id="t"></div><script>
+var term = new Terminal({scrollback: 10000, fontSize: 14, cursorBlink: true,
+  fontFamily: "'Droid Sans Mono', 'Roboto Mono', monospace",
+  theme: {background: '#1e1e1e', foreground: '#e6e6e6'}});
+var fit = new FitAddon.FitAddon();
+term.loadAddon(fit);
+term.open(document.getElementById('t'));
+var ta = document.querySelector('.xterm-helper-textarea');
+if (ta) { ta.setAttribute('autocorrect', 'off'); ta.setAttribute('autocapitalize', 'off'); ta.setAttribute('spellcheck', 'false'); }
+function send(o) { mcd.postMessage(JSON.stringify(o)); }
+var mods = {ctrl: false, alt: false};
+var imeOpen = false;
+var last = '';
+function resize() {
+  try { fit.fit(); } catch (e) {}
+  var k = term.cols + 'x' + term.rows;
+  if (k !== last) { last = k; send({t: 'size', c: term.cols, r: term.rows}); }
+}
+new ResizeObserver(resize).observe(document.getElementById('t'));
+term.onData(function (d) {
+  // the app's sticky Ctrl / Alt keys apply to the next typed character
+  if ((mods.ctrl || mods.alt) && d.length === 1) {
+    if (mods.ctrl) {
+      var c = d.toUpperCase().charCodeAt(0);
+      if (c >= 64 && c <= 95) d = String.fromCharCode(c - 64);
+      else if (d === ' ') d = '\x00';
+    }
+    if (mods.alt) d = '\x1b' + d;
+    mods = {ctrl: false, alt: false};
+    send({t: 'modused'});
+  }
+  send({t: 'in', d: d});
+});
+mcd.onmessage = function (ev) {
+  var m = JSON.parse(ev.data);
+  if (m.t === 'out') {
+    var b = atob(m.b), u = new Uint8Array(b.length);
+    for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+    term.write(u);
+  } else if (m.t === 'reset') { term.reset(); }
+  else if (m.t === 'font') { term.options.fontSize = m.s; resize(); }
+  else if (m.t === 'focus') { term.focus(); }
+  else if (m.t === 'ime') {
+    // the app reports the soft keyboard: while it is closed, touching the terminal must not reopen it
+    imeOpen = !!m.v;
+    if (ta) { if (imeOpen) ta.removeAttribute('inputmode'); else ta.setAttribute('inputmode', 'none'); }
+  }
+  else if (m.t === 'mod') { mods = {ctrl: !!m.ctrl, alt: !!m.alt}; }
+  else if (m.t === 'copy') { send({t: 'copy', d: term.getSelection()}); }
+  else if (m.t === 'paste') { term.paste(m.d); }
+};
+// Touch scrolling (xterm.js has none that works in a phone web view): drag up / down to scroll the history, a flick
+// keeps going. In full-screen programs (less, vim, htop: the alternate screen has no history) the drag sends arrow
+// keys instead, like a mouse wheel does. A tap without moving still focuses the terminal (keyboard).
+(function () {
+  var el = document.getElementById('t'), y0 = null, x0 = 0, acc = 0, scrolling = false, vel = 0, lastY = 0, lastT = 0, fling = null;
+  function cellH() {
+    var r = document.querySelector('.xterm-rows > div');
+    return (r && r.offsetHeight) || Math.round(term.options.fontSize * 1.2);
+  }
+  function lines(n) {                        // n > 0 = towards newer output
+    if (!n) return;
+    if (term.buffer.active.type === 'alternate') {
+      var k = term.modes.applicationCursorKeysMode ? (n < 0 ? '\x1bOA' : '\x1bOB') : (n < 0 ? '\x1b[A' : '\x1b[B');
+      var out = ''; for (var i = 0; i < Math.min(Math.abs(n), 20); i++) out += k;
+      send({t: 'in', d: out});
+    } else term.scrollLines(n);
+  }
+  function step(dy) {
+    acc += dy;
+    var h = cellH(), n = (acc / h) | 0;
+    if (n) { acc -= n * h; lines(-n); }
+  }
+  el.addEventListener('touchstart', function (e) {
+    if (fling) { cancelAnimationFrame(fling); fling = null; }
+    if (e.touches.length !== 1) { y0 = null; return; }
+    y0 = lastY = e.touches[0].clientY; x0 = e.touches[0].clientX; lastT = Date.now(); acc = 0; vel = 0; scrolling = false;
+  }, {passive: true, capture: true});
+  el.addEventListener('touchmove', function (e) {
+    if (y0 === null || e.touches.length !== 1) return;
+    var y = e.touches[0].clientY, now = Date.now();
+    if (!scrolling && Math.abs(y - y0) > 8 && Math.abs(y - y0) > Math.abs(e.touches[0].clientX - x0)) {
+      scrolling = true;
+    }
+    if (!scrolling) return;
+    e.preventDefault(); e.stopPropagation();
+    step(y - lastY);
+    vel = 0.8 * vel + 0.2 * ((y - lastY) / Math.max(1, now - lastT));     // px per ms, smoothed
+    lastY = y; lastT = now;
+  }, {passive: false, capture: true});
+  el.addEventListener('touchend', function (e) {
+    if (!scrolling) {
+      // a tap: open the keyboard on purpose (while it is closed, inputmode=none keeps touches from opening it)
+      if (y0 !== null && !imeOpen && ta) { ta.removeAttribute('inputmode'); term.focus(); send({t: 'kb'}); }
+      y0 = null; return;
+    }
+    e.preventDefault(); e.stopPropagation();
+    y0 = null;
+    var v = vel * 16, prev = Date.now();                                  // px per frame
+    if (term.buffer.active.type === 'alternate' || Math.abs(v) < 2) return;
+    (function frame() {
+      var now = Date.now(), f = Math.max(1, (now - prev) / 16); prev = now;
+      step(v * f); v *= Math.pow(0.95, f);
+      fling = Math.abs(v) > 0.5 ? requestAnimationFrame(frame) : null;
+    })();
+  }, {passive: false, capture: true});
+})();
+resize();
+send({t: 'ready'});
+</script></body></html>

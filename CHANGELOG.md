@@ -7,6 +7,28 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Security
+- Linux devices: "Open URL", the remote chat window and notifications started the program as the account named
+  in the console user's own environment (USER / LOGNAME). A local user who set USER=root could make the root agent
+  run xdg-open, zenity or the browser as root with their own PATH (privilege escalation on the managed device when
+  an administrator used one of these actions). The account now always comes from the console session's user id.
+
+### Added
+- Android app (in development, `android/`): sign-in with two-factor code and a remembered password
+  (Android Keystore), device list with groups, search and online filter, device General / Hardware /
+  Network, remote desktop (MeshCentral's viewer with touch gestures, a keyboard with modifier and function
+  keys, Ctrl+Alt+Del, quality presets, fullscreen), terminal (xterm.js), files (browse, download, upload,
+  new folder, rename, delete), run command, power actions, chat with file transfer both ways and
+  notifications. The remote screen is always fitted whole (servers using the Modern UI showed only its
+  top-left corner on a phone) and goes fullscreen in landscape. Touchpad mode (default): a cursor moved like a
+  laptop touchpad, tap clicks at the cursor; direct touch is one tap away. Stays connected: automatic
+  reconnect (server connection and remote desktop), keep-alive messages through proxies, optional background
+  service. App lock with fingerprint, face or screen lock. Account pictures (cached; change your own). Also the desktop app's other pages:
+  device tools (events, notes, processes, services, software, agent console, registry), device actions,
+  remote desktop tools, group actions on several devices, add device, users, user groups, My Server,
+  server events, My Files and My Account, and a Settings page with About. See docs/ANDROID.md.
+
 ## [3.0.4] - 2026-10-07
 ### Fixed
 - Chat: on the remote computer the chat window opened at the browser's own (large) window size when the

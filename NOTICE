@@ -27,3 +27,18 @@ MeshCentral web interface. The following parts follow MeshCentral's source code:
 
 The remote desktop view embeds the MeshCentral web viewer that is served by the user's own
 MeshCentral server at run time. That viewer is not copied into or distributed with this project.
+
+-------------------------------------------------------------------------------
+Android app (android/)
+
+The Android app's account and device permission rules (data/Rights.kt) are a port of
+mcdesktop/rights.py above. Its APK bundles these third-party components:
+
+  * xterm.js and @xterm/addon-fit, Copyright The xterm.js authors, MIT License
+    (https://github.com/xtermjs/xterm.js); the licence text ships in the APK as
+    assets/xterm/LICENSE-xterm.txt.
+  * AndroidX and Jetpack Compose libraries, Copyright The Android Open Source Project,
+    Apache License, Version 2.0.
+  * OkHttp, Copyright Square, Inc., Apache License, Version 2.0.
+  * Kotlin standard library and kotlinx.coroutines, Copyright JetBrains s.r.o. and
+    contributors, Apache License, Version 2.0.

@@ -1,0 +1,11 @@
+.gradle/
+build/
+local.properties
+*.jks
+*.keystore
+keystore.properties
+.idea/
+*.iml
+captures/
+app/src/rig/
+app/src/main/assets/xterm/
