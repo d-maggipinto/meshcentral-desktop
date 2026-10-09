@@ -3,7 +3,9 @@
 MeshCentral Desktop is a single-process GTK 3 application written in Python. It talks to a
 MeshCentral server over the same WebSocket control channel as the web UI and `meshctrl`, opens
 relay tunnels for terminal / file sessions, and embeds MeshCentral's own web desktop viewer in
-WebKitGTK for remote desktop.
+WebKitGTK for remote desktop. The same code runs on Windows (see [WINDOWS.md](WINDOWS.md)); the Android
+app is a separate Kotlin / Jetpack Compose project in `android/` that follows the same design (see
+[ANDROID.md](ANDROID.md)).
 
 ## Source layout
 

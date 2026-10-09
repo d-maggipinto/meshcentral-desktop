@@ -50,6 +50,13 @@ PyInstaller, then Inno Setup and WiX). The `windows` job of the CI workflow buil
 the Windows tests and installs both installers; on a version tag the release gets the setup `.exe` and
 the `.msi` next to the `.deb`. Details in [WINDOWS.md](WINDOWS.md).
 
+### Android build
+
+The Android app in `android/` is a separate Kotlin / Jetpack Compose project that takes its version from
+`mcdesktop/__init__.py`. The `android` job of the CI workflow builds the release APK on every push; on a
+version tag it signs it with the release key and the release gets `MeshCentralDesktop-<version>-android.apk`.
+The CodeQL workflow builds it too, so the Kotlin code is scanned. Details in [ANDROID.md](ANDROID.md#build).
+
 ## Tests
 
 The test scripts are kept outside the public repository. Every feature is verified against a

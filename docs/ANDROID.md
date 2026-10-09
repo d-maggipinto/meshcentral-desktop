@@ -1,6 +1,6 @@
 # Android app
 
-The Android app (in development) is a native Kotlin / Jetpack Compose app in [`android/`](../android). It
+The Android app (preview since 3.0.5) is a native Kotlin / Jetpack Compose app in [`android/`](../android). It
 talks to MeshCentral the same way as the desktop app: the control channel (`control.ashx`) with your user
 name, password and two-factor code, and relay tunnels (`meshrelay.ashx`) for the terminal, files and chat.
 Like the desktop app it never re-implements the remote desktop protocol: it shows MeshCentral's own viewer

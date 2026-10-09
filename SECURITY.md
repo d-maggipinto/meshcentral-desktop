@@ -32,6 +32,16 @@ MeshCentralDesktop-<version>-setup.exe --repo d-maggipinto/meshcentral-desktop`;
 `Get-FileHash` shows the SHA-256 to compare with `SHA256SUMS`). They are not Authenticode code-signed
 yet.
 
+The Android APK (since 3.0.5) is in `SHA256SUMS` and the attestation too, and it is signed with the
+CYVELION release key. Check the signer certificate before installing an APK from anywhere else:
+
+```bash
+apksigner verify --print-certs MeshCentralDesktop-<version>-android.apk
+# Signer #1 certificate SHA-256 digest: 03ccbf9ed4ea3eb98d0d258185201cf52046ad0ea7874298859bc1e2c7b5a8a0
+```
+
+The CI signs the APK only for version tags and refuses one signed with any other key.
+
 The workflow pins every action to a commit SHA, gives the build a read-only token and only the
 release job write access. The job that builds the Windows installers runs no third-party server code
 (the MeshCentral server used to test the app runs in a separate job, installed from a lockfile without

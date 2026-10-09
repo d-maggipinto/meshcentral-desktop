@@ -3,9 +3,9 @@
 [![CI](https://github.com/d-maggipinto/meshcentral-desktop/actions/workflows/ci.yml/badge.svg)](https://github.com/d-maggipinto/meshcentral-desktop/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-A native desktop client for [MeshCentral](https://github.com/Ylianst/MeshCentral) on **Linux** and
-**Windows**. Manage your devices, open remote desktops, terminals and file transfers, and administer
-the server from a desktop application instead of a browser tab.
+A native client for [MeshCentral](https://github.com/Ylianst/MeshCentral) on **Linux**, **Windows**
+and **Android**, with **macOS** planned. Manage your devices, open remote desktops, terminals and file
+transfers, and administer the server from an app instead of a browser tab.
 
 > **Unofficial project.** MeshCentral Desktop is an independent client made by CYVELION LTD. It is not
 > affiliated with, endorsed by or supported by the MeshCentral project. It works with a standard,
@@ -19,6 +19,9 @@ the server from a desktop application instead of a browser tab.
 - **Windows 10 / 11** (preview): setup `.exe`, `.msi` for managed deployment, and a portable
   single-file `.exe`. Remote desktop, terminal and chat are embedded with Microsoft Edge WebView2.
   Not code-signed yet, see [Windows](#windows).
+- **Android 8 or later** (preview): a native app (Kotlin, Jetpack Compose) with the same pages, a
+  remote desktop made for touch screens and an app lock. Signed APK on every release, see [Android](#android).
+- **macOS**: planned, see the [roadmap](ROADMAP.md).
 
 Current version: **3.0.5**, see the [changelog](CHANGELOG.md).
 
@@ -181,6 +184,7 @@ desktop.
   are not tested.
 - Python 3.11 or later, GTK 3, WebKitGTK 4.1 (`gir1.2-webkit2-4.1`), VTE 2.91, libsecret.
 - A MeshCentral server you can sign in to (user name, password and, if enabled, a two-factor code).
+- Windows 10 / 11 for the Windows version, Android 8 or later for the Android app.
 
 The package declares all dependencies, so `apt` installs them automatically.
 
@@ -247,12 +251,24 @@ code-signed yet. Please report problems on the issue tracker.
 
 ## Android
 
-An Android app is in development in [`android/`](android): a native Kotlin / Jetpack Compose app with
-the same pages as the desktop app: devices, remote desktop (always fitted to the phone, touchpad cursor or direct
-touch, full keyboard), terminal, files, chat with file transfer, device tools, group actions, users, user groups,
-server, events, My Files and account. It reconnects by itself, can stay connected in the background and can be
-locked with fingerprint, face or screen lock. It uses the same version numbers as the desktop app. A signed APK
-is attached to every release as a preview (`MeshCentralDesktop-<version>-android.apk`). Details and the build: [docs/ANDROID.md](docs/ANDROID.md).
+A native Android app (Kotlin, Jetpack Compose, in [`android/`](android)) with the same pages as the
+desktop app: devices, remote desktop, terminal, files, chat with file transfer, device tools, group
+actions, add device, users, user groups, server, server events, My Files, account and settings.
+
+- **Remote desktop for touch screens**: the remote screen always fits the phone, a touchpad cursor
+  (or direct touch), pinch to zoom, a keyboard with Ctrl, Alt, Win, Esc, arrows and F1 to F12, and
+  fullscreen when the phone is turned sideways.
+- **Stays connected**: reconnects by itself after network drops and can keep running in the background.
+- **App lock**: fingerprint, face or the phone's screen lock; the remembered password is encrypted with
+  a key in the Android Keystore.
+- Same version numbers as the desktop app.
+
+Install: download `MeshCentralDesktop-<version>-android.apk` from the
+[releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases) on the phone, open it and
+allow installing apps from your browser or file manager when Android asks. Updates install over the
+previous version. The APK is a **preview**, signed with the CYVELION release key (certificate SHA-256
+`03:CC:BF:9E:D4:EA:3E:B9:8D:0D:25:81:85:20:1C:F5:20:46:AD:0E:A7:87:42:98:85:9B:C1:E2:C7:B5:A8:A0`); it is
+not on Google Play yet. Details, gestures, security and the build: [docs/ANDROID.md](docs/ANDROID.md).
 
 ## Usage
 
@@ -308,6 +324,10 @@ system shortcuts. Choose **Allow**.
 - **Update check**: the app contacts `api.github.com` (GitHub sees your IP address and the app version) and
   downloads only this repository's release files from GitHub over HTTPS; a file is installed only if its
   SHA-256 matches the release's `SHA256SUMS`. Switch automatic checks off in *Check for updates*.
+- **Android app**: the remembered password is encrypted with a key in the Android Keystore and left out
+  of backups; the optional app lock hides the app in the recent-apps screen; the sign-in header is never
+  sent to another host on a redirect. Certificates you install on the phone yourself are trusted (needed
+  for servers with a private certificate authority). Details: [docs/ANDROID.md](docs/ANDROID.md).
 - The server enforces all MeshCentral permissions; the app never tries to work around them.
 
 Please report security problems privately, see [SECURITY.md](SECURITY.md).
@@ -326,6 +346,8 @@ Please report security problems privately, see [SECURITY.md](SECURITY.md).
   sign-ins there.
 - Linux: only tested on Debian based distributions.
 - Windows: preview, not code-signed (see [Windows](#windows)).
+- Android: preview, installed from the APK (not on Google Play yet); importing users and deleting your
+  own account are only in the desktop app.
 
 ## Building from source
 
@@ -341,18 +363,17 @@ Run from the source tree without installing:
 python3 pkg/usr/share/meshcentral-desktop/main.py
 ```
 
+The Android app: `cd android && scripts/fetch-assets.sh && ./gradlew assembleDebug` (JDK 21 and the
+Android SDK, see [docs/ANDROID.md](docs/ANDROID.md#build)).
+
 Build steps, the local test server, the testing rules and the release checklist are in
 [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md).
 
 ## Roadmap
 
-Windows: code signing, testing of the remaining features, a Windows 11 look. See
-[docs/WINDOWS.md](docs/WINDOWS.md).
-
-Planned next: the full remote desktop toolbar (guest sharing, refresh, session recording,
-screenshots, wallpaper toggle, open a web address, notifications and chat on the remote computer),
-a macOS app, testing with Windows and macOS remote computers, a refreshed interface and
-security improvements such as signed releases. See [ROADMAP.md](ROADMAP.md).
+Planned next: a **macOS app**, code signing for Windows, the Android app on Google Play, testing with
+Windows and macOS remote computers, a refreshed desktop interface and more security improvements such
+as certificate pinning. See [ROADMAP.md](ROADMAP.md).
 
 ## Documentation
 
