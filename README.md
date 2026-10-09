@@ -20,7 +20,7 @@ the server from a desktop application instead of a browser tab.
   single-file `.exe`. Remote desktop, terminal and chat are embedded with Microsoft Edge WebView2.
   Not code-signed yet, see [Windows](#windows).
 
-Current version: **3.0.4**, see the [changelog](CHANGELOG.md).
+Current version: **3.0.5**, see the [changelog](CHANGELOG.md).
 
 ![MeshCentral Desktop: remote desktop, chat and fullscreen](docs/images/demo.gif)
 
@@ -252,7 +252,7 @@ the same pages as the desktop app: devices, remote desktop (always fitted to the
 touch, full keyboard), terminal, files, chat with file transfer, device tools, group actions, users, user groups,
 server, events, My Files and account. It reconnects by itself, can stay connected in the background and can be
 locked with fingerprint, face or screen lock. It uses the same version numbers as the desktop app. A signed APK
-will be attached to the releases once it is ready. Details and the build: [docs/ANDROID.md](docs/ANDROID.md).
+is attached to every release as a preview (`MeshCentralDesktop-<version>-android.apk`). Details and the build: [docs/ANDROID.md](docs/ANDROID.md).
 
 ## Usage
 

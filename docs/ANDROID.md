@@ -8,6 +8,20 @@ in a web view and adds native controls around it.
 
 It uses the same version number as the desktop app (read from `mcdesktop/__init__.py` at build time).
 
+## Install
+
+Every release (from 3.0.5) has `MeshCentralDesktop-<version>-android.apk`, built by the CI and signed with the
+CYVELION release key. Android 8 or later. Open the file on the phone and allow installing apps from your
+browser or file manager when Android asks. Updates install over the old version as long as they are signed
+with the same key. Check the signer before installing an APK from anywhere else:
+
+```bash
+apksigner verify --print-certs MeshCentralDesktop-<version>-android.apk
+# Signer #1 certificate SHA-256 digest: 03ccbf9ed4ea3eb98d0d258185201cf52046ad0ea7874298859bc1e2c7b5a8a0
+```
+
+`SHA256SUMS` and the build provenance attestation on the release cover the APK too.
+
 ## Features
 
 | Area | What it does |
@@ -134,7 +148,8 @@ scripts/fetch-assets.sh          # xterm.js, pinned by version and SHA-256 (same
 
 Release signing reads `android/keystore.properties` (`storeFile`, `storePassword`, `keyAlias`,
 `keyPassword`) or the environment variables `MCD_KEYSTORE`, `MCD_KEYSTORE_PASSWORD`, `MCD_KEY_ALIAS` and
-`MCD_KEY_PASSWORD`. Never commit a keystore.
+`MCD_KEY_PASSWORD`. Never commit a keystore. The CI signs only on version tags (the key is a repository
+secret handed to that job alone) and refuses an APK whose signer certificate is not the one above.
 
 Toolchain: Android Gradle Plugin 9.4, Gradle 9.8 (wrapper checked by SHA-256), Kotlin Compose compiler
 2.4, Compose BOM 2026.09, OkHttp 5.5; compileSdk 37, targetSdk 36, minSdk 26.

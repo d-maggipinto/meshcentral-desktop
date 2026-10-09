@@ -311,9 +311,65 @@ jobs:
             agent/agent.err
           if-no-files-found: ignore
 
+  # Android app (android/): release build, shrunk with R8. On version tags it is signed with the release key
+  # (repository secrets, only handed to this job on tags) and the signer certificate is checked against the
+  # published fingerprint, so a release can never carry an APK signed with any other key.
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6  # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Third-party assets (xterm.js, pinned by SHA-256)
+        run: android/scripts/fetch-assets.sh
+
+      - name: Build
+        env:
+          KEYSTORE_B64: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MCD_KEYSTORE_B64 || '' }}
+          MCD_KEYSTORE_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MCD_KEYSTORE_PASSWORD || '' }}
+          MCD_KEY_ALIAS: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MCD_KEY_ALIAS || '' }}
+          MCD_KEY_PASSWORD: ${{ startsWith(github.ref, 'refs/tags/v') && secrets.MCD_KEY_PASSWORD || '' }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            umask 077
+            printf '%s' "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+            export MCD_KEYSTORE="$RUNNER_TEMP/release.jks"
+          fi
+          cd android
+          ./gradlew --no-daemon assembleRelease
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Check the APK
+        run: |
+          VER=$(sed -n 's/^__version__ = "\(.*\)"/\1/p' pkg/usr/share/meshcentral-desktop/mcdesktop/__init__.py)
+          OUT=android/app/build/outputs/apk/release
+          ls -l "$OUT"
+          if unzip -l "$OUT"/*.apk | grep -q rig_ca; then echo "APK contains the test certificate"; exit 1; fi
+          mkdir -p dist
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            APKSIGNER=$(ls -d "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+            "$APKSIGNER" verify --print-certs "$OUT/app-release.apk" | tee certs.txt
+            # the release key's certificate (also published in docs/ANDROID.md)
+            grep -qi "certificate SHA-256 digest: 03ccbf9ed4ea3eb98d0d258185201cf52046ad0ea7874298859bc1e2c7b5a8a0" certs.txt
+            cp "$OUT/app-release.apk" "dist/MeshCentralDesktop-$VER-android.apk"
+          else
+            cp "$OUT"/*.apk dist/
+          fi
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: android-apk
+          path: dist/*.apk
+
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, windows, windows-app]
+    needs: [build, windows, windows-app, android]
     runs-on: ubuntu-24.04
     permissions:
       contents: write       # create the release and upload its files
@@ -339,12 +395,17 @@ jobs:
           name: windows-installers
           path: dist
 
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: android-apk
+          path: dist
+
       - name: Source archives and checksums
         run: |
           VER="${GITHUB_REF_NAME#v}"
           git archive --format=tar.gz --prefix="meshcentral-desktop-$VER/" -o "dist/meshcentral-desktop-$VER.tar.gz" "$GITHUB_REF_NAME"
           git archive --format=zip --prefix="meshcentral-desktop-$VER/" -o "dist/meshcentral-desktop-$VER.zip" "$GITHUB_REF_NAME"
-          (cd dist && sha256sum *.deb *.exe *.msi *.tar.gz *.zip > SHA256SUMS && cat SHA256SUMS)
+          (cd dist && sha256sum *.deb *.exe *.msi *.apk *.tar.gz *.zip > SHA256SUMS && cat SHA256SUMS)
 
       - name: Build provenance attestation
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8  # v4.2.2
@@ -353,6 +414,7 @@ jobs:
             dist/*.deb
             dist/*.exe
             dist/*.msi
+            dist/*.apk
             dist/*.tar.gz
             dist/*.zip
 
@@ -372,6 +434,7 @@ jobs:
             echo "- \`MeshCentralDesktop-${VER}-portable.exe\`: Windows, single file, runs without installation"
             echo ""
             echo "The Windows files are a **preview** and are **not code-signed** yet: SmartScreen shows a warning (More info > Run anyway) and Windows 11 Smart App Control must be off. See docs/WINDOWS.md."
+            echo "- \`MeshCentralDesktop-${VER}-android.apk\`: Android 8 or later, **preview** (allow installing from your browser or file manager). Signed with the CYVELION release key, certificate SHA-256 \`03:CC:BF:9E:D4:EA:3E:B9:8D:0D:25:81:85:20:1C:F5:20:46:AD:0E:A7:87:42:98:85:9B:C1:E2:C7:B5:A8:A0\`. See docs/ANDROID.md."
             echo "- \`meshcentral-desktop-${VER}.tar.gz\`, \`meshcentral-desktop-${VER}.zip\`: source code"
             echo "- \`SHA256SUMS\`: checksums, verify with \`sha256sum -c SHA256SUMS\`"
             echo "- Build provenance: \`gh attestation verify meshcentral-desktop_${VER}_all.deb --repo ${GITHUB_REPOSITORY} --signer-workflow ${GITHUB_REPOSITORY}/.github/workflows/ci.yml --source-ref refs/tags/${GITHUB_REF_NAME}\`"
@@ -386,6 +449,7 @@ jobs:
             dist/*.deb
             dist/*.exe
             dist/*.msi
+            dist/*.apk
             dist/*.tar.gz
             dist/*.zip
             dist/SHA256SUMS

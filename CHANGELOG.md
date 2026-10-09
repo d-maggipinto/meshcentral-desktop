@@ -7,7 +7,7 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
-## [Unreleased]
+## [3.0.5] - 2026-10-09
 ### Security
 - Linux devices: "Open URL", the remote chat window and notifications started the program as the account named
   in the console user's own environment (USER / LOGNAME). A local user who set USER=root could make the root agent
@@ -15,7 +15,7 @@ original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed
   an administrator used one of these actions). The account now always comes from the console session's user id.
 
 ### Added
-- Android app (in development, `android/`): sign-in with two-factor code and a remembered password
+- Android app (preview, `android/`; signed APK attached to the release): sign-in with two-factor code and a remembered password
   (Android Keystore), device list with groups, search and online filter, device General / Hardware /
   Network, remote desktop (MeshCentral's viewer with touch gestures, a keyboard with modifier and function
   keys, Ctrl+Alt+Del, quality presets, fullscreen), terminal (xterm.js), files (browse, download, upload,
