@@ -33,9 +33,11 @@ LINUX_ENV_JS = (
     "var O=root?{uid:uid,env:E}:{env:E};"
     # a root agent only calls setuid() for a child (group stays root, no supplementary groups): browsers then
     # misbehave (file dialogs did not open). runuser sets the user's group and groups; env passes the session.
-    "var RU=null,UN=E?(E.USER||E.LOGNAME):null;if(root){var RP=['/usr/sbin/runuser','/sbin/runuser',"
+    # the account comes from the console uid ONLY: USER / LOGNAME are the user's own (editable) environment, and a
+    # user who set USER=root would make the root agent start the program (with the user's PATH) as root
+    "var RU=null,UN=null;if(root){var RP=['/usr/sbin/runuser','/sbin/runuser',"
     "'/usr/bin/runuser'];for(var i=0;i<RP.length;i++){if(fs.existsSync(RP[i])){RU=RP[i];break;}}"
-    "if(!UN){try{UN=require('user-sessions').getUsername(uid);}catch(x){}}}"
+    "try{UN=require('user-sessions').getUsername(uid);}catch(x){}}"
     "function X(p,a){var cp=require('child_process');if(RU&&UN){var ev=[];for(var k in E){ev.push(k+'='+E[k]);}"
     "return cp.execFile(RU,['runuser','-u',UN,'--','/usr/bin/env'].concat(ev).concat([p]).concat(a.slice(1)),"
     "{env:{PATH:'/usr/sbin:/usr/bin:/sbin:/bin'}});}return cp.execFile(p,a,O);}")
