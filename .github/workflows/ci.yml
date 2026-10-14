@@ -38,7 +38,7 @@ jobs:
           dpkg-deb --info dist/*.deb
           dpkg-deb --contents dist/*.deb
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: meshcentral-desktop-deb
           path: dist/*.deb
@@ -213,7 +213,7 @@ jobs:
           if ($u) { Start-Process $u.FullName -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES" -Wait }
           Start-Process msiexec -ArgumentList "/x","dist\MeshCentralDesktop-$ver.msi","/qn" -Wait
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: always()
         with:
           name: windows-installers
@@ -222,7 +222,7 @@ jobs:
             dist/*.msi
           if-no-files-found: ignore
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: always()
         with:
           name: windows-smoke
@@ -298,7 +298,7 @@ jobs:
           timeout 900 python ../scripts/windows/app_smoke.py https://127.0.0.1:8443 ciadmin 'Ci-Test-12345!' 2>&1 | tee app.log
           exit ${PIPESTATUS[0]}
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         if: always()
         with:
           name: windows-app-smoke
@@ -362,7 +362,7 @@ jobs:
             cp "$OUT"/*.apk dist/
           fi
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9  # v7
         with:
           name: android-apk
           path: dist/*.apk
