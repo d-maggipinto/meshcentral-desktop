@@ -7,6 +7,16 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [3.0.6] - 2026-10-22
+### Fixed
+- Sign-in (and every other connection) stalled on networks whose IPv6 is configured but carries no
+  traffic, for example a router that advertises an IPv6 prefix while the uplink drops the packets. The
+  server's IPv6 addresses are listed first, the app's socket library gives up on the first address that
+  times out, so the app reported "Cannot reach server" after about two minutes while the web UI, which
+  falls back to IPv4 at once, kept working. The app now races the first IPv6 and IPv4 address of a host
+  (IPv6 gets a 250 ms head start, as browsers do) and prefers the family that answers; the result is
+  cached for five minutes per host. Set `MCD_ADDRESS_RACE=0` to disable it.
+
 ## [3.0.5] - 2026-10-09
 ### Security
 - Linux devices: "Open URL", the remote chat window and notifications started the program as the account named

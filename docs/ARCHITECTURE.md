@@ -40,6 +40,7 @@ pkg/                                   Debian package root (built with dpkg-deb)
 | `software_panel.py` | Software (installed applications, Store apps, uninstall) |
 | `registry_panel.py` | Registry (Windows devices only, relay protocol 4): browse, GoTo, new key / value, edit, rename, delete, export `.reg` |
 | `webview.py` | the embedded web view API used by the remote desktop and the server-page windows: WebKitGTK on Linux, Edge WebView2 on Windows (same-origin rule, no pop-ups / downloads / page clipboard, non-blocking dialogs, session cookies) |
+| `eyeballs.py` | address selection for the app's own connections (Happy Eyeballs): when a host has IPv6 and IPv4 addresses the first of each is raced and the family that answers is tried first, so an IPv6 that carries no traffic does not stall sign-in (installed at start-up) |
 | `osdep.py` | operating-system services: saved passwords (Secret Service or Windows Credential Manager); on Windows also notifications, single instance (named mutex) and the app identity |
 | `winweb.py` | Windows: `WebView2Widget`, Edge WebView2 in a native child window of a GTK widget (WebView2.tlb through comtypes) |
 | `winterm.py` | Windows: the terminal widget, xterm.js inside WebView2 with the part of the VTE API the terminal panel uses |

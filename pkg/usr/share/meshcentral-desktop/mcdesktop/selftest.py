@@ -50,6 +50,18 @@ def run(out_path):
     _check(r, "version", lambda: __version__)
     _check(r, "modules", modules)
 
+    def address_race():
+        import socket
+        from . import eyeballs
+        a = socket.socket(socket.AF_INET)
+        a.bind(("127.0.0.1", 0)); a.listen(1)
+        try:
+            fam = eyeballs.race(("100::1", 9, 0, 0), a.getsockname())   # RFC 6666 discard prefix vs local listener
+        finally:
+            a.close()
+        return {"ipv4_wins_over_blackholed_ipv6": fam == socket.AF_INET}
+    _check(r, "address_race", address_race)
+
     def gtk():
         import gi
         gi.require_version("Gtk", "3.0")

@@ -10,7 +10,7 @@ from gi.repository import Gtk, Gio, GLib, Gdk
 
 from .login import LoginWindow
 from .mainwindow import MainWindow
-from . import osdep
+from . import osdep, eyeballs
 
 APP_ID = "uk.co.cyvelion.MeshCentralDesktop"
 CONFIG_DIR = os.path.join(GLib.get_user_config_dir(), "meshcentral-desktop")
@@ -165,6 +165,7 @@ def main():
     # instead of falling back to the script name ("main.py") with no icon.
     GLib.set_prgname("meshcentral-desktop")
     GLib.set_application_name("MeshCentral Desktop")
+    eyeballs.install()      # IPv6 that does not carry traffic must not stall every connection (3.0.6)
     try:
         Gtk.Window.set_default_icon_name("meshcentral-desktop")
     except Exception:
