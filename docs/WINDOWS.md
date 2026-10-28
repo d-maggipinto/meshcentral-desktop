@@ -96,9 +96,14 @@ downloads the new portable file next to the old one. Downloads are checked again
 The build runs in an MSYS2 **UCRT64** shell on Windows:
 
 ```bash
-pacman -S --needed unzip mingw-w64-ucrt-x86_64-{gtk3,python,python-gobject,python-cairo,python-websocket-client,python-comtypes,adwaita-icon-theme,pyinstaller,pyinstaller-hooks-contrib}
+pacman -S --needed unzip mingw-w64-ucrt-x86_64-{gtk3,python,python-gobject,python-cairo,python-websocket-client,python-comtypes,adwaita-icon-theme,pyinstaller,pyinstaller-hooks-contrib,python-pip}
+python -m pip install --break-system-packages --no-deps --require-hashes -r scripts/windows/requirements-pypi.txt
 scripts/windows/build.sh            # -> dist/MeshCentralDesktop/MeshCentralDesktop.exe
 ```
+
+MSYS2 does not package `qrcode` (the QR code of the authenticator setup), so it comes from PyPI, pinned by
+version and hash in `scripts/windows/requirements-pypi.txt`; without it PyInstaller stops with
+`PackageNotFoundError: No package metadata was found for qrcode`.
 
 `build.sh` downloads the third-party files pinned by version and SHA-256 (`scripts/windows/fetch-assets.sh`:
 WebView2 SDK, xterm.js, its fit add-on) into `build/`, makes the icon and the version resource, and runs

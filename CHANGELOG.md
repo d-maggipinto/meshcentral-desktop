@@ -7,6 +7,12 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Fixed
+- Windows build steps: install `python-pip` and the PyPI packages (`qrcode`, pinned by hash in
+  `scripts/windows/requirements-pypi.txt`) as the CI does; following the documented `pacman` line alone,
+  PyInstaller stopped with `PackageNotFoundError: No package metadata was found for qrcode`.
+
 ## [3.0.6] - 2026-10-22
 ### Fixed
 - Sign-in (and every other connection) stalled on networks whose IPv6 is configured but carries no
