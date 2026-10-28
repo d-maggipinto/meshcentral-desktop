@@ -7,6 +7,12 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Fixed
+- Remote desktop with a two-factor account: the viewer's web sign-in stopped at the code page with
+  "This account needs a two-factor code", and there was no way to enter one. The app now asks for a
+  fresh code in a dialog (with "remember this computer" when the server allows it) and continues.
+
 ## [3.0.6] - 2026-10-22
 ### Fixed
 - Sign-in (and every other connection) stalled on networks whose IPv6 is configured but carries no

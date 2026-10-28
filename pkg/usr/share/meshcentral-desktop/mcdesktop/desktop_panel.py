@@ -56,6 +56,7 @@ class DesktopPanel(Gtk.Box):
         self._started = False
         self._closing = False
         self._logged_in = False
+        self._token_tries = 0
         self._navigated = False
         self._connect_tried = False
         self._connected = False
@@ -366,6 +367,7 @@ class DesktopPanel(Gtk.Box):
         self._gen += 1
         self._last_page_msg = ""
         self._logged_in = False
+        self._token_tries = 0
         self._navigated = False
         self._connect_tried = False
         self._page_ready = False
@@ -1784,7 +1786,8 @@ class DesktopPanel(Gtk.Box):
             "(function(){"
             "var u=document.getElementById('username');"
             "var t=document.getElementById('tokenInput');"
-            "if(t&&t.offsetParent!==null)return 'token';"
+            "if(t&&t.offsetParent!==null){var r=document.getElementById('tokenInputRememberLabel');"
+            "return (r&&r.offsetParent!==null)?'token-remember':'token';}"
             "if(u&&u.offsetParent!==null)return 'login';"
             "return 'app';})()",
             self._route)
@@ -1792,10 +1795,12 @@ class DesktopPanel(Gtk.Box):
     def _route(self, kind):
         if self._closing or self._phase != "loading":
             return
-        if kind == "token":
+        if kind in ("token", "token-remember"):
             self._set_status("Two-factor code required")
-            self._note("This account needs a two-factor code. Sign in to the web UI once in "
-                       "this session, or use an account without 2FA for the embedded desktop.")
+            if self._watchdog:                      # the user types the code at their own pace
+                GLib.source_remove(self._watchdog)
+                self._watchdog = None
+            GLib.idle_add(self._ask_token, self._gen, kind == "token-remember")
             return
         if kind == "login" and not self._logged_in:
             self._logged_in = True
@@ -1827,6 +1832,48 @@ class DesktopPanel(Gtk.Box):
             self._set_status("Starting remote session…")
             self._connect_attempts = 0
             self._click_connect(self._gen)
+
+    # Lengths the web login page itself accepts: authenticator code, backup code, YubiKey OTP.
+    _TOKEN_LENGTHS = (6, 8, 44)
+
+    def _ask_token(self, gen, can_remember):
+        """The viewer's web sign-in wants a 2FA code: ask for a fresh one (the code typed at app sign-in is
+        spent). Only a code the user typed, of a length the server accepts, is ever submitted, so nothing
+        repeats on its own into the server's maxinvalid2fa lockout."""
+        if self._closing or gen != self._gen or self._phase != "loading":
+            return False
+        self._token_tries += 1
+        title = ("Two-factor code for the remote desktop" if self._token_tries == 1
+                 else "The code was not accepted, enter a new one")
+        fields = [("code", "Code:", "text", "")]
+        if can_remember:
+            fields.append(("remember", "Remember this computer for the remote desktop", "check", False))
+        self._cover_show("Waiting for the two-factor code…", busy=False)
+        code, r = "", None
+        while True:
+            r = ui.form_dialog(self._parent_window(), title, fields, "Sign in")
+            if self._closing or gen != self._gen:
+                return False
+            code = "".join((r or {}).get("code", "").split())
+            if not r or not code or len(code) in self._TOKEN_LENGTHS:
+                break
+            title = "A code has 6 digits (8 for a backup code)"
+        if not code:
+            self._fail("The remote desktop needs a two-factor code. Retry to enter one.")
+            return False
+        self._cover_show("Signing in…")
+        self._arm_watchdog()
+        origin = json.dumps(server_origin(self.app.ctrl.server.url))
+        remember = "true" if r.get("remember") else "false"
+        self._js(
+            # the code goes only into the configured server's own page (https origin), like the password
+            "(function(){if(location.origin!==" + origin + ")return 'foreign';"
+            "var t=document.getElementById('tokenInput');var f=document.getElementById('tokenpanelform');"
+            "if(!t||!f)return 'noform';t.value=" + json.dumps(code) + ";"
+            "var c=document.getElementById('tokenInputRemember');if(c)c.checked=" + remember + ";"
+            "f.submit();return 'ok';})()",
+            self._after_login_submit)
+        return False
 
     def _after_login_submit(self, result):
         if result == "noform":

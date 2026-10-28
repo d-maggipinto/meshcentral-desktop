@@ -15,7 +15,11 @@ Opening the Desktop tab does not connect: the cover shows "Not connected" and a 
 button. Pressing it (or the toolbar's Connect) starts the flow below.
 
 1. Load `<server>/` in a private WebKit profile. If the login form is shown, fill in the account's
-   username and password and submit (2FA forms cannot be completed automatically).
+   username and password and submit. If the page then asks for a two-factor code, a native dialog
+   asks for a fresh one (the code typed at app sign-in is already spent) and submits it to the page's
+   token form, with "remember this computer" when the server offers it. Only a typed code of a length
+   the page accepts (6, 8 or 44 characters) is sent, so a typo or a loop cannot add to the server's
+   `maxinvalid2fa` count; the 45 s start timeout pauses while the dialog is open.
 2. Navigate to `<server>/?gotonode=<short id>&viewmode=11&hide=15`: the short id is the part of
    the node `_id` after the last `/`; `hide=15` removes the web UI's masthead, tabs and footer.
 3. Poll every 250 ms until the viewer's `#connectbutton1` exists, then click it (the viewer never
