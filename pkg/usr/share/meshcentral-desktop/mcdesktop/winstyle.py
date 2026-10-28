@@ -380,6 +380,10 @@ class Win11Style:
         """Native title bars (dialogs): dark / light caption in the app's colours, rounded corners."""
         if win.get_window() is None or win.get_window().get_window_type() != Gdk.WindowType.TOPLEVEL:
             return
+        # Header-bar windows draw their own frame: the HWND includes GTK's transparent shadow margin, so DWM
+        # rounding it drew a second border and shadow ~60 px (at 100 %) outside the visible window.
+        if win.get_style_context().has_class("csd"):
+            return
         hwnd = osdep.window_handle(win)
         if not hwnd:
             return

@@ -7,6 +7,13 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Fixed
+- Windows: the main and sign-in windows had a second frame, a faint (light mode) or white (dark look on a
+  light desktop) rounded border with its own shadow, about an inch outside the window. The DWM rounded
+  corners and caption colour meant for dialogs with a native title bar were also applied to the header-bar
+  windows, whose HWND includes GTK's transparent shadow margin, so Windows framed that margin too.
+
 ## [3.0.6] - 2026-10-22
 ### Fixed
 - Sign-in (and every other connection) stalled on networks whose IPv6 is configured but carries no
