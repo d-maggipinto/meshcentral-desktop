@@ -18,6 +18,7 @@ from gi.repository import Gdk, GLib, GObject, Gtk
 from . import osdep
 
 _PREVIEW = os.environ.get("MCD_WIN11_STYLE", "").lower()
+_FORCED_DARK = None                            # config "dark" (true / false) overrides the system mode
 _POLL_MS = 2000
 DEFAULT_ACCENT = "#0078d4"                     # Windows 11 default blue
 
@@ -48,11 +49,13 @@ def _mix(c, other, t):
 
 
 def system_scheme():
-    """(dark: bool, accent palette dict) as Windows has them now."""
+    """(dark: bool, accent palette dict) as Windows has them now; a forced mode wins over the system's."""
     if not osdep.IS_WINDOWS:
         return _PREVIEW != "light", _palette(None)
-    light = _reg(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme")
     pal = _reg(r"Software\Microsoft\Windows\CurrentVersion\Explorer\Accent", "AccentPalette")
+    if _FORCED_DARK is not None:
+        return _FORCED_DARK, _palette(pal)
+    light = _reg(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize", "AppsUseLightTheme")
     return light == 0, _palette(pal)
 
 
@@ -473,11 +476,13 @@ def caption_buttons(win, headerbar):
 _style = None
 
 
-def install():
-    """Start the Windows 11 look (no-op elsewhere). Returns True when it is active."""
-    global _style
+def install(dark=None):
+    """Start the Windows 11 look (no-op elsewhere). Returns True when it is active.
+    dark: True / False forces dark / light mode, None follows the system."""
+    global _style, _FORCED_DARK
     if not enabled():
         return False
+    _FORCED_DARK = dark if isinstance(dark, bool) else None
     if _style is None:
         _style = Win11Style()
         _style.install()

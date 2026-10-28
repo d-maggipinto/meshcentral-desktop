@@ -67,7 +67,8 @@ class App(Gtk.Application):
         from . import ui
         ui.set_time_format(self.config.get("date_format"))
         from . import winstyle
-        if not winstyle.install():                 # Windows: Windows 11 look, follows the system theme
+        if not winstyle.install(self.config.get("dark")):   # Windows: Windows 11 look, follows the system
+                                                            # theme unless config "dark" is set
             settings = Gtk.Settings.get_default()
             if self.config.get("dark", True):
                 settings.set_property("gtk-application-prefer-dark-theme", True)

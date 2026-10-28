@@ -7,6 +7,12 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Added
+- Windows: `"dark": true` (or `false`) in `%LOCALAPPDATA%\meshcentral-desktop\config.json` keeps the
+  Windows 11 look in dark (or light) mode instead of following the system's app mode; the accent colour
+  is still followed. Without the key the app follows the system as before.
+
 ## [3.0.6] - 2026-10-22
 ### Fixed
 - Sign-in (and every other connection) stalled on networks whose IPv6 is configured but carries no

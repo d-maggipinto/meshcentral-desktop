@@ -156,7 +156,8 @@ screen, which keeps its full size:
 
 ![Fullscreen with the floating chat](docs/images/fullscreen-chat.png)
 
-**Windows look**: on Windows the app follows the system's light or dark mode and accent colour:
+**Windows look**: on Windows the app follows the system's light or dark mode and accent colour
+(`"dark": true` or `false` in `config.json` keeps it in one mode):
 
 | | |
 |---|---|

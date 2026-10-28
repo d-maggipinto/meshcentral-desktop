@@ -41,7 +41,9 @@ Notes:
 `winstyle.py` lays a style sheet over GTK's own theme. It reads *Settings > Personalization > Colors*
 from the registry (`AppsUseLightTheme` and the `AccentPalette` Windows derives from the accent colour)
 and checks again every 2 seconds, so switching between light and dark, or changing the accent colour,
-applies to the open app. Accent fills use the palette shade Windows 11 itself uses (a lighter shade in
+applies to the open app. To keep the app dark (or light) whatever the system mode, set `"dark": true`
+(or `false`) in `%LOCALAPPDATA%\meshcentral-desktop\config.json`; the accent colour is still followed.
+Accent fills use the palette shade Windows 11 itself uses (a lighter shade in
 dark mode, a darker one in light mode). The header bars get drawn minimise / maximise / close buttons
 with the Windows 11 glyphs (GTK's own title buttons come from theme icons that CSS cannot replace);
 dialogs keep the native title bar, which DWM is told to draw in the same mode and colour, with rounded
