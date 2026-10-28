@@ -375,9 +375,10 @@ class WebSession:
         with self._lock:
             if self._logged_in:
                 return
+            # Never the 2FA code typed at sign-in: it is spent (control.ashx) or expired by now, and the
+            # server logs every stale code as "incorrect 2nd factor" and counts it toward maxinvalid2fa,
+            # which blocks 2FA for the whole /24. Without a code a 2FA account just gets no session.
             form = {"action": "login", "username": self.ctrl.username, "password": self.ctrl.password or ""}
-            if self.ctrl.token:
-                form["token"] = self.ctrl.token
             req = urllib.request.Request(self.ctrl.server.url + "/login",
                                          data=urllib.parse.urlencode(form).encode(),
                                          headers={"User-Agent": USER_AGENT})

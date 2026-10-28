@@ -7,6 +7,15 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Fixed
+- Accounts with two-factor sign-in: the web sign-in behind large downloads, uploads and the Web-RDP /
+  SSH / VNC windows re-sent the 2FA code typed at app sign-in, which by then was spent or expired. The
+  server logged each one as "User login attempt with incorrect 2nd factor" and counted it toward
+  `maxinvalid2fa`, so a few clicks could block two-factor sign-in for the whole address range
+  (the browser included). The code is no longer re-sent; these features report that the account needs
+  the web UI instead, as documented.
+
 ## [3.0.6] - 2026-10-22
 ### Fixed
 - Sign-in (and every other connection) stalled on networks whose IPv6 is configured but carries no
