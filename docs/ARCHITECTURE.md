@@ -122,7 +122,7 @@ JavaScript, while a native overlay hides everything except the remote screen. Se
 
 | Location | Content |
 |---|---|
-| `~/.config/meshcentral-desktop/config.json` | server, username, remember flag, dark theme, `clipboard_sync`, `desktop_hotkeys`, `desktop_display` (per device), `devices_view` (filter, sort, OS name), `stars`, `devices_expanded` (open device-list sections; all start collapsed) |
+| `~/.config/meshcentral-desktop/config.json` | server, username, remember flag, dark theme, `clipboard_sync`, `desktop_hotkeys`, `desktop_display` (per device), `devices_view` (filter, sort, OS name), `stars`, `devices_expanded` (open device-list sections; all start collapsed), `devices_list_hidden` (device list hidden while a device is open) |
 | System keyring (libsecret) | password, only when *Remember password* is ticked |
 | `~/.local/share/meshcentral-desktop/webkit*` | private WebKit profile of the embedded viewer (cookies, cache) |
 | `~/.local/share/meshcentral-desktop/serverstats-<host>.json` | CPU of the server's live 5-minute stats samples recorded since sign-in (30 days): the server's NeDB/MongoDB history does not contain CPU |

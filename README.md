@@ -79,6 +79,8 @@ Current version: **3.0.5**, see the [changelog](CHANGELOG.md).
 ### Remote desktop
 - Uses **MeshCentral's own desktop viewer**, embedded in the app and wrapped in native controls.
   The web sign-in page and the "connecting" steps are never shown, only the remote screen.
+- **Hide the device list** while a device is open with the title-bar button, to give the remote desktop
+  the full window width without going fullscreen; the choice is remembered.
 - Real fullscreen (**Ctrl+Alt+F**) with an **auto-hiding toolbar** on the edge you choose (top, bottom, left
   or right): every desktop control and tool, the image settings, a pin and **Exit fullscreen**; it slides
   away and comes back when the pointer reaches that edge. Fit to window, display picker for multi-monitor

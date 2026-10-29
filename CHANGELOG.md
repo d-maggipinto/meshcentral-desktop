@@ -7,6 +7,13 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Added
+- Devices: a title-bar button hides the device list while a device is open, so its page (the remote
+  desktop) gets the whole window width without fullscreen. With no device open (after sign-in, or when the
+  device is closed) the list shows, so there is always something to pick from. The choice is remembered
+  (`devices_list_hidden`), leaving fullscreen keeps it, and the remote screen refits to the new width.
+
 ## [3.0.6] - 2026-10-22
 ### Fixed
 - Sign-in (and every other connection) stalled on networks whose IPv6 is configured but carries no
