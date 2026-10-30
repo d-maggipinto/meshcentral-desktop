@@ -866,6 +866,12 @@ class MainWindow(Gtk.ApplicationWindow):
         """The open device was deleted (General → Delete Device): close its pages."""
         if self._open_node_id != nodeid:
             return
+        self.close_open_device()
+
+    def close_open_device(self):
+        """Close the open device's pages (its sessions end with them) and go back to "Select a device"."""
+        if self._open_node_id is None:
+            return
         self._teardown_device_panels()
         self._open_node_id = None
         self.current = None

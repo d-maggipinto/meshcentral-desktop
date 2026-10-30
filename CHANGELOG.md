@@ -7,6 +7,12 @@ before that and are available as archived builds on the
 [releases page](https://github.com/d-maggipinto/meshcentral-desktop/releases); their dates are the
 original build dates. Versions 2.0.0 to 2.7.x were never packaged and are listed for reference.
 
+## [Unreleased]
+### Added
+- Devices: a close button (×) at the right of the device bar closes the open device. Its pages are torn
+  down, so desktop, terminal and file sessions end, and the view goes back to *Select a device*. Before,
+  a device page stayed open until another device was picked (or the device was deleted).
+
 ## [3.0.6] - 2026-10-22
 ### Fixed
 - Sign-in (and every other connection) stalled on networks whose IPv6 is configured but carries no

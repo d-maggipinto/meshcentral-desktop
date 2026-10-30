@@ -68,7 +68,8 @@ Current version: **3.0.5**, see the [changelog](CHANGELOG.md).
   Web-VNC / Web-RDP, MeshCmd, Change Group, Delete Device and per-device user permissions.
 - Device pages in three groups: **Overview** (General, Hardware, Network, Events, Notes),
   **Remote** (Desktop, Terminal, Files, and Registry on Windows) and **Tools** (Processes, Services, Software,
-  Agent Console). The remote pages connect only when you press **Connect**.
+  Agent Console). The remote pages connect only when you press **Connect**. The **×** at the right of the
+  device bar closes the device: its sessions end and the page goes back to *Select a device*.
 - **Registry** (Windows devices, MeshCentral 1.2 or later): browse hives and keys, go to a typed path, create
   keys and values, edit string and number values, rename, delete, export a key as a `.reg` file.
 - Actions: run commands and see their output, wake, sleep, restart, power off, message box, toast

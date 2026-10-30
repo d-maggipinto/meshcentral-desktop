@@ -131,6 +131,13 @@ class DeviceActions:
         bar.pack_start(power_btn, False, False, 0)
         self.buttons["power"] = power_btn
 
+        # rightmost: close the device (ends its desktop / terminal / file sessions), back to "Select a device"
+        close_btn = Gtk.Button(image=Gtk.Image.new_from_icon_name("window-close-symbolic", Gtk.IconSize.BUTTON),
+                               tooltip_text="Close this device")
+        close_btn.connect("clicked", lambda *_: self.win.close_open_device())
+        bar.pack_end(close_btn, False, False, 0)
+        self.buttons["close"] = close_btn
+
         more_btn = Gtk.MenuButton(image=Gtk.Image.new_from_icon_name("view-more-symbolic", Gtk.IconSize.BUTTON))
         more_btn.set_popover(self._more_menu())
         bar.pack_end(more_btn, False, False, 0)
