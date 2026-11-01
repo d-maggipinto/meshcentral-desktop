@@ -3,6 +3,6 @@
   "private": true,
   "description": "Throwaway MeshCentral server for the Windows CI app test (pinned by package-lock.json).",
   "dependencies": {
-    "meshcentral": "1.2.5"
+    "meshcentral": "1.3.1"
   }
 }
